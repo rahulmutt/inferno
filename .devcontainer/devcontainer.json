@@ -1,0 +1,17 @@
+{
+  "name": "inferno",
+  "image": "ghcr.io/rahulmutt/dev:sha-253d4ae",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "dev",
+  "containerEnv": {
+    "CARGO_HOME": "/home/dev/.cargo",
+    "RUSTUP_HOME": "/home/dev/.rustup",
+    "INSTALL_DEVENV": "true",
+  },
+  "postCreateCommand": "post-create.sh",
+  "customizations": {
+    "devpod": {
+      "ide": "none"
+    }
+  }
+}
