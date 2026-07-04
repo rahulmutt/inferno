@@ -1,0 +1,5 @@
+artifacts/
+coverage/
+corpus/*/*
+!corpus/gguf_parse/tiny.gguf
+!corpus/safetensors_parse/tiny.safetensors

@@ -34,6 +34,10 @@ run = "cargo fmt --all"
 description = "Supply-chain gate: RustSec advisories + cargo-deny policy"
 run = ["cargo audit", "cargo deny check advisories bans sources licenses"]
 
+# In sandboxes with restricted ptrace (ptrace_scope=2, Docker default seccomp),
+# LeakSanitizer's exit-time check faults and libFuzzer reports a spurious
+# empty-input crash — run with ASAN_OPTIONS=detect_leaks=0 there. Real crashes
+# have non-empty artifacts.
 [tasks.fuzz]
 description = "Run one fuzz target briefly (nightly rustc): mise run fuzz -- gguf_parse"
 run = "mise exec rust@nightly -- cargo fuzz run --fuzz-dir fuzz {{arg(name='target')}} -- -max_total_time=60"
