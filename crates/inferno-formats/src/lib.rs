@@ -6,7 +6,9 @@
 
 mod desc;
 mod error;
+pub mod gguf;
 pub mod limits;
+mod read;
 
 pub use desc::{Architecture, DType, HyperParams, ModelDesc, TensorDesc};
 pub use error::{FormatError, Result};
