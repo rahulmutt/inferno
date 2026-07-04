@@ -114,10 +114,13 @@ pub fn parse<R: Read>(r: &mut R) -> Result<ModelDesc> {
         });
     }
 
-    let alignment = meta
-        .get("general.alignment")
-        .and_then(GgufValue::as_u64)
-        .unwrap_or(32);
+    let alignment = match meta.get("general.alignment") {
+        None => 32,
+        Some(v) => v.as_u64().ok_or_else(|| FormatError::Malformed {
+            context: "general.alignment",
+            detail: format!("expected an integer, got {v:?}"),
+        })?,
+    };
     if alignment == 0 || !alignment.is_power_of_two() {
         return Err(FormatError::Malformed {
             context: "general.alignment",
@@ -279,5 +282,75 @@ mod tests {
             .data_section_offsets[0] as usize;
         let cut = &bytes[..hdr_end - 40];
         assert!(parse(&mut Cursor::new(cut)).is_err());
+    }
+
+    /// Minimal GGUF: 0 tensors, 1 kv pair (`general.alignment`), no other
+    /// keys. Parse order is magic -> version -> counts -> kv pairs -> tensor
+    /// infos -> alignment validation -> tensor-offset check -> hyperparam
+    /// extraction, so with 0 tensors the alignment check is reached and
+    /// fails without needing `general.architecture` or any other key.
+    fn minimal_with_alignment_kv(type_id: u32, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"GGUF");
+        out.extend_from_slice(&3u32.to_le_bytes()); // version
+        out.extend_from_slice(&0u64.to_le_bytes()); // tensor count
+        out.extend_from_slice(&1u64.to_le_bytes()); // kv count
+        // key: "general.alignment"
+        let key = "general.alignment";
+        out.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        out.extend_from_slice(key.as_bytes());
+        out.extend_from_slice(&type_id.to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[test]
+    fn rejects_non_power_of_two_alignment() {
+        // type id 4 = u32, value 33 (not a power of two).
+        let bytes = minimal_with_alignment_kv(4, &33u32.to_le_bytes());
+        assert!(matches!(
+            parse(&mut Cursor::new(&bytes)),
+            Err(crate::FormatError::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_typed_alignment() {
+        // type id 8 = string, value "32" — present but not an integer type.
+        let s = "32";
+        let mut payload = (s.len() as u64).to_le_bytes().to_vec();
+        payload.extend_from_slice(s.as_bytes());
+        let bytes = minimal_with_alignment_kv(8, &payload);
+        assert!(matches!(
+            parse(&mut Cursor::new(&bytes)),
+            Err(crate::FormatError::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_misaligned_tensor_offset() {
+        // 1 tensor, 0 kv pairs: alignment defaults to 32. The tensor-offset
+        // check runs before hyperparam extraction, so no arch/vocab keys are
+        // needed for this error to surface first.
+        let mut out = Vec::new();
+        out.extend_from_slice(b"GGUF");
+        out.extend_from_slice(&3u32.to_le_bytes()); // version
+        out.extend_from_slice(&1u64.to_le_bytes()); // tensor count
+        out.extend_from_slice(&0u64.to_le_bytes()); // kv count
+
+        // Tensor info: name "t", 1 dim of size 1, dtype F32 (ggml id 0),
+        // data_offset 7 (not 32-aligned).
+        let name = "t";
+        out.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes()); // n_dims
+        out.extend_from_slice(&1u64.to_le_bytes()); // dim 0
+        out.extend_from_slice(&0u32.to_le_bytes()); // ggml type 0 = F32
+        out.extend_from_slice(&7u64.to_le_bytes()); // data_offset
+
+        assert!(matches!(
+            parse(&mut Cursor::new(&out)),
+            Err(crate::FormatError::Malformed { .. })
+        ));
     }
 }

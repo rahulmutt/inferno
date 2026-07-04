@@ -155,4 +155,16 @@ mod tests {
     fn rejects_garbage_json() {
         assert!(parse(&mut Cursor::new(wrap("not json")), 0).is_err());
     }
+
+    #[test]
+    fn rejects_shape_overflow() {
+        // shape[0] * shape[1] overflows u64: must hit the checked_mul
+        // try_fold path in the element-count computation, not panic.
+        let json =
+            r#"{"w": {"dtype":"F32","shape":[18446744073709551615,2],"data_offsets":[0,16]}}"#;
+        assert!(matches!(
+            parse(&mut Cursor::new(wrap(json)), 0),
+            Err(crate::FormatError::Malformed { .. })
+        ));
+    }
 }
