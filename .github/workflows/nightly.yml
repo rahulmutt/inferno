@@ -39,7 +39,7 @@ jobs:
       - run: cargo mutants --package inferno-formats --timeout 60 --in-place
         continue-on-error: true # advisory: audits assertion strength, doesn't gate
 
-  # Weekly-fresh supply-chain scan (new CVEs land on old code).
+  # Nightly-fresh supply-chain scan (new CVEs land on old code).
   audit:
     runs-on: ubuntu-latest
     steps:

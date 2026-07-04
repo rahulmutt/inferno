@@ -34,7 +34,7 @@ means recompile, never load. The cache directory has user-only permissions.
 - Tokenizer-content attacks on downstream systems (prompt/output content is
   the embedding application's concern).
 
-**Supply chain:** `cargo audit` + `cargo deny` gate CI and run on a weekly
+**Supply chain:** `cargo audit` + `cargo deny` gate CI and run on a nightly
 schedule; `Cargo.lock` committed; `gitleaks` on pre-commit and CI.
 
 Revisit when: the HTTP server lands (v2), AOT artifact *distribution* lands
