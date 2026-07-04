@@ -1,0 +1,20 @@
+[package]
+name = "inferno"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "inferno"
+path = "src/main.rs"
+
+[dependencies]
+inferno-formats.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+insta.workspace = true
+
+[lints]
+workspace = true
