@@ -127,3 +127,57 @@ pub fn tiny_llama_gguf() -> Vec<u8> {
     out.resize(out.len() + offset as usize, 0);
     out
 }
+
+/// The tiny llama as a single MLX-style safetensors file (F32, zero data).
+pub fn tiny_llama_safetensors() -> Vec<u8> {
+    let mut entries = Vec::new();
+    let mut offset = 0u64;
+    for (name, shape) in tiny_tensor_shapes() {
+        // HF/MLX naming differs from GGUF naming; that mapping is M1's
+        // problem (graph builder). M0 records names verbatim.
+        let n: u64 = shape.iter().product();
+        let end = offset + n * 4;
+        entries.push(format!(
+            r#""{name}": {{"dtype":"F32","shape":[{}],"data_offsets":[{offset},{end}]}}"#,
+            shape
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        offset = end;
+    }
+    let json = format!("{{{}}}", entries.join(","));
+    let mut out = (json.len() as u64).to_le_bytes().to_vec();
+    out.extend_from_slice(json.as_bytes());
+    out.resize(out.len() + offset as usize, 0);
+    out
+}
+
+/// Matching MLX config.json (HF-style keys).
+pub fn tiny_llama_config_json() -> String {
+    let hp = tiny_hyperparams();
+    format!(
+        r#"{{
+  "model_type": "llama",
+  "hidden_size": {},
+  "num_hidden_layers": {},
+  "num_attention_heads": {},
+  "num_key_value_heads": {},
+  "intermediate_size": {},
+  "vocab_size": {},
+  "rope_theta": {},
+  "rms_norm_eps": {},
+  "max_position_embeddings": {}
+}}"#,
+        hp.hidden_size,
+        hp.n_layers,
+        hp.n_heads,
+        hp.n_kv_heads,
+        hp.ffn_hidden_size,
+        hp.vocab_size,
+        hp.rope_theta,
+        hp.norm_eps,
+        hp.context_length
+    )
+}

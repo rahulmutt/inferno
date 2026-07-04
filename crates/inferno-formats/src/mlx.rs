@@ -1,0 +1,137 @@
+//! MLX model directories: HF-style config.json + one or more .safetensors.
+
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+
+use crate::{Architecture, FormatError, HyperParams, ModelDesc, Result, safetensors};
+
+#[derive(Deserialize)]
+struct MlxConfig {
+    model_type: String,
+    hidden_size: u64,
+    num_hidden_layers: u64,
+    num_attention_heads: u64,
+    num_key_value_heads: Option<u64>,
+    intermediate_size: u64,
+    vocab_size: u64,
+    #[serde(default = "default_rope_theta")]
+    rope_theta: f32,
+    #[serde(default = "default_norm_eps")]
+    rms_norm_eps: f32,
+    #[serde(default)]
+    max_position_embeddings: u64,
+}
+
+fn default_rope_theta() -> f32 {
+    10000.0
+}
+fn default_norm_eps() -> f32 {
+    1e-5
+}
+
+pub fn load_dir(dir: &Path) -> Result<ModelDesc> {
+    let config_path = dir.join("config.json");
+    let config_file = File::open(&config_path).map_err(|e| FormatError::Malformed {
+        context: "mlx model directory",
+        detail: format!("cannot open {}: {e}", config_path.display()),
+    })?;
+    let config: MlxConfig = serde_json::from_reader(BufReader::new(config_file))?;
+
+    let mut shard_paths: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "safetensors"))
+        .collect();
+    shard_paths.sort();
+    if shard_paths.is_empty() {
+        return Err(FormatError::Malformed {
+            context: "mlx model directory",
+            detail: format!("no .safetensors files in {}", dir.display()),
+        });
+    }
+
+    let mut tensors = Vec::new();
+    let mut data_section_offsets = Vec::new();
+    for (i, path) in shard_paths.iter().enumerate() {
+        let mut reader = BufReader::new(File::open(path)?);
+        let (mut shard_tensors, data_off) = safetensors::parse(&mut reader, i as u32)?;
+        tensors.append(&mut shard_tensors);
+        data_section_offsets.push(data_off);
+    }
+
+    Ok(ModelDesc {
+        architecture: Architecture::from_id(&config.model_type),
+        name: dir.file_name().map(|n| n.to_string_lossy().into_owned()),
+        hyperparams: HyperParams {
+            vocab_size: config.vocab_size,
+            hidden_size: config.hidden_size,
+            n_layers: config.num_hidden_layers,
+            n_heads: config.num_attention_heads,
+            n_kv_heads: config
+                .num_key_value_heads
+                .unwrap_or(config.num_attention_heads),
+            ffn_hidden_size: config.intermediate_size,
+            rope_theta: config.rope_theta,
+            norm_eps: config.rms_norm_eps,
+            context_length: config.max_position_embeddings,
+        },
+        tensors,
+        weight_files: shard_paths,
+        data_section_offsets,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Architecture, fixtures};
+
+    fn write_tiny_mlx_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("inferno-mlx-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.json"), fixtures::tiny_llama_config_json()).unwrap();
+        std::fs::write(
+            dir.join("model.safetensors"),
+            fixtures::tiny_llama_safetensors(),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn loads_tiny_mlx_dir() {
+        let dir = write_tiny_mlx_dir();
+        let desc = load_dir(&dir).unwrap();
+        assert_eq!(desc.architecture, Architecture::Llama);
+        assert_eq!(desc.hyperparams, fixtures::tiny_hyperparams());
+        assert_eq!(desc.tensors.len(), fixtures::tiny_tensor_shapes().len());
+        assert_eq!(desc.weight_files, vec![dir.join("model.safetensors")]);
+        assert_eq!(desc.data_section_offsets.len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_config_is_clear_error() {
+        let dir = std::env::temp_dir().join(format!("inferno-mlx-noconf-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("model.safetensors"),
+            fixtures::tiny_llama_safetensors(),
+        )
+        .unwrap();
+        let err = load_dir(&dir).unwrap_err().to_string();
+        assert!(err.contains("config.json"), "unhelpful error: {err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn no_safetensors_is_clear_error() {
+        let dir = std::env::temp_dir().join(format!("inferno-mlx-nost-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.json"), fixtures::tiny_llama_config_json()).unwrap();
+        assert!(load_dir(&dir).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

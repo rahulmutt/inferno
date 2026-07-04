@@ -9,6 +9,8 @@ mod error;
 pub mod fixtures;
 pub mod gguf;
 pub mod limits;
+#[allow(dead_code)] // consumed by load_desc in Task 8
+pub(crate) mod mlx;
 mod read;
 pub mod safetensors;
 
