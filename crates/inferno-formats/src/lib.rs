@@ -10,6 +10,7 @@ pub mod fixtures;
 pub mod gguf;
 pub mod limits;
 mod read;
+pub mod safetensors;
 
 pub use desc::{Architecture, DType, HyperParams, ModelDesc, TensorDesc};
 pub use error::{FormatError, Result};
