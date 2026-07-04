@@ -6,6 +6,7 @@
 
 mod desc;
 mod error;
+pub mod fixtures;
 pub mod gguf;
 pub mod limits;
 mod read;

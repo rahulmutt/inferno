@@ -6,7 +6,6 @@ use crate::read::*;
 use crate::{FormatError, Result, limits};
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum GgufValue {
     U8(u8),
     I8(i8),
@@ -24,7 +23,6 @@ pub enum GgufValue {
 }
 
 impl GgufValue {
-    #[allow(dead_code)]
     pub fn parse<R: Read>(r: &mut R, type_id: u32, depth: u32) -> Result<Self> {
         Ok(match type_id {
             0 => Self::U8(read_u8(r)?),
@@ -74,7 +72,6 @@ impl GgufValue {
     }
 
     /// Widen any integer value to u64 (metadata writers vary integer widths).
-    #[allow(dead_code)]
     pub fn as_u64(&self) -> Option<u64> {
         match *self {
             Self::U8(v) => Some(v.into()),
@@ -89,7 +86,6 @@ impl GgufValue {
         }
     }
 
-    #[allow(dead_code)]
     pub fn as_f32(&self) -> Option<f32> {
         match *self {
             Self::F32(v) => Some(v),
@@ -98,7 +94,6 @@ impl GgufValue {
         }
     }
 
-    #[allow(dead_code)]
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(s) => Some(s),
@@ -106,7 +101,6 @@ impl GgufValue {
         }
     }
 
-    #[allow(dead_code)]
     pub fn array_len(&self) -> Option<u64> {
         match self {
             Self::Array(v) => Some(v.len() as u64),

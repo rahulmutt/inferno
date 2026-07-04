@@ -6,7 +6,6 @@ use std::mem::size_of;
 
 use crate::{FormatError, Result, limits};
 
-#[allow(dead_code)]
 fn fill<R: Read>(r: &mut R, buf: &mut [u8], context: &'static str) -> Result<()> {
     r.read_exact(buf).map_err(|e| {
         if e.kind() == std::io::ErrorKind::UnexpectedEof {
@@ -22,7 +21,6 @@ fn fill<R: Read>(r: &mut R, buf: &mut [u8], context: &'static str) -> Result<()>
 
 macro_rules! reader {
     ($name:ident, $ty:ty) => {
-        #[allow(dead_code)]
         pub(crate) fn $name<R: Read>(r: &mut R) -> Result<$ty> {
             let mut buf = [0u8; size_of::<$ty>()];
             fill(r, &mut buf, stringify!($ty))?;
@@ -42,7 +40,6 @@ reader!(read_i64, i64);
 reader!(read_f32, f32);
 reader!(read_f64, f64);
 
-#[allow(dead_code)]
 pub(crate) fn read_bool<R: Read>(r: &mut R) -> Result<bool> {
     match read_u8(r)? {
         0 => Ok(false),
@@ -55,7 +52,6 @@ pub(crate) fn read_bool<R: Read>(r: &mut R) -> Result<bool> {
 }
 
 /// GGUF string: u64 LE byte length + UTF-8 payload.
-#[allow(dead_code)]
 pub(crate) fn read_string<R: Read>(r: &mut R) -> Result<String> {
     let len = read_u64(r)?;
     if len > limits::MAX_STRING_BYTES {
