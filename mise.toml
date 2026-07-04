@@ -6,6 +6,7 @@ rust = "1.96.0"
 "cargo:cargo-insta" = "1.48.0"
 gitleaks = "8.30.1"
 lefthook = "2.1.9"
+"cargo:cargo-fuzz" = "0.13.2"
 
 [env]
 CARGO_TERM_COLOR = "always"
