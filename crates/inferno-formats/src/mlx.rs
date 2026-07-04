@@ -88,12 +88,18 @@ mod tests {
     use super::*;
     use crate::{Architecture, fixtures};
 
-    fn write_tiny_mlx_dir() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("inferno-mlx-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("config.json"), fixtures::tiny_llama_config_json()).unwrap();
+    // tempfile::tempdir() creates a securely-permissioned, uniquely-named
+    // directory (not a predictable pid-based path in the shared system temp
+    // dir) and removes it on drop.
+    fn write_tiny_mlx_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.join("model.safetensors"),
+            dir.path().join("config.json"),
+            fixtures::tiny_llama_config_json(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("model.safetensors"),
             fixtures::tiny_llama_safetensors(),
         )
         .unwrap();
@@ -103,42 +109,43 @@ mod tests {
     #[test]
     fn loads_tiny_mlx_dir() {
         let dir = write_tiny_mlx_dir();
-        let desc = load_dir(&dir).unwrap();
+        let desc = load_dir(dir.path()).unwrap();
         assert_eq!(desc.architecture, Architecture::Llama);
         assert_eq!(desc.hyperparams, fixtures::tiny_hyperparams());
         assert_eq!(desc.tensors.len(), fixtures::tiny_tensor_shapes().len());
-        assert_eq!(desc.weight_files, vec![dir.join("model.safetensors")]);
+        assert_eq!(
+            desc.weight_files,
+            vec![dir.path().join("model.safetensors")]
+        );
         assert_eq!(desc.data_section_offsets.len(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn missing_config_is_clear_error() {
-        let dir = std::env::temp_dir().join(format!("inferno-mlx-noconf-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.join("model.safetensors"),
+            dir.path().join("model.safetensors"),
             fixtures::tiny_llama_safetensors(),
         )
         .unwrap();
-        let err = load_dir(&dir).unwrap_err().to_string();
+        let err = load_dir(dir.path()).unwrap_err().to_string();
         assert!(err.contains("config.json"), "unhelpful error: {err}");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn no_safetensors_is_clear_error() {
-        let dir = std::env::temp_dir().join(format!("inferno-mlx-nost-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("config.json"), fixtures::tiny_llama_config_json()).unwrap();
-        assert!(load_dir(&dir).is_err());
-        std::fs::remove_dir_all(&dir).ok();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            fixtures::tiny_llama_config_json(),
+        )
+        .unwrap();
+        assert!(load_dir(dir.path()).is_err());
     }
 
     #[test]
     fn minimal_config_applies_defaults() {
-        let dir = std::env::temp_dir().join(format!("inferno-mlx-defaults-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let config = r#"{
   "model_type": "llama",
   "hidden_size": 8,
@@ -147,46 +154,47 @@ mod tests {
   "intermediate_size": 16,
   "vocab_size": 32
 }"#;
-        std::fs::write(dir.join("config.json"), config).unwrap();
+        std::fs::write(dir.path().join("config.json"), config).unwrap();
         std::fs::write(
-            dir.join("model.safetensors"),
+            dir.path().join("model.safetensors"),
             fixtures::tiny_llama_safetensors(),
         )
         .unwrap();
-        let desc = load_dir(&dir).unwrap();
+        let desc = load_dir(dir.path()).unwrap();
         assert_eq!(desc.hyperparams.n_kv_heads, desc.hyperparams.n_heads);
         assert_eq!(desc.hyperparams.rope_theta, 10000.0);
         assert_eq!(desc.hyperparams.norm_eps, 1e-5);
         assert_eq!(desc.hyperparams.context_length, 0);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn multi_shard_dir_orders_files_and_tracks_file_index() {
-        let dir = std::env::temp_dir().join(format!("inferno-mlx-shards-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("config.json"), fixtures::tiny_llama_config_json()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.join("model-00001-of-00002.safetensors"),
+            dir.path().join("config.json"),
+            fixtures::tiny_llama_config_json(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("model-00001-of-00002.safetensors"),
             fixtures::tiny_llama_safetensors(),
         )
         .unwrap();
         std::fs::write(
-            dir.join("model-00002-of-00002.safetensors"),
+            dir.path().join("model-00002-of-00002.safetensors"),
             fixtures::tiny_llama_safetensors(),
         )
         .unwrap();
-        let desc = load_dir(&dir).unwrap();
+        let desc = load_dir(dir.path()).unwrap();
         assert_eq!(
             desc.weight_files,
             vec![
-                dir.join("model-00001-of-00002.safetensors"),
-                dir.join("model-00002-of-00002.safetensors"),
+                dir.path().join("model-00001-of-00002.safetensors"),
+                dir.path().join("model-00002-of-00002.safetensors"),
             ]
         );
         assert_eq!(desc.data_section_offsets.len(), 2);
         assert!(desc.tensors.iter().filter(|t| t.file_index == 0).count() > 0);
         assert!(desc.tensors.iter().filter(|t| t.file_index == 1).count() > 0);
-        std::fs::remove_dir_all(&dir).ok();
     }
 }
