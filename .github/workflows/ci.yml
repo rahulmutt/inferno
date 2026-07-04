@@ -20,6 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2 # installs mise.toml pins, incl. rust
+      # mise-action's GH Actions cache only spans ~/.local/share/mise, not the
+      # rustup-managed toolchain dir — a cache-hit run can restore rustc/cargo
+      # but drop the rustfmt/clippy components. Idempotent no-op when present.
+      - run: rustup component add rustfmt clippy
       - uses: Swatinem/rust-cache@v2
       - run: mise run lint
       - run: mise run test
