@@ -1,0 +1,61 @@
+name: nightly
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [gguf_parse, safetensors_parse]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - run: mise exec rust@nightly -- rustc --version
+      - run: mise exec rust@nightly -- cargo fuzz run --fuzz-dir fuzz ${{ matrix.target }} -- -max_total_time=600
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: fuzz/artifacts/
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep scan --config p/rust --error
+
+  mutants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - run: mise use --pin "cargo:cargo-mutants@latest" && mise install
+      - run: cargo mutants --package inferno-formats --timeout 60 --in-place
+        continue-on-error: true # advisory: audits assertion strength, doesn't gate
+
+  # Weekly-fresh supply-chain scan (new CVEs land on old code).
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: mise run audit
+
+  # Onboarding-you-can-actually-run: the README quickstart from a bare clone.
+  onboarding:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+      - run: nix profile install nixpkgs#devenv
+      - uses: jdx/mise-action@v2
+      - run: devenv shell -- bash -c 'llvm-config --version && command -v llama-cli'
+      - run: mise run test
+      - run: cargo run -p inferno -- inspect crates/inferno-formats/tests/fixtures/tiny.gguf
