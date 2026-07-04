@@ -134,4 +134,59 @@ mod tests {
         assert!(load_dir(&dir).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn minimal_config_applies_defaults() {
+        let dir = std::env::temp_dir().join(format!("inferno-mlx-defaults-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = r#"{
+  "model_type": "llama",
+  "hidden_size": 8,
+  "num_hidden_layers": 2,
+  "num_attention_heads": 2,
+  "intermediate_size": 16,
+  "vocab_size": 32
+}"#;
+        std::fs::write(dir.join("config.json"), config).unwrap();
+        std::fs::write(
+            dir.join("model.safetensors"),
+            fixtures::tiny_llama_safetensors(),
+        )
+        .unwrap();
+        let desc = load_dir(&dir).unwrap();
+        assert_eq!(desc.hyperparams.n_kv_heads, desc.hyperparams.n_heads);
+        assert_eq!(desc.hyperparams.rope_theta, 10000.0);
+        assert_eq!(desc.hyperparams.norm_eps, 1e-5);
+        assert_eq!(desc.hyperparams.context_length, 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn multi_shard_dir_orders_files_and_tracks_file_index() {
+        let dir = std::env::temp_dir().join(format!("inferno-mlx-shards-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.json"), fixtures::tiny_llama_config_json()).unwrap();
+        std::fs::write(
+            dir.join("model-00001-of-00002.safetensors"),
+            fixtures::tiny_llama_safetensors(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("model-00002-of-00002.safetensors"),
+            fixtures::tiny_llama_safetensors(),
+        )
+        .unwrap();
+        let desc = load_dir(&dir).unwrap();
+        assert_eq!(
+            desc.weight_files,
+            vec![
+                dir.join("model-00001-of-00002.safetensors"),
+                dir.join("model-00002-of-00002.safetensors"),
+            ]
+        );
+        assert_eq!(desc.data_section_offsets.len(), 2);
+        assert!(desc.tensors.iter().filter(|t| t.file_index == 0).count() > 0);
+        assert!(desc.tensors.iter().filter(|t| t.file_index == 1).count() > 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

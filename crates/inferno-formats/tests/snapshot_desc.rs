@@ -27,6 +27,13 @@ fn gguf_weight_file_and_offset_recorded() {
 }
 
 #[test]
+fn safetensors_file_dispatches_to_same_dir() {
+    let from_file = inferno_formats::load_desc(&fixture("mlx/model.safetensors")).unwrap();
+    let from_dir = inferno_formats::load_desc(&fixture("mlx")).unwrap();
+    assert_eq!(from_file, from_dir);
+}
+
+#[test]
 fn unknown_format_is_clear_error() {
     let err = inferno_formats::load_desc(Path::new("Cargo.toml")).unwrap_err();
     assert!(matches!(
