@@ -1,4 +1,8 @@
 [tools]
+# CAUTION: Editing this file invalidates GitHub Actions tool cache (jdx/mise-action),
+# forcing the five cargo-backend tools (nextest, audit, deny, insta, fuzz) to rebuild
+# from source (~10 min next CI run, then self-heals). Rust components rustfmt/clippy
+# are additionally guarded in .github/workflows/ci.yml (cache misses ~/.rustup).
 "cargo:cargo-nextest" = "0.9.138"
 rust = { version = "1.96.0", components = "rustfmt,clippy" }
 "cargo:cargo-audit" = "0.22.2"
