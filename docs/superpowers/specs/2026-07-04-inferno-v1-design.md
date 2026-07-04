@@ -212,28 +212,153 @@ the v2 cross-compile interface. (Note: iOS forbids JIT and loading unsigned
 code, so phone delivery is necessarily AOT cross-compile; the design
 accommodates it, v1 does not build it.)
 
+## Development Environment & Repository Conventions
+
+These follow the devkit skills (`developer-environment`,
+`navigable-codebases`, `writing-clean-code`); the spec records the decisions,
+not the commands — task definitions and pins are single-sourced in the files
+named below.
+
+### Toolchain: mise-first, devenv.nix for native deps
+
+- **`mise.toml`** (committed) pins every tool to an exact version via
+  `mise use --pin`: `rust`, and cargo-distributed dev tools via the cargo
+  backend (e.g. `cargo:cargo-nextest`, `cargo:cargo-fuzz`,
+  `cargo:cargo-audit`, `cargo:cargo-deny`, `cargo:cargo-insta`). Unpinned
+  entries are treated as reproducibility bugs.
+- **`devenv.nix`** (committed) provides what mise cannot: **LLVM** (the
+  `llvmPackages_<N>` dev output that `llvm-sys`/`inkwell` link against, with
+  `LLVM_SYS_<N>0_PREFIX` exported in the shell), supporting native libs
+  (`libffi`, `libxml2`, `zlib`), and **llama.cpp** (nixpkgs package) as the
+  pinned benchmark opponent. The LLVM major version is pinned here and must
+  match the `inkwell` feature flag in `inferno-codegen`; devenv's lockfile
+  pins the nixpkgs revision so LLVM and llama.cpp versions are deterministic.
+- **Application dependencies** are owned by cargo: `Cargo.lock` is committed;
+  exact or lockfile-resolved versions only; automated updater (Renovate or
+  Dependabot) gated by CI keeps them current in small steps. Every dependency
+  is a liability — prefer std or one small crate over overlapping ones.
+- **Build orchestration:** native cargo only. No Bazel — single-language
+  workspace, no remote-cache or hermeticity trigger holds.
+
+### Repo front door (navigable-codebases)
+
+Built in M0 and maintained as the repo evolves:
+
+- **README quickstart:** clone → `devenv shell` (or direnv) → `mise install`
+  → `mise run test`. The README references task *names*, never re-spells
+  commands.
+- **Named tasks** in `mise.toml` `[tasks]` for every repeated workflow:
+  `test` (blocking tier), `test-full`, `lint`, `fmt`, `bench`, `fuzz`. Tasks
+  are the single source of truth; CI invokes the same task names.
+- **`AGENTS.md`** (with `CLAUDE.md` pointing at it) carries only the
+  non-derivable: pointers to this spec, the threat model, the task names, and
+  the LLVM-version-must-match-inkwell constraint.
+- **`ARCHITECTURE.md`** is the codebase map: the crate diagram and boundary
+  rules from this spec (why the boundaries fall where they do — formats are
+  dumb, target is pure data, kernels are a fixed ABI), not a restated file
+  tree.
+- **Onboarding is verified by running it** — a CI job runs the documented
+  clone-to-test sequence from scratch.
+
+### Authoring conventions (writing-clean-code)
+
+`rustfmt` + `clippy` are the source of truth for style (format-on-save,
+lint-in-CI); one purpose per crate (the workspace layout above is the domain
+decomposition — names come from the domain: `plan`, `target`, `kernels`);
+rule-of-three before abstracting; YAGNI ruthlessly — v1 builds no
+speculative generality for GPU, batching, or formats beyond the two chosen.
+
 ## Testing Strategy
 
-- **Kernel tests:** every microkernel vs the scalar reference on random
-  inputs; property-based; explicit tolerance rules per quant format.
-- **End-to-end golden tests:** compiled-model logits vs reference-interpreter
-  logits (tolerance ~1e-2 for quantized paths); spot-check outputs against
-  llama.cpp on identical GGUF files as an external oracle.
-- **Tokenizer conformance:** round-trip against HF `tokenizers` for the same
-  vocab.
-- **Format tests:** golden GGUF/safetensors fixtures, including tiny
-  handcrafted models (2 layers, dim 64) so CI stays fast without downloading
-  real models.
-- **Perf:** `inferno bench` reports prefill tok/s, decode tok/s, peak RSS;
-  a checked-in protocol benchmarks against llama.cpp on the same
-  model/quant/machine. Criterion micro-benches for kernels.
+Per `testing-practices`: match each oracle to what we can assert, keep most
+weight on cheap layers, and tier the suite by speed.
+
+### Static base
+
+`rustfmt --check` + `cargo clippy` (warnings deny) on every PR; the compiler
+and ownership model are the first validation layer. `unsafe` is confined to
+`inferno-kernels` (intrinsics), mmap, and `dlopen` glue — each block carries a
+documented invariant and gets extra review.
+
+### Oracles
+
+- **Derived (differential) — the load-bearing oracle:** the scalar reference
+  interpreter in `inferno-graph` is the trusted implementation; compiled-model
+  logits are compared against it (tolerance ~1e-2 on quantized paths, defined
+  once per quant format and reused by every layer). llama.cpp output on
+  identical GGUF files is a second, external differential oracle.
+- **Invariant (property-based, `proptest`):** every microkernel vs the scalar
+  reference on random inputs; quant pack/unpack round-trips; tokenizer
+  encode/decode round-trips against HF `tokenizers` on the same vocab.
+- **Recorded (golden, `insta`):** parsed `ModelDesc` snapshots for GGUF and
+  safetensors fixtures; graph-IR dumps after builder and after planning
+  (compiler IR is a classic snapshot target); CLI `inspect` output. Snapshots
+  stay narrow and deterministic; every change is reviewed, never
+  blind-accepted.
+- **Specified (unit):** sampling (seeded RNG, exact expected picks), memory
+  planner offsets, target detection parsing against captured `cpuid`/`sysctl`
+  fixtures.
+- **Fuzz (`cargo-fuzz`):** the GGUF and safetensors parsers take untrusted
+  bytes — libFuzzer targets from M0, run as a nightly campaign with a corpus
+  seeded from the golden fixtures.
+
+Test fixtures include tiny handcrafted models (2 layers, dim 64) in both
+formats so the blocking tier never downloads real models.
+
+### Tiers
+
+- **pre-commit / on-save:** fmt + clippy + fast unit tests (seconds).
+- **PR (blocking):** unit + integration on tiny fixture models, incl.
+  interpreter-vs-compiled differential on the tiny models. Explicit
+  wall-clock budget: ≤5 minutes.
+- **nightly / scheduled:** fuzz campaigns, real-model differential tests
+  (llama.cpp cross-check), `cargo-mutants` on `inferno-plan` and
+  `inferno-formats`, full bench protocol, fresh-clone onboarding job.
+
+Flaky tests are quarantined out of the blocking tier immediately, then fixed
+or deleted — never blind-retried.
+
+### Performance
+
+`inferno bench` reports prefill tok/s, decode tok/s, peak RSS; a checked-in
+protocol benchmarks against the devenv-pinned llama.cpp on the same
+model/quant/machine. Criterion micro-benches for kernels from M2.
+
+## Security
+
+Per `security-practices`, scaled to a local-inference library (no network
+surface in v1):
+
+- **Threat model** (committed at `docs/threat-model.md` in M0, linked from
+  `AGENTS.md`): the primary trust boundary is **model files are untrusted
+  input** — a downloaded GGUF/safetensors file may be malicious. Controls:
+  parsers validate and canonicalize at the edge (bounds-checked offsets, no
+  `unsafe` in `inferno-formats`, allocation limits derived from file size),
+  plus the fuzz targets above. Second boundary: the artifact cache under
+  `~/.cache/inferno/` is trusted-local — artifacts are keyed and verified by
+  content hash before `dlopen`, and loading an artifact is documented as
+  equivalent to running code from that cache directory. Out of scope:
+  sandboxing generated code against a hostile *local* user.
+- **Supply chain:** `cargo audit` (RustSec) + `cargo deny check` (advisories,
+  bans, sources, licenses) as a CI gate **and** on a weekly schedule (new
+  CVEs land on old code); lockfile committed; updater cadence per the
+  environment section.
+- **Secret scanning:** `gitleaks` in pre-commit and CI — non-negotiable
+  hygiene even with no secrets expected.
+- **SAST:** `clippy` security lints + `semgrep --config p/rust` in CI.
+  Container/IaC scanning: none — no such artifacts exist.
 
 ## Milestones
 
 Each milestone is its own spec → plan → implementation cycle.
 
-- **M0 — Skeleton + formats.** Workspace scaffolding; `inferno-formats`
-  parsing GGUF and safetensors/MLX into `ModelDesc`; `inferno inspect` CLI.
+- **M0 — Skeleton + formats.** Workspace scaffolding; dev environment
+  (`mise.toml` pins, `devenv.nix` with LLVM + llama.cpp, named tasks); repo
+  front door (README quickstart, `AGENTS.md`/`CLAUDE.md`, `ARCHITECTURE.md`);
+  CI skeleton with the blocking/nightly tiers, scanners (gitleaks,
+  cargo-audit/deny, semgrep), and fresh-clone onboarding job; threat model;
+  `inferno-formats` parsing GGUF and safetensors/MLX into `ModelDesc` with
+  fuzz targets; `inferno inspect` CLI.
 - **M1 — Graph IR + interpreter.** Llama-family builder; scalar interpreter
   producing real (slow) tokens end-to-end, incl. tokenizer + greedy sampling.
   *First tokens out.*
@@ -257,8 +382,11 @@ batching and prefix caching.
   throughput) so we know early if the bet is failing, before the full
   end-to-end protocol lands in M4.
 - **LLVM dependency weight.** `llvm-sys` pins an LLVM version and slows cold
-  builds. Mitigation: prebuilt LLVM in the devcontainer; the LLVM surface is
-  isolated inside `inferno-codegen`.
+  builds. Mitigation: LLVM comes prebuilt and version-pinned from
+  `devenv.nix` (nixpkgs `llvmPackages_<N>`), never built from source or
+  installed ad hoc; the LLVM surface is isolated inside `inferno-codegen`,
+  and the devenv-pinned major version must match `inferno-codegen`'s
+  `inkwell` feature flag (recorded in `AGENTS.md`).
 - **Two formats in v1** doubles loader work. Mitigation: the shared
   `ModelDesc` keeps it to parsing only; MLX safetensors parsing is simple
   compared to GGUF.
