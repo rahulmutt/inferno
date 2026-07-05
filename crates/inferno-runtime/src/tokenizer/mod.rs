@@ -1,11 +1,11 @@
 mod bpe;
 pub(crate) mod bytes;
 mod hf;
-// spm module joins in Task 12.
+mod spm;
 
 use inferno_formats::{TokenizerKind, TokenizerSpec};
 
-use crate::{Result, RuntimeError};
+use crate::Result;
 
 pub trait Tokenizer: Send {
     fn encode(&self, text: &str, add_bos: bool) -> Result<Vec<u32>>;
@@ -37,7 +37,18 @@ pub fn tokenizer_for(spec: &TokenizerSpec) -> Result<Box<dyn Tokenizer>> {
         )?)),
         TokenizerSpec::Embedded {
             kind: TokenizerKind::Spm,
+            tokens,
+            scores,
+            token_types,
+            special,
+            add_bos,
             ..
-        } => Err(RuntimeError::Tokenizer("spm lands in Task 12".into())),
+        } => Ok(Box::new(spm::SpmTokenizer::new(
+            tokens.clone(),
+            scores.clone(),
+            token_types.clone(),
+            special.clone(),
+            *add_bos,
+        )?)),
     }
 }
