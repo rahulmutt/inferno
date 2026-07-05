@@ -1,8 +1,9 @@
+mod bpe;
 pub(crate) mod bytes;
 mod hf;
-// bpe and spm modules join in Tasks 11–12.
+// spm module joins in Task 12.
 
-use inferno_formats::TokenizerSpec;
+use inferno_formats::{TokenizerKind, TokenizerSpec};
 
 use crate::{Result, RuntimeError};
 
@@ -17,11 +18,26 @@ pub trait Tokenizer: Send {
 pub fn tokenizer_for(spec: &TokenizerSpec) -> Result<Box<dyn Tokenizer>> {
     match spec {
         TokenizerSpec::HfJson { path } => Ok(Box::new(hf::HfTokenizer::load(path)?)),
-        TokenizerSpec::Embedded { .. } => {
-            // Native implementations land in Tasks 11–12.
-            Err(RuntimeError::Tokenizer(
-                "embedded tokenizers not yet wired".into(),
-            ))
-        }
+        TokenizerSpec::Embedded {
+            kind: TokenizerKind::Bpe,
+            tokens,
+            token_types,
+            merges,
+            pre,
+            special,
+            add_bos,
+            ..
+        } => Ok(Box::new(bpe::BpeTokenizer::new(
+            tokens.clone(),
+            token_types,
+            merges,
+            pre.as_deref(),
+            special.clone(),
+            *add_bos,
+        )?)),
+        TokenizerSpec::Embedded {
+            kind: TokenizerKind::Spm,
+            ..
+        } => Err(RuntimeError::Tokenizer("spm lands in Task 12".into())),
     }
 }
