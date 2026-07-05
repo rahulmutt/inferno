@@ -78,6 +78,28 @@ jobs:
           key: inferno-test-models-qwen25-05b-v1
       - run: devenv shell -- mise run differential
 
+  # M3 "faster than the interpreter" gate (spec §Testing, Task 17): compiles
+  # the pinned model and asserts compiled decode tok/s clears
+  # `cli/src/bench.rs::MARGIN` times the interpreter's, on the same real
+  # quantized model the `differential` job downloads (same cache dir/key —
+  # `scripts/fetch-qwen-gguf.sh` is shared by both). Kept out of the blocking
+  # PR tier: model download + first LLVM compile blow the 5-min budget.
+  speedup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+      - run: nix profile install nixpkgs#devenv
+      - uses: jdx/mise-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/inferno-tests
+          key: inferno-test-models-qwen25-05b-v1
+      - run: devenv shell -- mise run speedup
+
   # Full suite incl. ignored/slow tests, with enlarged property-test runs.
   test-full:
     runs-on: ubuntu-latest

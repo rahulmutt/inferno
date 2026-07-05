@@ -8,12 +8,14 @@ setup time — then caches the compiled artifact for instant reloads.
 Loads GGUF and MLX (safetensors) models. No GPU: the goal is maximum speed on
 commodity hardware, laptops to phones. Written in Rust.
 
-**Status:** pre-release, milestone M2 (targets + AVX2 quantized GEMV kernels).
+**Status:** pre-release, milestone M3 (LLVM-compiled inference path: `inferno
+compile`/`run` beat the M1 interpreter's decode throughput on a real model).
 
 ## Quickstart
 
-Requires [devenv](https://devenv.sh) (native deps: LLVM, llama.cpp) and
-[mise](https://mise.jdx.dev) (Rust toolchain + dev tools; task runner):
+Requires [devenv](https://devenv.sh) (native deps: LLVM 18 + a C toolchain
+for linking, llama.cpp) and [mise](https://mise.jdx.dev) (Rust toolchain +
+dev tools; task runner):
 
     devenv shell        # native deps
     mise install        # pinned toolchain
@@ -24,6 +26,19 @@ Try it:
 
     cargo run -p inferno -- inspect crates/inferno-formats/tests/fixtures/tiny.gguf
     cargo run -p inferno -- run crates/inferno-formats/tests/fixtures/tiny.gguf --prompt "the" --max-tokens 4
+
+The `run` command above compiles the model first (LLVM codegen + link to a
+cached `model.so` — needs the devenv shell's LLVM 18 + linker the first
+time; later runs reuse the cached artifact) and runs the compiled path by
+default. Force a compile without generating, or inspect where the artifact
+landed, with `inferno compile`:
+
+    cargo run -p inferno -- compile crates/inferno-formats/tests/fixtures/tiny.gguf
+
+Pass `--interp` to `run` to use the M1 scalar interpreter instead (slow by
+design; a cross-check against the compiled path, not for everyday use):
+
+    cargo run -p inferno -- run crates/inferno-formats/tests/fixtures/tiny.gguf --prompt "the" --max-tokens 4 --interp
 
 ## Common tasks
 
