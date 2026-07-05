@@ -6,7 +6,7 @@ model: tiny-llama-test
 architecture: llama
 hyperparams: layers=2 hidden=8 heads=2 kv_heads=1 ffn=16 vocab=32 ctx=128 rope_theta=10000 norm_eps=0.00001
 tensors: 21
-  token_embd.weight                                32x8 F32
+  token_embed.weight                               32x8 F32
   output_norm.weight                                  8 F32
-  output.weight                                    32x8 F32
+  lm_head.weight                                   32x8 F32
   … and 18 more
