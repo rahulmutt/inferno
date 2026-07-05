@@ -21,6 +21,11 @@ fn main() {
         fixtures::tiny_llama_safetensors(),
     )
     .unwrap();
+    fs::write(
+        fix.join("mlx/tokenizer.json"),
+        fixtures::tiny_tokenizer_json(),
+    )
+    .unwrap();
 
     // Fuzz corpus seeds (fuzz/ is created in the fuzz task; ignore if absent).
     let corpus = root.join("../../fuzz/corpus");

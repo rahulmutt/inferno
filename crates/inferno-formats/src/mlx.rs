@@ -129,7 +129,7 @@ mod tests {
                 ..fixtures::tiny_hyperparams()
             }
         );
-        assert_eq!(desc.tensors.len(), fixtures::tiny_tensor_shapes().len());
+        assert_eq!(desc.tensors.len(), fixtures::tiny_tensors_hf().len());
         assert_eq!(
             desc.weight_files,
             vec![dir.path().join("model.safetensors")]

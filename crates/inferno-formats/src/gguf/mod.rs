@@ -301,13 +301,13 @@ mod tests {
         assert_eq!(desc.architecture, Architecture::Llama);
         assert_eq!(desc.name.as_deref(), Some("tiny-llama-test"));
         assert_eq!(desc.hyperparams, fixtures::tiny_hyperparams());
-        assert_eq!(desc.tensors.len(), fixtures::tiny_tensor_shapes().len());
+        assert_eq!(desc.tensors.len(), fixtures::tiny_tensors_gguf().len());
 
         let embd = &desc.tensors[0];
         assert_eq!(embd.name, "token_embed.weight");
-        assert_eq!(embd.shape, vec![32, 8]); // row-major: [vocab, hidden]
+        assert_eq!(embd.shape, vec![260, 64]); // row-major: [vocab, hidden]
         assert_eq!(embd.dtype, DType::F32);
-        assert_eq!(embd.data_len, Some(32 * 8 * 4));
+        assert_eq!(embd.data_len, Some(260 * 64 * 4));
         assert_eq!(desc.data_section_offsets.len(), 1);
         assert_eq!(desc.data_section_offsets[0] % 32, 0);
     }
