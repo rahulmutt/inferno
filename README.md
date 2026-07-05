@@ -8,7 +8,7 @@ setup time — then caches the compiled artifact for instant reloads.
 Loads GGUF and MLX (safetensors) models. No GPU: the goal is maximum speed on
 commodity hardware, laptops to phones. Written in Rust.
 
-**Status:** pre-release, milestone M0 (model-file parsing + tooling).
+**Status:** pre-release, milestone M1 (graph IR + scalar interpreter — first tokens out).
 
 ## Quickstart
 

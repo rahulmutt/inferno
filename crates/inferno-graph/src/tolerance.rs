@@ -28,4 +28,6 @@ pub fn logits_abs_tol(dtype: &DType) -> f32 {
 /// Teacher-forced differential: a position where our top-2 logit gap is
 /// below this counts as a genuine tie, not a mismatch. Tuned against the
 /// gap distributions the nightly diff reports (see AGENTS.md).
+/// Observed so far (Qwen2.5-0.5B-Instruct Q8_0, first nightly, 2026-07-05):
+/// 64 checked, 63 matched, 1 tie, min top-2 gap 0.0004.
 pub const LOGIT_TIE_EPSILON: f32 = 0.05;
