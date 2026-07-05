@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/inferno-formats", "crates/inferno-graph", "crates/inferno-target", "crates/inferno-runtime", "cli"]
+members = ["crates/inferno-formats", "crates/inferno-graph", "crates/inferno-target", "crates/inferno-runtime", "crates/inferno-kernels", "cli"]
 exclude = ["fuzz"]
 
 [workspace.package]
@@ -14,7 +14,10 @@ inferno-formats = { path = "crates/inferno-formats" }
 inferno-graph = { path = "crates/inferno-graph" }
 inferno-target = { path = "crates/inferno-target" }
 inferno-runtime = { path = "crates/inferno-runtime" }
+inferno-kernels = { path = "crates/inferno-kernels" }
 thiserror = "2"
+criterion = "0.7"
+libloading = "0.9"
 toml = "0.9"
 rustix = { version = "1", default-features = false, features = ["param"] }
 serde = { version = "1", features = ["derive"] }

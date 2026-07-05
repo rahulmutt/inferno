@@ -1,0 +1,31 @@
+[package]
+name = "inferno-kernels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+inferno-formats.workspace = true
+inferno-target.workspace = true
+thiserror.workspace = true
+libloading = { workspace = true, optional = true }
+
+[dev-dependencies]
+inferno-graph.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+
+[features]
+# Bench-only FFI against the devenv-pinned ggml CPU backend. Never default:
+# shipping builds contain zero FFI (spec §Benchmarks).
+ggml-compare = ["dep:libloading"]
+
+# The workspace lints deny `unsafe_code`; this crate is the sanctioned
+# exception (intrinsics + the C ABI M3 codegen calls by symbol). Every unsafe
+# fn documents its contract; unsafe ops inside unsafe fns still need blocks.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[[bench]]
+name = "gemv"
+harness = false
