@@ -54,6 +54,8 @@ pub enum Step {
     },
     Attention {
         q: usize,
+        k: usize,
+        v: usize,
         layer: usize,
         n_heads: usize,
         n_kv_heads: usize,
@@ -182,6 +184,8 @@ pub fn build_loopir(plan: &Plan, graph: &Graph, _desc: &ModelDesc) -> LoopIr {
                     head_dim,
                 } => steps.push(Step::Attention {
                     q: node.inputs[0],
+                    k: node.inputs[1],
+                    v: node.inputs[2],
                     layer: *layer,
                     n_heads: *n_heads as usize,
                     n_kv_heads: *n_kv_heads as usize,

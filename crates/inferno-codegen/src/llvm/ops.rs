@@ -2,10 +2,10 @@
 //! points (`prefill`, `decode_step`).
 //!
 //! Every op mirrors [`inferno_graph::ops`] (the scalar oracle) exactly —
-//! operation order, eps placement, rope pairing, sigmoid form — so Task 12's
-//! differential sees matching logits. Only `embed`, `rmsnorm`, `rope`,
-//! `swiglu`, and `add` are lowered here; `matmul`/`attention` (and their
-//! `quantize`/`gemv`/`bias` expansion) are no-op stubs this task (Task 10).
+//! operation order, eps placement, rope pairing, sigmoid form, attention
+//! scale/softmax/GQA — so Task 12's differential sees matching logits. All ops
+//! are lowered here: `embed`, `rmsnorm`, `rope`, `swiglu`, `add`, the MatMul
+//! kernel calls (`quantize?`/`gemv`/`bias?`), and causal GQA `attention`.
 //!
 //! # Arena addressing
 //! `arena` is an opaque `ptr` to an f32 base. Value `v`'s slot is
@@ -43,8 +43,8 @@ use crate::Result;
 use crate::loopir::{LoopIr, Step, build_loopir};
 
 /// Build the full LLVM module for a planned model: the frozen kernel ABI, the
-/// two entry-point signatures, and real op lowering for the five arithmetic
-/// ops (matmul/attention stubbed until Task 10). The result `verify()`s.
+/// two entry-point signatures, and real op lowering for every op (the
+/// arithmetic ops, MatMul kernel calls, and attention). The result `verify()`s.
 pub fn build_full_module<'c>(
     ctx: &'c Context,
     plan: &Plan,
@@ -67,6 +67,11 @@ pub fn build_full_module<'c>(
 struct Frame<'c> {
     /// The `arena` base pointer (entry-point param).
     arena: PointerValue<'c>,
+    /// The packed-weight image base pointer (entry-point param). GEMV weight
+    /// pointers are `weights + PackedWeight.offset` (a byte offset).
+    weights: PointerValue<'c>,
+    /// The KV-cache base pointer (entry-point param). f32 K/V storage.
+    kv: PointerValue<'c>,
     /// Arena row index for this token (`r` in prefill, `0` in decode).
     row: IntValue<'c>,
     /// Absolute position of this token (`pos_off + r` / the `pos` param), i64.
@@ -94,6 +99,7 @@ struct Codegen<'c, 'a> {
     cos_fn: FunctionValue<'c>,
     exp_fn: FunctionValue<'c>,
     sqrt_fn: FunctionValue<'c>,
+    maxnum_fn: FunctionValue<'c>,
 
     /// tensor_index -> private `[N x float]` global of dequantized weights.
     weight_globals: RefCell<HashMap<usize, PointerValue<'c>>>,
@@ -132,6 +138,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
             cos_fn: decl("llvm.cos"),
             exp_fn: decl("llvm.exp"),
             sqrt_fn: decl("llvm.sqrt"),
+            maxnum_fn: decl("llvm.maxnum"),
             weight_globals: RefCell::new(HashMap::new()),
             rope_freqs: RefCell::new(HashMap::new()),
         }
@@ -162,6 +169,20 @@ impl<'c, 'a> Codegen<'c, 'a> {
             .build_int_mul(index, self.const_i64(4), "bytes")
             .unwrap();
         let addr = self.builder.build_int_add(b, bytes, "addr").unwrap();
+        self.builder
+            .build_int_to_ptr(addr, self.ptr_t, "i2p")
+            .unwrap()
+    }
+
+    /// Byte address `base + byte_off` (a raw byte offset, *not* scaled by 4).
+    /// Used for the packed-weight image and the act-scratch region, whose
+    /// offsets are already in bytes.
+    fn byte_ptr(&self, base: PointerValue<'c>, byte_off: IntValue<'c>) -> PointerValue<'c> {
+        let b = self
+            .builder
+            .build_ptr_to_int(base, self.i64_t, "p2i")
+            .unwrap();
+        let addr = self.builder.build_int_add(b, byte_off, "baddr").unwrap();
         self.builder
             .build_int_to_ptr(addr, self.ptr_t, "i2p")
             .unwrap()
@@ -202,6 +223,21 @@ impl<'c, 'a> Codegen<'c, 'a> {
     fn call_unary(&self, f: FunctionValue<'c>, x: FloatValue<'c>) -> FloatValue<'c> {
         self.builder
             .build_call(f, &[x.into()], "call")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_float_value()
+    }
+
+    fn call_binary(
+        &self,
+        f: FunctionValue<'c>,
+        a: FloatValue<'c>,
+        b: FloatValue<'c>,
+    ) -> FloatValue<'c> {
+        self.builder
+            .build_call(f, &[a.into(), b.into()], "call2")
             .unwrap()
             .try_as_basic_value()
             .left()
@@ -253,6 +289,20 @@ impl<'c, 'a> Codegen<'c, 'a> {
     ) -> PointerValue<'c> {
         let idx = self.add(base_index, i);
         self.elem_ptr(frame.arena, idx)
+    }
+
+    /// Pointer to element 0 of value `v`'s row for this frame (the row start).
+    fn arena_row_ptr(&self, frame: &Frame<'c>, v: usize) -> PointerValue<'c> {
+        let base = self.row_base(frame, v);
+        self.arena_ptr(frame, base, self.i64_t.const_zero())
+    }
+
+    /// Pointer to the quantized-activation scratch region: `arena` advanced by
+    /// `act_scratch_off` *bytes* (the offset is already a byte offset from the
+    /// f32 arena base, so it is added directly, not scaled by 4).
+    fn act_scratch_ptr(&self, frame: &Frame<'c>) -> PointerValue<'c> {
+        let off = self.const_i64(self.plan.arena.act_scratch_off as u64);
+        self.byte_ptr(frame.arena, off)
     }
 
     /// A private `[N x float]` global holding tensor `tensor_index` dequantized
@@ -362,6 +412,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let tokens = func.get_nth_param(0).unwrap().into_pointer_value();
         let n = func.get_nth_param(1).unwrap().into_int_value();
         let pos_off = func.get_nth_param(2).unwrap().into_int_value();
+        let weights = func.get_nth_param(3).unwrap().into_pointer_value();
+        let kv = func.get_nth_param(4).unwrap().into_pointer_value();
         let arena = func.get_nth_param(5).unwrap().into_pointer_value();
 
         self.range_loop(n, |cg, r| {
@@ -378,6 +430,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
                 .unwrap();
             let frame = Frame {
                 arena,
+                weights,
+                kv,
                 row: r,
                 pos,
                 token,
@@ -394,6 +448,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
 
         let tok = func.get_nth_param(0).unwrap().into_int_value();
         let pos = func.get_nth_param(1).unwrap().into_int_value();
+        let weights = func.get_nth_param(2).unwrap().into_pointer_value();
+        let kv = func.get_nth_param(3).unwrap().into_pointer_value();
         let arena = func.get_nth_param(4).unwrap().into_pointer_value();
         let token = self
             .builder
@@ -401,6 +457,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
             .unwrap();
         let frame = Frame {
             arena,
+            weights,
+            kv,
             row: self.const_i64(0),
             pos,
             token,
@@ -439,12 +497,41 @@ impl<'c, 'a> Codegen<'c, 'a> {
             } => self.lower_rope(frame, *src, *out, *n_heads, *head_dim, *theta, *style),
             Step::SwiGlu { gate, up, out } => self.lower_swiglu(frame, *gate, *up, *out),
             Step::Add { a, b, out } => self.lower_add(frame, *a, *b, *out),
-            // Task 10 fills these; a no-op that never writes its out-slot still
-            // verifies (numeric correctness is Task 12's differential).
-            Step::Quantize { .. }
-            | Step::Gemv { .. }
-            | Step::Bias { .. }
-            | Step::Attention { .. } => {}
+            Step::Gemv {
+                symbol,
+                weight,
+                out,
+                rows,
+                k,
+            } => self.lower_gemv(frame, symbol, *weight, *out, *rows, *k),
+            Step::Bias {
+                bias_tensor,
+                out,
+                rows,
+            } => self.lower_bias(frame, *bias_tensor, *out, *rows),
+            Step::Attention {
+                q,
+                k,
+                v,
+                layer,
+                n_heads,
+                n_kv_heads,
+                head_dim,
+                out,
+            } => self.lower_attention(
+                frame,
+                *q,
+                *k,
+                *v,
+                *layer,
+                *n_heads,
+                *n_kv_heads,
+                *head_dim,
+                *out,
+            ),
+            // The activation-quantize is folded into the `Gemv` anchor (which
+            // carries the weight index → dtype/isa needed to pick the kernel).
+            Step::Quantize { .. } => {}
         }
     }
 
@@ -638,5 +725,263 @@ impl<'c, 'a> Codegen<'c, 'a> {
             let o = cg.builder.build_float_add(x, y, "sum").unwrap();
             cg.store_f32(cg.arena_ptr(frame, ob, i), o);
         });
+    }
+
+    /// `inferno_quantize_row_<q>_<isa>`: the activation-quantize kernel for a
+    /// quantized weight's *stored* dtype. Weight Q8_0 → activation `q8a`;
+    /// weight Q4_K → activation `q8k` (M2 kernel design). Only reached for
+    /// quantized weights (F32 skips quantize entirely).
+    fn quantize_symbol(dtype: &inferno_formats::DType, isa: inferno_kernels::KernelIsa) -> String {
+        let q = match dtype {
+            inferno_formats::DType::Q8_0 => "q8a",
+            inferno_formats::DType::Q4_K => "q8k",
+            other => unreachable!("non-quantized dtype {other:?} reached quantize_symbol"),
+        };
+        let i = match isa {
+            inferno_kernels::KernelIsa::Scalar => "scalar",
+            inferno_kernels::KernelIsa::Avx2 => "avx2",
+        };
+        format!("inferno_quantize_row_{q}_{i}")
+    }
+
+    /// Lower one MatMul's `Gemv` (folding in the preceding `Quantize`): compute
+    /// `out[0..rows]` for this token via the packed-weight kernel. The
+    /// activation source is the MatMul's input-0 value (node `out-1`). For a
+    /// quantized weight the source row is quantized into the shared act-scratch
+    /// region first; for an F32 (native or widened F16/BF16) weight the raw f32
+    /// source row is passed straight through. `w_ptr = weights + offset` and
+    /// row range `[0, rows)` (single-threaded), mirroring the decode kernel.
+    fn lower_gemv(
+        &self,
+        frame: &Frame<'c>,
+        symbol: &str,
+        weight: usize,
+        out: usize,
+        rows: usize,
+        k: usize,
+    ) {
+        let pw = &self.plan.weights.weights[weight];
+        // The activation feeding this GEMV is the MatMul node's first input;
+        // the node produces value `out`, so it is `graph.nodes[out-1]`.
+        let src = self.graph.nodes[out - 1].inputs[0];
+        let k_c = self.const_i64(k as u64);
+
+        let xq_ptr = if pw.dtype != inferno_formats::DType::F32 {
+            // Quantize the f32 source row into the act-scratch region.
+            let scratch = self.act_scratch_ptr(frame);
+            let src_ptr = self.arena_row_ptr(frame, src);
+            let qsym = Self::quantize_symbol(&pw.dtype, pw.isa);
+            let qfn = self
+                .module
+                .get_function(&qsym)
+                .expect("quantize kernel declared (Task 8)");
+            self.builder
+                .build_call(
+                    qfn,
+                    &[src_ptr.into(), scratch.into(), k_c.into()],
+                    "quantize",
+                )
+                .unwrap();
+            scratch
+        } else {
+            // F32 weight: the raw f32 activation row is the kernel input.
+            self.arena_row_ptr(frame, src)
+        };
+
+        let w_ptr = self.byte_ptr(frame.weights, self.const_i64(pw.offset as u64));
+        let out_ptr = self.arena_row_ptr(frame, out);
+        let gfn = self
+            .module
+            .get_function(symbol)
+            .expect("gemv kernel declared (Task 8)");
+        let zero = self.i64_t.const_zero();
+        let rows_c = self.const_i64(rows as u64);
+        self.builder
+            .build_call(
+                gfn,
+                &[
+                    out_ptr.into(),
+                    xq_ptr.into(),
+                    w_ptr.into(),
+                    k_c.into(),
+                    zero.into(),
+                    rows_c.into(),
+                ],
+                "gemv",
+            )
+            .unwrap();
+    }
+
+    /// `out[i] += bias[i]` for `i in 0..rows` (oracle `matmul`'s `+ bias[n]`).
+    /// The bias tensor is dequantized at compile time into a private global,
+    /// same as the norm/embed weights.
+    fn lower_bias(&self, frame: &Frame<'c>, bias_tensor: usize, out: usize, rows: usize) {
+        let bias = self.weight_global(bias_tensor);
+        let out_base = self.row_base(frame, out);
+        self.range_loop(self.const_i64(rows as u64), |cg, i| {
+            let o_ptr = cg.arena_ptr(frame, out_base, i);
+            let cur = cg.load_f32(o_ptr);
+            let bv = cg.load_f32(cg.elem_ptr(bias, i));
+            let sum = cg.builder.build_float_add(cur, bv, "bias").unwrap();
+            cg.store_f32(o_ptr, sum);
+        });
+    }
+
+    /// Causal GQA attention for the current token, mirroring
+    /// `inferno_graph::ops::attention`. First appends this token's k/v vectors
+    /// into the f32 KV cache at position `pos`, then reads: for each head `h`
+    /// (kv group `g = h / (n_heads/n_kv_heads)`) computes
+    /// `scores[t] = dot(q_head, kcache[t,g]) * (1/sqrt(head_dim))` for
+    /// `t in 0..=pos`, softmaxes with max-subtraction, and accumulates
+    /// `out_head = Σ_t (scores[t]/denom) * vcache[t,g]`.
+    #[allow(clippy::too_many_arguments)]
+    fn lower_attention(
+        &self,
+        frame: &Frame<'c>,
+        q: usize,
+        k: usize,
+        v: usize,
+        layer: usize,
+        n_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        out: usize,
+    ) {
+        let hd = head_dim as u64;
+        let kv_dim = self.plan.kv.kv_dim as u64; // == n_kv_heads * head_dim
+        let seq_len = self.plan.max_seq_len as u64;
+        let group = (n_heads / n_kv_heads) as u64;
+        let scale = self.const_f32(1.0 / (head_dim as f32).sqrt());
+        // Per-layer KV region base (f32 elements); K then V, each [seq_len × kv_dim].
+        let kv_base = layer as u64 * seq_len * kv_dim * 2;
+        let k_region = kv_base;
+        let v_region = kv_base + seq_len * kv_dim;
+        let kv_dim_c = self.const_i64(kv_dim);
+
+        // --- KV append: write this token's k/v vectors at position `pos`. ---
+        let pos_kv = self
+            .builder
+            .build_int_mul(frame.pos, kv_dim_c, "poskv")
+            .unwrap();
+        let k_row = self.row_base(frame, k);
+        let v_row = self.row_base(frame, v);
+        let k_dst = self.add(self.const_i64(k_region), pos_kv);
+        let v_dst = self.add(self.const_i64(v_region), pos_kv);
+        self.range_loop(kv_dim_c, |cg, c| {
+            let kval = cg.load_f32(cg.arena_ptr(frame, k_row, c));
+            cg.store_f32(cg.elem_ptr(frame.kv, cg.add(k_dst, c)), kval);
+            let vval = cg.load_f32(cg.arena_ptr(frame, v_row, c));
+            cg.store_f32(cg.elem_ptr(frame.kv, cg.add(v_dst, c)), vval);
+        });
+
+        // --- Attention read for the single query row (this token). ---
+        let visible = self
+            .builder
+            .build_int_add(frame.pos, self.const_i64(1), "visible")
+            .unwrap();
+        let scores = self.entry_alloca(self.f32_t.array_type(seq_len as u32), "scores");
+        let q_row = self.row_base(frame, q);
+        let out_row = self.row_base(frame, out);
+
+        for h in 0..n_heads as u64 {
+            let g = h / group;
+            let q_head = self.add(q_row, self.const_i64(h * hd));
+            let out_head = self.add(out_row, self.const_i64(h * hd));
+            // kcache[t*kv_dim + g*head_dim] / vcache[…] base offsets at t=0.
+            let kg = self.const_i64(k_region + g * hd);
+            let vg = self.const_i64(v_region + g * hd);
+
+            // scores[t] = dot(q_head, kcache[t,g]) * scale.
+            self.range_loop(visible, |cg, t| {
+                let t_kv = cg.builder.build_int_mul(t, kv_dim_c, "tkv").unwrap();
+                let k_base = cg.add(kg, t_kv);
+                let acc = cg.entry_alloca(cg.f32_t, "dot");
+                cg.builder.build_store(acc, cg.f32_t.const_zero()).unwrap();
+                cg.range_loop(cg.const_i64(hd), |cg2, d| {
+                    let qv = cg2.load_f32(cg2.arena_ptr(frame, q_head, d));
+                    let kv = cg2.load_f32(cg2.elem_ptr(frame.kv, cg2.add(k_base, d)));
+                    let prod = cg2.builder.build_float_mul(qv, kv, "qk").unwrap();
+                    let cur = cg2
+                        .builder
+                        .build_load(cg2.f32_t, acc, "acc")
+                        .unwrap()
+                        .into_float_value();
+                    let s = cg2.builder.build_float_add(cur, prod, "dotsum").unwrap();
+                    cg2.builder.build_store(acc, s).unwrap();
+                });
+                let dot = cg
+                    .builder
+                    .build_load(cg.f32_t, acc, "dot.v")
+                    .unwrap()
+                    .into_float_value();
+                let sc = cg.builder.build_float_mul(dot, scale, "sc").unwrap();
+                cg.store_f32(cg.elem_ptr(scores, t), sc);
+            });
+
+            // max = fold(NEG_INFINITY, f32::max) over scores[..visible].
+            let maxslot = self.entry_alloca(self.f32_t, "maxv");
+            self.builder
+                .build_store(maxslot, self.const_f32(f32::NEG_INFINITY))
+                .unwrap();
+            self.range_loop(visible, |cg, t| {
+                let sc = cg.load_f32(cg.elem_ptr(scores, t));
+                let cur = cg
+                    .builder
+                    .build_load(cg.f32_t, maxslot, "m")
+                    .unwrap()
+                    .into_float_value();
+                let m = cg.call_binary(cg.maxnum_fn, cur, sc);
+                cg.builder.build_store(maxslot, m).unwrap();
+            });
+            let maxv = self
+                .builder
+                .build_load(self.f32_t, maxslot, "max.v")
+                .unwrap()
+                .into_float_value();
+
+            // scores[t] = exp(scores[t] - max); denom = Σ scores[t].
+            let denomslot = self.entry_alloca(self.f32_t, "denom");
+            self.builder
+                .build_store(denomslot, self.f32_t.const_zero())
+                .unwrap();
+            self.range_loop(visible, |cg, t| {
+                let sptr = cg.elem_ptr(scores, t);
+                let sc = cg.load_f32(sptr);
+                let sub = cg.builder.build_float_sub(sc, maxv, "sub").unwrap();
+                let e = cg.call_unary(cg.exp_fn, sub);
+                cg.store_f32(sptr, e);
+                let cur = cg
+                    .builder
+                    .build_load(cg.f32_t, denomslot, "d")
+                    .unwrap()
+                    .into_float_value();
+                let nd = cg.builder.build_float_add(cur, e, "denomsum").unwrap();
+                cg.builder.build_store(denomslot, nd).unwrap();
+            });
+            let denom = self
+                .builder
+                .build_load(self.f32_t, denomslot, "denom.v")
+                .unwrap()
+                .into_float_value();
+
+            // out_head[d] = 0, then += (scores[t]/denom) * vcache[t,g,d].
+            self.range_loop(self.const_i64(hd), |cg, d| {
+                cg.store_f32(cg.arena_ptr(frame, out_head, d), cg.f32_t.const_zero());
+            });
+            self.range_loop(visible, |cg, t| {
+                let sc = cg.load_f32(cg.elem_ptr(scores, t));
+                let w = cg.builder.build_float_div(sc, denom, "w").unwrap();
+                let t_kv = cg.builder.build_int_mul(t, kv_dim_c, "tkv").unwrap();
+                let v_base = cg.add(vg, t_kv);
+                cg.range_loop(cg.const_i64(hd), |cg2, d| {
+                    let vv = cg2.load_f32(cg2.elem_ptr(frame.kv, cg2.add(v_base, d)));
+                    let contrib = cg2.builder.build_float_mul(w, vv, "wv").unwrap();
+                    let optr = cg2.arena_ptr(frame, out_head, d);
+                    let cur = cg2.load_f32(optr);
+                    let no = cg2.builder.build_float_add(cur, contrib, "outsum").unwrap();
+                    cg2.store_f32(optr, no);
+                });
+            });
+        }
     }
 }
