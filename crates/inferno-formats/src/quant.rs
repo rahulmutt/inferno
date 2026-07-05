@@ -82,7 +82,8 @@ fn bad(detail: String) -> FormatError {
 }
 
 /// ggml Q4_K scale/min extraction: 8 six-bit (scale, min) pairs in 12 bytes.
-fn get_scale_min_k4(j: usize, s: &[u8]) -> (u8, u8) {
+/// Public because `inferno-kernels` decodes scales at pack time (M2).
+pub fn get_scale_min_k4(j: usize, s: &[u8]) -> (u8, u8) {
     if j < 4 {
         (s[j] & 63, s[j + 4] & 63)
     } else {

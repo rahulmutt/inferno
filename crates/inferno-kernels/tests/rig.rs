@@ -379,3 +379,162 @@ fn observed_error_q8_0() {
         gemv_rel_tol(&DType::Q8_0)
     );
 }
+
+// ---------- Q4_K ----------
+
+use inferno_kernels::q4_k;
+
+fn gemv_q4_k(
+    isa: KernelIsa,
+    w: &inferno_kernels::AlignedBuf,
+    xq: &[u8],
+    _rows: usize,
+    k: usize,
+    range: (usize, usize),
+    y: &mut [f32],
+) {
+    // SAFETY: w is a pack_q4_k_rs8 image for (rows, k); xq is a q8k buffer
+    // for k; y has rows elements; range within rows.
+    unsafe {
+        match isa {
+            KernelIsa::Scalar => inferno_kernels::inferno_gemv_q4_k_rs8_scalar(
+                y.as_mut_ptr(),
+                xq.as_ptr(),
+                w.as_ptr(),
+                k,
+                range.0,
+                range.1,
+            ),
+            KernelIsa::Avx2 => inferno_kernels::inferno_gemv_q4_k_rs8_avx2(
+                y.as_mut_ptr(),
+                xq.as_ptr(),
+                w.as_ptr(),
+                k,
+                range.0,
+                range.1,
+            ),
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn q4_k_gemv_matches_oracle(seed in any::<u64>(), rows in 1usize..20, nsb in 1usize..3) {
+        let k = nsb * 256;
+        let vals = pseudo(seed, rows * k);
+        let x = pseudo(seed ^ 0x51ed, k);
+        let wbytes = quant::pack(&DType::Q4_K, &vals).unwrap();
+        let w = q4_k::pack_q4_k_rs8(&wbytes, rows, k).unwrap();
+        let xq = act::quantize_row_q8k(KernelIsa::Scalar, &x).unwrap();
+        let want = oracle(&DType::Q4_K, &wbytes, rows, k, &x);
+        for isa in KernelIsa::all_available() {
+            let mut y = vec![f32::NAN; rows];
+            gemv_q4_k(isa, &w, &xq, rows, k, (0, rows), &mut y);
+            assert_close(&DType::Q4_K, &y, &want);
+        }
+    }
+
+    #[test]
+    fn q4_k_isa_variants_bitwise_equal(seed in any::<u64>(), rows in 1usize..20) {
+        if !KernelIsa::Avx2.available() { return Ok(()); }
+        let k = 512usize;
+        let vals = pseudo(seed, rows * k);
+        let x = pseudo(seed ^ 5, k);
+        let w = q4_k::pack_q4_k_rs8(&quant::pack(&DType::Q4_K, &vals).unwrap(), rows, k).unwrap();
+        let xq = act::quantize_row_q8k(KernelIsa::Scalar, &x).unwrap();
+        let (mut a, mut b) = (vec![f32::NAN; rows], vec![f32::NAN; rows]);
+        gemv_q4_k(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut a);
+        gemv_q4_k(KernelIsa::Avx2, &w, &xq, rows, k, (0, rows), &mut b);
+        for (i, (a, b)) in a.iter().zip(&b).enumerate() {
+            prop_assert_eq!(a.to_bits(), b.to_bits(), "row {}", i);
+        }
+    }
+
+    #[test]
+    fn q4_k_range_partition_bitwise(seed in any::<u64>(), rows in 2usize..24) {
+        let k = 256usize;
+        let split = (seed % rows as u64) as usize;
+        let vals = pseudo(seed, rows * k);
+        let x = pseudo(seed ^ 6, k);
+        let w = q4_k::pack_q4_k_rs8(&quant::pack(&DType::Q4_K, &vals).unwrap(), rows, k).unwrap();
+        let xq = act::quantize_row_q8k(KernelIsa::Scalar, &x).unwrap();
+        let mut full = vec![f32::NAN; rows];
+        gemv_q4_k(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut full);
+        for isa in KernelIsa::all_available() {
+            let mut y = vec![f32::NAN; rows];
+            gemv_q4_k(isa, &w, &xq, rows, k, (0, split), &mut y);
+            gemv_q4_k(isa, &w, &xq, rows, k, (split, rows), &mut y);
+            for (i, (a, b)) in full.iter().zip(&y).enumerate() {
+                prop_assert_eq!(a.to_bits(), b.to_bits(), "row {}", i);
+            }
+        }
+    }
+}
+
+/// Pack inverse via normalized super-blocks (spec §Testing).
+#[test]
+fn q4_k_pack_inverse() {
+    use inferno_formats::quant::get_scale_min_k4;
+    let (rows, k) = (9usize, 256usize);
+    let vals = pseudo(11, rows * k);
+    let bytes = quant::pack(&DType::Q4_K, &vals).unwrap();
+    let w = q4_k::pack_q4_k_rs8(&bytes, rows, k).unwrap();
+    let p = w.as_slice();
+    for r in 0..rows {
+        let s = r * 144; // one super-block per row at k=256
+        let file_d = quant::f16_to_f32(u16::from_le_bytes([bytes[s], bytes[s + 1]]));
+        let file_dmin = quant::f16_to_f32(u16::from_le_bytes([bytes[s + 2], bytes[s + 3]]));
+        let g = (r / 8) * 1216;
+        let lane = r % 8;
+        let pd = f32::from_le_bytes(p[g + lane * 4..g + lane * 4 + 4].try_into().unwrap());
+        let pdmin = f32::from_le_bytes(
+            p[g + 32 + lane * 4..g + 32 + lane * 4 + 4]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(pd.to_bits(), file_d.to_bits(), "row {r} d");
+        assert_eq!(pdmin.to_bits(), file_dmin.to_bits(), "row {r} dmin");
+        for j in 0..8 {
+            let (sc, m) = get_scale_min_k4(j, &bytes[s + 4..s + 16]);
+            assert_eq!(p[g + 64 + lane * 8 + j], sc, "row {r} sc[{j}]");
+            assert_eq!(p[g + 128 + lane * 8 + j], m, "row {r} m[{j}]");
+        }
+        assert_eq!(
+            &p[g + 192 + lane * 128..g + 192 + (lane + 1) * 128],
+            &bytes[s + 16..s + 144]
+        );
+    }
+}
+
+#[test]
+fn q4_k_pack_validates() {
+    assert!(q4_k::pack_q4_k_rs8(&[0u8; 144], 1, 255).is_err());
+    assert!(q4_k::pack_q4_k_rs8(&[0u8; 143], 1, 256).is_err());
+    assert!(q4_k::pack_q4_k_rs8(&[], 0, 256).is_err());
+}
+
+/// Ignored diagnostic (see observed_error_q8_0).
+#[test]
+#[ignore = "diagnostic; prints observed gemv error distribution"]
+fn observed_error_q4_k() {
+    let mut max_rel = 0f32;
+    for seed in 0..500u64 {
+        let (rows, k) = (16usize, 512usize);
+        let vals = pseudo(seed, rows * k);
+        let x = pseudo(seed ^ 77, k);
+        let wbytes = quant::pack(&DType::Q4_K, &vals).unwrap();
+        let w = q4_k::pack_q4_k_rs8(&wbytes, rows, k).unwrap();
+        let xq = act::quantize_row_q8k(KernelIsa::Scalar, &x).unwrap();
+        let want = oracle(&DType::Q4_K, &wbytes, rows, k, &x);
+        let mut y = vec![f32::NAN; rows];
+        gemv_q4_k(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut y);
+        let scale = want.iter().fold(1f32, |m, v| m.max(v.abs()));
+        for (g, w_) in y.iter().zip(&want) {
+            max_rel = max_rel.max((g - w_).abs() / scale);
+        }
+    }
+    println!(
+        "q4_k observed max rel error: {max_rel:e} (tol {:e})",
+        gemv_rel_tol(&DType::Q4_K)
+    );
+}
