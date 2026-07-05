@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/inferno-formats", "crates/inferno-graph", "crates/inferno-target", "crates/inferno-runtime", "crates/inferno-kernels", "crates/inferno-plan", "crates/inferno-codegen", "cli"]
+members = ["crates/inferno-formats", "crates/inferno-graph", "crates/inferno-target", "crates/inferno-runtime", "crates/inferno-kernels", "crates/inferno-plan", "crates/inferno-codegen", "crates/inferno-core", "cli"]
 exclude = ["fuzz"]
 
 [workspace.package]
@@ -17,8 +17,10 @@ inferno-runtime = { path = "crates/inferno-runtime" }
 inferno-kernels = { path = "crates/inferno-kernels" }
 inferno-plan = { path = "crates/inferno-plan" }
 inferno-codegen = { path = "crates/inferno-codegen" }
+inferno-core = { path = "crates/inferno-core" }
 inkwell = { version = "0.6", features = ["llvm18-1"] }
 thiserror = "2"
+sha2 = "0.10"
 criterion = "0.7"
 libloading = "0.9"
 toml = "0.9"
