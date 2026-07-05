@@ -301,3 +301,6 @@ phases, each independently testable:
 ## Amendments
 
 _(Record data points and post-implementation corrections here, as M2 did.)_
+
+- **KV stored as f32 in M3 (not F16)** to keep the compiled-vs-interpreter
+  differential free of an F16 rounding term; F16 KV is deferred to M4.
