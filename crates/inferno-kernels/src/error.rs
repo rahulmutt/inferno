@@ -20,6 +20,8 @@ pub enum KernelError {
     },
     #[error("size overflow computing a buffer length")]
     Overflow,
+    #[error("kernel ISA `{isa}` is not available on this CPU")]
+    IsaUnavailable { isa: &'static str },
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

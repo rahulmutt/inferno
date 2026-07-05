@@ -262,7 +262,7 @@ must be understood before M3 starts.
   pass; batch integer reductions — one transpose-reduction per 8 lanes /
   vector-domain scale accumulation) landed as a Task 8 follow-up, preserving
   the bitwise scalar/AVX2 contract. Result: Q8_0 1.09–1.72× (above parity),
-  Q4_K 0.72–0.80× (remaining gap is shuffle-port-bound integer work; closing
+  Q4_K 0.73–0.80× (remaining gap is shuffle-port-bound integer work; closing
   it needs VNNI/AVX-512, out of M2 scope).
 
 ### First bench data points (dev Ryzen 9 3900, 2026-07-05)

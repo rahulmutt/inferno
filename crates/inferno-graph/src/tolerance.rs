@@ -48,7 +48,7 @@ pub const LOGIT_TIE_EPSILON: f32 = 0.05;
 /// tail dominated by near-cancelling, low-block-count shapes (`rows=1`,
 /// few blocks) where `assert_close`'s `max(1, max|want|)` normalization
 /// turns a small absolute quantization error into a large relative one;
-/// a 2026-07-05 investigation (task-6-report.md, "BLOCKED") measured this
+/// a 2026-07-05 investigation on the dev Ryzen 9 3900 measured this
 /// end-to-end noise at up to 3.37e-2 (Q8_0, 2k seeds) climbing to 6.25e-2
 /// (Q8_0, 500k seeds) and up to ~0.142 (Q4_K tail, 3M seeds) — too large
 /// for any single constant to both stay under a practical flake budget and

@@ -208,6 +208,12 @@ pub unsafe extern "C" fn inferno_gemv_q4_k_rs8_avx2(
                 // Per lane: acc = (dw*dx).mul_add(sumd, acc) then
                 // (dmin*dx).mul_add(-summ, acc) — bit-identical to scalar.
                 acc = _mm256_fmadd_ps(_mm256_mul_ps(dw, dxv), sumd, acc);
+                // Bit-identical to the scalar `-(summ as f32)`: `summ` comes
+                // from `cvtepi32_ps` of an integer sum, and 0-summ negates a
+                // finite value exactly. Even were `summ` +0.0, `0.0 - 0.0` is
+                // +0.0 (not −0.0), and `acc` is never −0.0 — it starts at +0.0
+                // and fma products into a round-to-nearest +0.0 accumulator
+                // cannot yield −0.0 — so any ±0.0 sign difference is absorbed.
                 let neg_summ = _mm256_sub_ps(_mm256_setzero_ps(), summ);
                 acc = _mm256_fmadd_ps(_mm256_mul_ps(dmin, dxv), neg_summ, acc);
             }

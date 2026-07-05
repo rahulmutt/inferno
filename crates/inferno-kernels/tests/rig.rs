@@ -263,8 +263,8 @@ proptest! {
         // kernel itself, so gemv_rel_tol only has to bound
         // accumulation-order/fma rounding differences, not the much larger
         // activation-quantization noise tail (see tolerance.rs doc comment
-        // and task-6-report.md's "BLOCKED" investigation for why comparing
-        // against the raw f32 activations was abandoned).
+        // for why comparing against the raw f32 activations was abandoned; a
+        // 2026-07-05 investigation on the dev Ryzen 9 3900 measured that tail).
         let x_hat = decode_q8a(&xq);
         let want = oracle(&DType::Q8_0, &wbytes, rows, k, &x_hat);
         for isa in KernelIsa::all_available() {
@@ -503,8 +503,8 @@ proptest! {
         // kernel itself, so gemv_rel_tol only has to bound
         // accumulation-order/fma rounding differences, not the much larger
         // activation-quantization noise tail (see tolerance.rs doc comment
-        // and task-6-report.md's "BLOCKED" investigation for why comparing
-        // against the raw f32 activations was abandoned).
+        // for why comparing against the raw f32 activations was abandoned; a
+        // 2026-07-05 investigation on the dev Ryzen 9 3900 measured that tail).
         let x_hat = decode_q8k(&xq);
         let want = oracle(&DType::Q4_K, &wbytes, rows, k, &x_hat);
         for isa in KernelIsa::all_available() {

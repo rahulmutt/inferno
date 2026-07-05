@@ -191,24 +191,43 @@ pub unsafe extern "C" fn inferno_quantize_row_q8k_avx2(x: *const f32, y: *mut u8
     }
 }
 
-fn validate(k: usize, block: usize) -> Result<()> {
+fn validate(isa: KernelIsa, k: usize, block: usize) -> Result<()> {
+    // Guard AVX2 dispatch locally: a hand-built `KernelIsa::Avx2` reaching a
+    // `#[target_feature(enable=…)]` symbol on a CPU without the feature is UB
+    // from safe code. `available()` is the invariant, checked here rather than
+    // delegated to the registry's selection path.
+    if !isa.available() {
+        return Err(KernelError::IsaUnavailable { isa: isa_name(isa) });
+    }
     if k == 0 || !k.is_multiple_of(block) {
         return Err(KernelError::BadK { k, block });
+    }
+    // Reject dimensions the unchecked length helpers could overflow on before
+    // any `q8*_len(k)` product is computed (see `crate::MAX_K`).
+    if k > crate::MAX_K {
+        return Err(KernelError::Overflow);
     }
     Ok(())
 }
 
+fn isa_name(isa: KernelIsa) -> &'static str {
+    match isa {
+        KernelIsa::Scalar => "scalar",
+        KernelIsa::Avx2 => "avx2",
+    }
+}
+
 /// Safe wrapper (tests, benches, M3 planner). The raw symbols stay unchecked.
 pub fn quantize_row_q8a(isa: KernelIsa, x: &[f32]) -> Result<Vec<u8>> {
-    validate(x.len(), Q8A_BLOCK)?;
+    validate(isa, x.len(), Q8A_BLOCK)?;
     let mut out = vec![0u8; q8a_len(x.len())];
     match isa {
-        // SAFETY: x/out lengths validated against the symbol's contract.
+        // SAFETY: x/out lengths validated against the symbol's contract; the
+        // AVX2 feature invariant was checked locally by `validate` above.
         KernelIsa::Scalar => unsafe {
             inferno_quantize_row_q8a_scalar(x.as_ptr(), out.as_mut_ptr(), x.len())
         },
-        // SAFETY: as above; KernelIsa::Avx2 callers hold the feature invariant
-        // (the registry refuses to hand out AVX2 kernels without CPU support).
+        // SAFETY: as above; `validate` returned Err unless AVX2+FMA is present.
         KernelIsa::Avx2 => unsafe {
             inferno_quantize_row_q8a_avx2(x.as_ptr(), out.as_mut_ptr(), x.len())
         },
@@ -217,7 +236,7 @@ pub fn quantize_row_q8a(isa: KernelIsa, x: &[f32]) -> Result<Vec<u8>> {
 }
 
 pub fn quantize_row_q8k(isa: KernelIsa, x: &[f32]) -> Result<Vec<u8>> {
-    validate(x.len(), Q8K_BLOCK)?;
+    validate(isa, x.len(), Q8K_BLOCK)?;
     let mut out = vec![0u8; q8k_len(x.len())];
     match isa {
         // SAFETY: as quantize_row_q8a.
@@ -339,5 +358,25 @@ mod tests {
         assert!(quantize_row_q8a(KernelIsa::Scalar, &[0f32; 31]).is_err());
         assert!(quantize_row_q8k(KernelIsa::Scalar, &[0f32; 255]).is_err());
         assert!(quantize_row_q8a(KernelIsa::Scalar, &[]).is_err());
+    }
+
+    /// The wrappers guard AVX2 dispatch on `isa.available()` *before* any
+    /// pointer work, so a `KernelIsa::Avx2` call on a non-AVX2 CPU returns a
+    /// typed error instead of executing an illegal instruction (UB). Scalar is
+    /// always available. On an AVX2 machine the guard passes and the Avx2 path
+    /// runs; on one without it, it short-circuits with `IsaUnavailable`.
+    #[test]
+    fn isa_availability_is_checked() {
+        assert!(quantize_row_q8a(KernelIsa::Scalar, &[0f32; 32]).is_ok());
+        assert!(quantize_row_q8k(KernelIsa::Scalar, &[0f32; 256]).is_ok());
+        if KernelIsa::Avx2.available() {
+            assert!(quantize_row_q8a(KernelIsa::Avx2, &[0f32; 32]).is_ok());
+            assert!(quantize_row_q8k(KernelIsa::Avx2, &[0f32; 256]).is_ok());
+        } else {
+            assert!(matches!(
+                quantize_row_q8a(KernelIsa::Avx2, &[0f32; 32]),
+                Err(KernelError::IsaUnavailable { .. })
+            ));
+        }
     }
 }

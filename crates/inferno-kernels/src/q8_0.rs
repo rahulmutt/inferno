@@ -99,8 +99,7 @@ pub unsafe extern "C" fn inferno_gemv_q8_0_rs8_scalar(
 /// so — like [`hsum_i32`] — the reduction structure is unconstrained by the
 /// numeric contract; it lets a strip emit all 8 rows' block dots at once.
 ///
-/// # Safety
-/// Caller must have AVX2 enabled.
+/// Callers must have AVX2 enabled (`target_feature`).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(crate) fn hsum8_i32(v: [std::arch::x86_64::__m256i; 8]) -> std::arch::x86_64::__m256i {

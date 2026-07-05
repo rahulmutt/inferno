@@ -2,8 +2,11 @@
 //! uses. The raw `extern "C"` symbols stay unchecked (M3 codegen guarantees
 //! their contracts by construction); tests, benches, and the M3 planner go
 //! through `KernelSet`, which validates lengths, block multiples, and row
-//! ranges. This is also the single place runtime CPU-feature detection
-//! happens: `kernels_for` refuses to hand out kernels the CPU can't run.
+//! ranges. Runtime CPU-feature detection for kernel *selection* happens here:
+//! `kernels_for` refuses to hand out kernels the CPU can't run. The safe
+//! *execution* wrappers (e.g. `act::quantize_row_q8a`) additionally re-check
+//! `available()` at dispatch, so a hand-constructed `KernelIsa::Avx2` call can
+//! never reach an AVX2 symbol on an unsupported CPU.
 
 use inferno_formats::DType;
 use inferno_target::Isa;
@@ -49,6 +52,10 @@ impl KernelSet {
                 block: self.wblock,
             });
         }
+        // Reject k above the bound where `act_len` products could wrap.
+        if x.len() > crate::MAX_K {
+            return Err(KernelError::Overflow);
+        }
         match self.quantize {
             Some(f) => {
                 let mut out = vec![0u8; (self.act_len)(x.len())];
@@ -77,6 +84,12 @@ impl KernelSet {
                 k,
                 block: self.wblock,
             });
+        }
+        // Reject dimensions above the bound where `act_len`/`packed_len`
+        // products could wrap and let a tiny buffer pass the equality checks
+        // below (see `crate::MAX_K`).
+        if k > crate::MAX_K || rows > crate::MAX_K {
+            return Err(KernelError::Overflow);
         }
         if y.len() != rows {
             return Err(KernelError::SizeMismatch {

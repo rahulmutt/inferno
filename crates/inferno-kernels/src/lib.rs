@@ -10,6 +10,12 @@
 //! `inferno_formats::DType`: they are a kernel implementation detail, not a
 //! weight-file dtype (spec boundary rule).
 
+// The SIMD kernels are written directly against x86-64 AVX2/FMA intrinsics;
+// portable NEON support is a v2 (NEON) milestone. Fail loudly on other targets
+// rather than silently compiling a scalar-only, untested build.
+#[cfg(not(target_arch = "x86_64"))]
+compile_error!("inferno-kernels is x86-64-only until the v2 NEON milestone");
+
 pub mod act;
 mod buf;
 mod error;
@@ -28,9 +34,21 @@ pub use registry::{KernelSet, kernels_for, reference_kernels};
 /// Rows per packed strip: every rs8 layout interleaves 8 rows.
 pub const STRIP: usize = 8;
 
+/// Upper bound on `k` (and `rows`) accepted by the safe validation wrappers.
+/// The public length helpers (`packed_len_*`, `q8a_len`, `q8k_len`) multiply
+/// dimensions unchecked; for absurd inputs those products wrap, which would let
+/// a tiny buffer pass a `KernelSet` equality check and cause an OOB read in the
+/// kernel. Rejecting any dimension above this bound keeps every length
+/// computation (worst case `rows_padded * k * 4` for F32) well under `2^60`, so
+/// no product can overflow `usize`. `2^28` (~268M) is far above any real tensor
+/// dimension yet leaves ~36 bits of headroom.
+pub const MAX_K: usize = 1 << 28;
+
 /// Which implementation of a kernel to run. Scalar is always available; SIMD
-/// variants only where the CPU supports them (the registry enforces this —
-/// the single place runtime feature detection happens).
+/// variants only where the CPU supports them. Runtime CPU-feature detection for
+/// *kernel selection* lives in the registry (`kernels_for`); the safe execution
+/// wrappers additionally guard each dispatch with `available()` so no safe call
+/// can reach an AVX2 symbol on an unsupported CPU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelIsa {
     Scalar,

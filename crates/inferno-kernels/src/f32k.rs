@@ -51,7 +51,8 @@ unsafe fn gemv_rows(y: *mut f32, x: *const f32, w: *const f32, k: usize, r0: usi
         let mut acc = 0f32;
         for c in 0..k {
             let wv = unsafe { base.add(c * STRIP).read() };
-            acc = wv.mul_add(unsafe { x.add(c).read() }, acc);
+            // x may have any alignment (a `&[u8]` subslice cast to f32).
+            acc = wv.mul_add(unsafe { x.add(c).read_unaligned() }, acc);
         }
         unsafe { y.add(r).write(acc) };
     }
@@ -62,7 +63,7 @@ unsafe fn gemv_rows(y: *mut f32, x: *const f32, w: *const f32, k: usize, r0: usi
 /// # Safety
 /// - `y` valid for f32 writes at indices `row_start..row_end`.
 /// - `x` points at the activation buffer — for F32, `k` raw little-endian
-///   f32 values (4-byte aligned).
+///   f32 values, any alignment (the loads are unaligned).
 /// - `w` is a `pack_f32_rs8` image built with this exact `k` and at least
 ///   `row_end` rows, 32-byte aligned (guaranteed by `AlignedBuf`).
 /// - `row_start <= row_end`; all values finite.
@@ -105,7 +106,8 @@ pub unsafe extern "C" fn inferno_gemv_f32_rs8_avx2(
         let mut acc = _mm256_setzero_ps();
         for c in 0..k {
             let wv = unsafe { _mm256_load_ps(base.add(c * STRIP)) };
-            let xv = _mm256_set1_ps(unsafe { xf.add(c).read() });
+            // x may have any alignment; broadcast from an unaligned scalar read.
+            let xv = _mm256_set1_ps(unsafe { xf.add(c).read_unaligned() });
             acc = _mm256_fmadd_ps(wv, xv, acc);
         }
         unsafe { _mm256_storeu_ps(y.add(r), acc) };
