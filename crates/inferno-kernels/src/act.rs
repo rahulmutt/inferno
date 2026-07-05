@@ -84,6 +84,11 @@ pub unsafe extern "C" fn inferno_quantize_row_q8k_scalar(x: *const f32, y: *mut 
 /// 32 i8 to `dst` and returning the four pre-narrowing i32 vectors' sum (the
 /// caller uses it for q8k bsums). Must match `quantize_block` bitwise:
 /// same mul, ties-to-even rounding, clamp to [-127, 127].
+///
+/// # Safety
+/// - `x` must be valid for 32 f32 reads.
+/// - `dst` must be valid for 32 byte writes.
+/// - Caller must have AVX2 and FMA enabled.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 unsafe fn quant32_avx2(x: *const f32, inv: f32, dst: *mut u8) -> i32 {
@@ -122,6 +127,10 @@ pub(crate) fn hsum_i32(v: std::arch::x86_64::__m256i) -> i32 {
 }
 
 /// amax of one 32-f32 chunk. max is exact and order-free on finite input.
+///
+/// # Safety
+/// - `x` must be valid for 32 f32 reads.
+/// - Caller must have AVX2 enabled.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn amax32_avx2(x: *const f32) -> f32 {
