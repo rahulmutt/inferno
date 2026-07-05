@@ -1,0 +1,19 @@
+[package]
+name = "inferno-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+inferno-formats.workspace = true
+inferno-graph.workspace = true
+thiserror.workspace = true
+tokenizers.workspace = true
+fancy-regex.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

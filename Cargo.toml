@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/inferno-formats", "crates/inferno-graph", "cli"]
+members = ["crates/inferno-formats", "crates/inferno-graph", "crates/inferno-runtime", "cli"]
 exclude = ["fuzz"]
 
 [workspace.package]
@@ -12,6 +12,7 @@ repository = "https://github.com/rahulmutt/inferno"
 [workspace.dependencies]
 inferno-formats = { path = "crates/inferno-formats" }
 inferno-graph = { path = "crates/inferno-graph" }
+inferno-runtime = { path = "crates/inferno-runtime" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -21,6 +22,8 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 proptest = "1"
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+fancy-regex = "0.16"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
