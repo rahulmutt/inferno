@@ -229,6 +229,15 @@ mod tests {
     }
 
     #[test]
+    fn rmsnorm_large_eps_is_inside_sqrt() {
+        // x=[1], w=[1], eps=3: ms = 1*1/1 = 1; inv = 1/sqrt(1 + 3) = 0.5
+        // → out = 1 * 0.5 * 1 = 0.5 exactly. Distinguishes eps-inside-sqrt
+        // from 1/sqrt(ms)+eps (=1+3=4) or 1/(sqrt(ms)+eps) (=1/(1+3)=0.25).
+        let out = rmsnorm(&t(&[1, 1], &[1.0]), &[1.0], 3.0, None);
+        assert_eq!(out.data, vec![0.5]);
+    }
+
+    #[test]
     fn rmsnorm_per_head_normalizes_each_head() {
         // 2 heads of dim 2; second head huge — must not affect first head's norm.
         let x = t(&[1, 4], &[3.0, 4.0, 300.0, 400.0]);
@@ -255,6 +264,22 @@ mod tests {
             let out = rope(&x, 1, 2, 10000.0, style, 1);
             assert!((out.data[0] - 0.540_302_3).abs() < 1e-6, "{style:?}");
             assert!((out.data[1] - 0.841_470_96).abs() < 1e-6, "{style:?}");
+        }
+    }
+
+    #[test]
+    fn rope_hand_computed_position_one_nonzero_cross_term() {
+        // head_dim 2, one pair, freq = theta^0 = 1 → angle = pos = 1 rad.
+        // x1 nonzero here, so both cross-terms (the -sin and +sin ones) are
+        // exercised: out0 = x0 cos - x1 sin, out1 = x0 sin + x1 cos.
+        // x=[1,2] at pos 1: cos1=0.5403023, sin1=0.8414710
+        //   out0 = 1*0.5403023 - 2*0.8414710 = -1.1426397
+        //   out1 = 1*0.8414710 + 2*0.5403023 =  1.9220756
+        let x = t(&[1, 2], &[1.0, 2.0]);
+        for style in [RopeStyle::Interleaved, RopeStyle::HalfSplit] {
+            let out = rope(&x, 1, 2, 10000.0, style, 1);
+            assert!((out.data[0] - (-1.142_639_7)).abs() < 1e-5, "{style:?}");
+            assert!((out.data[1] - 1.922_075_6).abs() < 1e-5, "{style:?}");
         }
     }
 
@@ -303,5 +328,18 @@ mod tests {
         let q = t(&[1, 2], &[1.0, 3.0]);
         let out = attention(&q, &[1.0], &[7.0], 1, 2, 1, 1, 0);
         assert_eq!(out.data, vec![7.0, 7.0]); // single key → output is v
+    }
+
+    #[test]
+    fn attention_gqa_group_mapping_is_contiguous_not_interleaved() {
+        // 4 query heads, 2 kv heads (group=2), head_dim 1, single cached
+        // position → softmax weight is trivially 1, so each head's output
+        // is exactly its mapped kv head's v. Correct mapping g = h / group:
+        // heads 0,1 → kv0 (v=100), heads 2,3 → kv1 (v=200) → [100,100,200,200].
+        // The interleaved alternative g = h % n_kv_heads would instead give
+        // [100,200,100,200], which fails this assertion.
+        let q = t(&[1, 4], &[1.0, 2.0, 3.0, 4.0]);
+        let out = attention(&q, &[1.0, 2.0], &[100.0, 200.0], 1, 4, 2, 1, 0);
+        assert_eq!(out.data, vec![100.0, 100.0, 200.0, 200.0]);
     }
 }
