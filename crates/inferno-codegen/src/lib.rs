@@ -2,6 +2,7 @@
 //! that links LLVM (18, matching devenv). See the M3 spec.
 
 pub mod error;
+pub mod loopir;
 pub use error::{CodegenError, Result};
 
 #[cfg(test)]
