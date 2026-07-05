@@ -415,6 +415,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let weights = func.get_nth_param(3).unwrap().into_pointer_value();
         let kv = func.get_nth_param(4).unwrap().into_pointer_value();
         let arena = func.get_nth_param(5).unwrap().into_pointer_value();
+        let logits_out = func.get_nth_param(6).unwrap().into_pointer_value();
 
         self.range_loop(n, |cg, r| {
             let pos = cg.builder.build_int_add(pos_off, r, "pos").unwrap();
@@ -439,7 +440,40 @@ impl<'c, 'a> Codegen<'c, 'a> {
             cg.lower_body(loopir, &frame);
         });
 
+        // Copy the LAST token's logits row (row n-1) of the graph output slot
+        // into the caller's `logits_out` buffer. The forward pass leaves logits
+        // in the arena slot; the entry-point contract is to surface the final
+        // token's row. `n >= 1` for any real prefill call.
+        let last = self
+            .builder
+            .build_int_sub(n, self.const_i64(1), "last")
+            .unwrap();
+        self.emit_logits_copy(arena, logits_out, last);
+
         self.builder.build_return(None).unwrap();
+    }
+
+    /// Copy `row` of the graph output slot (`[Seq, vocab]`) into `logits_out`
+    /// (`vocab` f32). Emitted after the forward pass so the caller sees logits
+    /// in the parameter buffer rather than an internal arena slot.
+    fn emit_logits_copy(
+        &self,
+        arena: PointerValue<'c>,
+        logits_out: PointerValue<'c>,
+        row: IntValue<'c>,
+    ) {
+        let out_v = self.graph.output;
+        let vocab = self.row_len(out_v);
+        let off = self.const_i64(self.plan.arena.slots[out_v - 1].offset as u64);
+        let rl = self.const_i64(vocab);
+        let row_off = self.builder.build_int_mul(row, rl, "logrow").unwrap();
+        let base = self.builder.build_int_add(off, row_off, "logbase").unwrap();
+        self.range_loop(self.const_i64(vocab), |cg, i| {
+            let src = cg.elem_ptr(arena, cg.add(base, i));
+            let v = cg.load_f32(src);
+            let dst = cg.elem_ptr(logits_out, i);
+            cg.store_f32(dst, v);
+        });
     }
 
     fn lower_decode(&self, func: FunctionValue<'c>, loopir: &LoopIr) {
@@ -451,6 +485,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let weights = func.get_nth_param(2).unwrap().into_pointer_value();
         let kv = func.get_nth_param(3).unwrap().into_pointer_value();
         let arena = func.get_nth_param(4).unwrap().into_pointer_value();
+        let logits_out = func.get_nth_param(5).unwrap().into_pointer_value();
         let token = self
             .builder
             .build_int_z_extend(tok, self.i64_t, "tok64")
@@ -464,6 +499,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
             token,
         };
         self.lower_body(loopir, &frame);
+        // decode_step operates on arena row 0; copy that single row to logits.
+        self.emit_logits_copy(arena, logits_out, self.const_i64(0));
         self.builder.build_return(None).unwrap();
     }
 

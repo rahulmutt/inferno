@@ -621,6 +621,7 @@ dependencies = [
  "inferno-target",
  "inkwell",
  "insta",
+ "libloading",
  "serde",
  "serde_json",
  "tempfile",
