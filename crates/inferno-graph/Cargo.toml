@@ -1,0 +1,17 @@
+[package]
+name = "inferno-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+inferno-formats.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
