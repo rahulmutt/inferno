@@ -1,0 +1,41 @@
+---
+source: crates/inferno-graph/tests/snapshot_ir.rs
+assertion_line: 15
+expression: g.dump(&desc)
+---
+graph (layers=2, kv_heads=1, head_dim=32)
+  %0 = tokens : [seq]
+  %1 = embed(%0, @token_embed.weight[260x64:F32]) : [seq,64]  ; embed
+  %2 = rmsnorm(%1, @layers.0.attn_norm.weight[64:F32], eps=0.00001) : [seq,64]  ; layers.0.attn_norm
+  %3 = matmul(%2, @layers.0.attn.q_proj.weight[64x64:Q8_0]) : [seq,64]  ; layers.0.attn.q_proj
+  %4 = matmul(%2, @layers.0.attn.k_proj.weight[32x64:Q8_0]) : [seq,32]  ; layers.0.attn.k_proj
+  %5 = matmul(%2, @layers.0.attn.v_proj.weight[32x64:F16]) : [seq,32]  ; layers.0.attn.v_proj
+  %6 = rope(%3, theta=10000, style=Interleaved, heads=2, head_dim=32) : [seq,64]  ; layers.0.rope_q
+  %7 = rope(%4, theta=10000, style=Interleaved, heads=1, head_dim=32) : [seq,32]  ; layers.0.rope_k
+  %8 = attention(%6, %7, %5, layer=0, heads=2, kv_heads=1, head_dim=32) : [seq,64]  ; layers.0.attention
+  %9 = matmul(%8, @layers.0.attn.o_proj.weight[64x64:Q8_0]) : [seq,64]  ; layers.0.attn.o_proj
+  %10 = add(%1, %9) : [seq,64]  ; layers.0.residual_attn
+  %11 = rmsnorm(%10, @layers.0.ffn_norm.weight[64:F32], eps=0.00001) : [seq,64]  ; layers.0.ffn_norm
+  %12 = matmul(%11, @layers.0.ffn.gate_proj.weight[256x64:F16]) : [seq,256]  ; layers.0.ffn.gate
+  %13 = matmul(%11, @layers.0.ffn.up_proj.weight[256x64:BF16]) : [seq,256]  ; layers.0.ffn.up
+  %14 = swiglu(%12, %13) : [seq,256]  ; layers.0.swiglu
+  %15 = matmul(%14, @layers.0.ffn.down_proj.weight[64x256:Q4_K]) : [seq,64]  ; layers.0.ffn.down
+  %16 = add(%10, %15) : [seq,64]  ; layers.0.residual_ffn
+  %17 = rmsnorm(%16, @layers.1.attn_norm.weight[64:F32], eps=0.00001) : [seq,64]  ; layers.1.attn_norm
+  %18 = matmul(%17, @layers.1.attn.q_proj.weight[64x64:Q8_0]) : [seq,64]  ; layers.1.attn.q_proj
+  %19 = matmul(%17, @layers.1.attn.k_proj.weight[32x64:Q8_0]) : [seq,32]  ; layers.1.attn.k_proj
+  %20 = matmul(%17, @layers.1.attn.v_proj.weight[32x64:F16]) : [seq,32]  ; layers.1.attn.v_proj
+  %21 = rope(%18, theta=10000, style=Interleaved, heads=2, head_dim=32) : [seq,64]  ; layers.1.rope_q
+  %22 = rope(%19, theta=10000, style=Interleaved, heads=1, head_dim=32) : [seq,32]  ; layers.1.rope_k
+  %23 = attention(%21, %22, %20, layer=1, heads=2, kv_heads=1, head_dim=32) : [seq,64]  ; layers.1.attention
+  %24 = matmul(%23, @layers.1.attn.o_proj.weight[64x64:Q8_0]) : [seq,64]  ; layers.1.attn.o_proj
+  %25 = add(%16, %24) : [seq,64]  ; layers.1.residual_attn
+  %26 = rmsnorm(%25, @layers.1.ffn_norm.weight[64:F32], eps=0.00001) : [seq,64]  ; layers.1.ffn_norm
+  %27 = matmul(%26, @layers.1.ffn.gate_proj.weight[256x64:F16]) : [seq,256]  ; layers.1.ffn.gate
+  %28 = matmul(%26, @layers.1.ffn.up_proj.weight[256x64:BF16]) : [seq,256]  ; layers.1.ffn.up
+  %29 = swiglu(%27, %28) : [seq,256]  ; layers.1.swiglu
+  %30 = matmul(%29, @layers.1.ffn.down_proj.weight[64x256:Q4_K]) : [seq,64]  ; layers.1.ffn.down
+  %31 = add(%25, %30) : [seq,64]  ; layers.1.residual_ffn
+  %32 = rmsnorm(%31, @output_norm.weight[64:F32], eps=0.00001) : [seq,64]  ; output_norm
+  %33 = matmul(%32, @token_embed.weight[260x64:F32]) : [seq,260]  ; lm_head
+  output %33
