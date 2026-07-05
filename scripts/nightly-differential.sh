@@ -12,13 +12,15 @@ mkdir -p "$CACHE/qwen2.5-0.5b-mlx"
 HF="https://huggingface.co"
 
 GGUF="$CACHE/qwen2.5-0.5b-instruct-q8_0.gguf"
-[ -f "$GGUF" ] || curl -fL --retry 3 -o "$GGUF" \
-  "$HF/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf"
+[ -f "$GGUF" ] || { curl -fL --retry 3 -o "$GGUF.tmp" \
+  "$HF/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf" \
+  && mv "$GGUF.tmp" "$GGUF"; }
 
 MLX="$CACHE/qwen2.5-0.5b-mlx"
 for f in config.json model.safetensors tokenizer.json; do
-  [ -f "$MLX/$f" ] || curl -fL --retry 3 -o "$MLX/$f" \
-    "$HF/mlx-community/Qwen2.5-0.5B-Instruct-bf16/resolve/main/$f"
+  [ -f "$MLX/$f" ] || { curl -fL --retry 3 -o "$MLX/$f.tmp" \
+    "$HF/mlx-community/Qwen2.5-0.5B-Instruct-bf16/resolve/main/$f" \
+    && mv "$MLX/$f.tmp" "$MLX/$f"; }
 done
 
 PROMPT="The capital of France is"
