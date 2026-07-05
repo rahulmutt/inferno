@@ -15,7 +15,7 @@ use inkwell::context::Context;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{CodegenError, Result};
 
@@ -29,7 +29,10 @@ pub struct Artifact {
 /// Sidecar metadata written alongside the compiled shared object. Hash
 /// fields are placeholders (empty strings) here; `inferno-core` (Task 13/14)
 /// recomputes and rewrites them with real content hashes after compile.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// `Deserialize` is derived so `inferno-core` (Task 14) can read `meta.json`
+/// back to verify hashes and size the KV / arena / logits buffers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Meta {
     pub model_hash: String,
     pub target_hash: String,

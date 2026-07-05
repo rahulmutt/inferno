@@ -680,8 +680,17 @@ dependencies = [
 name = "inferno-core"
 version = "0.1.0"
 dependencies = [
+ "inferno-codegen",
+ "inferno-formats",
+ "inferno-graph",
+ "inferno-kernels",
  "inferno-target",
+ "libloading",
+ "rustix",
+ "serde",
+ "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
