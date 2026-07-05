@@ -114,6 +114,12 @@ pub fn parse<R: Read>(r: &mut R) -> Result<ModelDesc> {
         });
     }
 
+    for t in &mut tensors {
+        if let Some(canon) = crate::names::canonical_gguf(&t.name) {
+            t.name = canon;
+        }
+    }
+
     let alignment = match meta.get("general.alignment") {
         None => 32,
         Some(v) => v.as_u64().ok_or_else(|| FormatError::Malformed {
@@ -183,7 +189,7 @@ fn extract_hyperparams(
             .or_else(|| {
                 tensors
                     .iter()
-                    .find(|t| t.name == "token_embd.weight")
+                    .find(|t| t.name == "token_embed.weight")
                     .and_then(|t| t.shape.first().copied())
             })
             .ok_or_else(|| FormatError::MissingKey(k("vocab_size")))?,
@@ -228,7 +234,7 @@ mod tests {
         assert_eq!(desc.tensors.len(), fixtures::tiny_tensor_shapes().len());
 
         let embd = &desc.tensors[0];
-        assert_eq!(embd.name, "token_embd.weight");
+        assert_eq!(embd.name, "token_embed.weight");
         assert_eq!(embd.shape, vec![32, 8]); // row-major: [vocab, hidden]
         assert_eq!(embd.dtype, DType::F32);
         assert_eq!(embd.data_len, Some(32 * 8 * 4));

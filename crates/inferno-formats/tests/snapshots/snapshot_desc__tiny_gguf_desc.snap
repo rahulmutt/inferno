@@ -15,7 +15,7 @@ hyperparams:
   norm_eps: 0.00001
   context_length: 128
 tensors:
-  - name: token_embd.weight
+  - name: token_embed.weight
     shape:
       - 32
       - 8
@@ -30,7 +30,7 @@ tensors:
     file_index: 0
     data_offset: 1024
     data_len: 32
-  - name: output.weight
+  - name: lm_head.weight
     shape:
       - 32
       - 8
@@ -38,14 +38,14 @@ tensors:
     file_index: 0
     data_offset: 1056
     data_len: 1024
-  - name: blk.0.attn_norm.weight
+  - name: layers.0.attn_norm.weight
     shape:
       - 8
     dtype: F32
     file_index: 0
     data_offset: 2080
     data_len: 32
-  - name: blk.0.attn_q.weight
+  - name: layers.0.attn.q_proj.weight
     shape:
       - 8
       - 8
@@ -53,7 +53,7 @@ tensors:
     file_index: 0
     data_offset: 2112
     data_len: 256
-  - name: blk.0.attn_k.weight
+  - name: layers.0.attn.k_proj.weight
     shape:
       - 4
       - 8
@@ -61,7 +61,7 @@ tensors:
     file_index: 0
     data_offset: 2368
     data_len: 128
-  - name: blk.0.attn_v.weight
+  - name: layers.0.attn.v_proj.weight
     shape:
       - 4
       - 8
@@ -69,7 +69,7 @@ tensors:
     file_index: 0
     data_offset: 2496
     data_len: 128
-  - name: blk.0.attn_output.weight
+  - name: layers.0.attn.o_proj.weight
     shape:
       - 8
       - 8
@@ -77,14 +77,14 @@ tensors:
     file_index: 0
     data_offset: 2624
     data_len: 256
-  - name: blk.0.ffn_norm.weight
+  - name: layers.0.ffn_norm.weight
     shape:
       - 8
     dtype: F32
     file_index: 0
     data_offset: 2880
     data_len: 32
-  - name: blk.0.ffn_gate.weight
+  - name: layers.0.ffn.gate_proj.weight
     shape:
       - 16
       - 8
@@ -92,7 +92,7 @@ tensors:
     file_index: 0
     data_offset: 2912
     data_len: 512
-  - name: blk.0.ffn_up.weight
+  - name: layers.0.ffn.up_proj.weight
     shape:
       - 16
       - 8
@@ -100,7 +100,7 @@ tensors:
     file_index: 0
     data_offset: 3424
     data_len: 512
-  - name: blk.0.ffn_down.weight
+  - name: layers.0.ffn.down_proj.weight
     shape:
       - 8
       - 16
@@ -108,14 +108,14 @@ tensors:
     file_index: 0
     data_offset: 3936
     data_len: 512
-  - name: blk.1.attn_norm.weight
+  - name: layers.1.attn_norm.weight
     shape:
       - 8
     dtype: F32
     file_index: 0
     data_offset: 4448
     data_len: 32
-  - name: blk.1.attn_q.weight
+  - name: layers.1.attn.q_proj.weight
     shape:
       - 8
       - 8
@@ -123,7 +123,7 @@ tensors:
     file_index: 0
     data_offset: 4480
     data_len: 256
-  - name: blk.1.attn_k.weight
+  - name: layers.1.attn.k_proj.weight
     shape:
       - 4
       - 8
@@ -131,7 +131,7 @@ tensors:
     file_index: 0
     data_offset: 4736
     data_len: 128
-  - name: blk.1.attn_v.weight
+  - name: layers.1.attn.v_proj.weight
     shape:
       - 4
       - 8
@@ -139,7 +139,7 @@ tensors:
     file_index: 0
     data_offset: 4864
     data_len: 128
-  - name: blk.1.attn_output.weight
+  - name: layers.1.attn.o_proj.weight
     shape:
       - 8
       - 8
@@ -147,14 +147,14 @@ tensors:
     file_index: 0
     data_offset: 4992
     data_len: 256
-  - name: blk.1.ffn_norm.weight
+  - name: layers.1.ffn_norm.weight
     shape:
       - 8
     dtype: F32
     file_index: 0
     data_offset: 5248
     data_len: 32
-  - name: blk.1.ffn_gate.weight
+  - name: layers.1.ffn.gate_proj.weight
     shape:
       - 16
       - 8
@@ -162,7 +162,7 @@ tensors:
     file_index: 0
     data_offset: 5280
     data_len: 512
-  - name: blk.1.ffn_up.weight
+  - name: layers.1.ffn.up_proj.weight
     shape:
       - 16
       - 8
@@ -170,7 +170,7 @@ tensors:
     file_index: 0
     data_offset: 5792
     data_len: 512
-  - name: blk.1.ffn_down.weight
+  - name: layers.1.ffn.down_proj.weight
     shape:
       - 8
       - 16

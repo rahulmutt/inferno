@@ -74,6 +74,7 @@ pub fn parse<R: Read>(r: &mut R, file_index: u32) -> Result<(Vec<TensorDesc>, u6
                 detail: format!("{name}: span {span} != dtype size {expect}"),
             });
         }
+        let name = crate::names::canonical_hf(&name).unwrap_or(name);
         tensors.push(TensorDesc {
             name,
             shape: entry.shape,
@@ -110,7 +111,7 @@ mod tests {
         assert_eq!(tensors.len(), 2); // __metadata__ skipped
         let e = tensors
             .iter()
-            .find(|t| t.name.ends_with("embed_tokens.weight"))
+            .find(|t| t.name == "token_embed.weight")
             .unwrap();
         assert_eq!(e.dtype, DType::F32);
         assert_eq!(e.shape, vec![32, 8]);
