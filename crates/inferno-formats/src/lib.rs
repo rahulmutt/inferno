@@ -4,6 +4,7 @@
 //! bounded reads, checked arithmetic, and no `unsafe` anywhere in this crate.
 #![forbid(unsafe_code)]
 
+mod data;
 mod desc;
 mod error;
 pub mod fixtures;
@@ -14,6 +15,7 @@ pub mod quant;
 mod read;
 pub mod safetensors;
 
+pub use data::read_tensor_bytes;
 pub use desc::{Architecture, DType, HyperParams, ModelDesc, TensorDesc};
 pub use error::{FormatError, Result};
 
