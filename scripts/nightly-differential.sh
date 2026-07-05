@@ -33,10 +33,18 @@ printf '%s' "$PROMPT" > "$CACHE/prompt.txt"
 llama-server -m "$GGUF" -t 1 --port "$PORT" --host 127.0.0.1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+healthy=0
 for _ in $(seq 1 60); do
-  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null && break
+  if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null; then
+    healthy=1
+    break
+  fi
   sleep 1
 done
+if [ "$healthy" -ne 1 ]; then
+  echo "llama-server never became healthy on port $PORT after 60s" >&2
+  exit 1
+fi
 
 PROMPT_TOKENS=$(curl -sf "http://127.0.0.1:$PORT/tokenize" \
   -d "$(jq -n --arg c "$PROMPT" '{content: $c}')" | jq -c '.tokens')
@@ -44,7 +52,7 @@ GENERATED=$(curl -sf "http://127.0.0.1:$PORT/completion" \
   -d "$(jq -n --arg p "$PROMPT" --argjson n "$N_TOKENS" \
         '{prompt: $p, n_predict: $n, temperature: 0, top_k: 1, samplers: ["top_k"],
           return_tokens: true, cache_prompt: false}')" | jq -c '.tokens')
-kill "$SERVER_PID"; trap - EXIT
+kill "$SERVER_PID" || true; trap - EXIT
 
 jq -n --argjson p "$PROMPT_TOKENS" --argjson g "$GENERATED" \
   '{prompt_tokens: $p, generated_tokens: $g}' > "$CACHE/tokens.json"

@@ -199,6 +199,5 @@ mod tests {
         };
         let dump = g.dump(&desc);
         assert!(dump.contains("%1 = embed(%0, @token_embed.weight[260x64:F32]) : [seq,64]"));
-        let _ = RopeStyle::HalfSplit; // silence unused import if assertions change
     }
 }

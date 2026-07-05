@@ -32,8 +32,10 @@ const HF_LAYER: &[(&str, &str)] = &[
     ("mlp.down_proj", "ffn.down_proj"),
 ];
 
-/// Split "name.weight" / "name.bias" → (name, param). Longest-match tables
-/// above are ordered so prefixes (attn_q vs attn_q_norm) resolve correctly.
+/// Split "name.weight" / "name.bias" → (name, param). `map_layer` below does
+/// exact-match lookup against the tables above, so their ordering is
+/// irrelevant (e.g. "attn_q" and "attn_q_norm" are distinct exact keys, not
+/// competing prefixes).
 fn split_param(raw: &str) -> Option<(&str, &str)> {
     raw.rsplit_once('.')
         .filter(|(_, p)| *p == "weight" || *p == "bias")

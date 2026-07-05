@@ -64,6 +64,7 @@ jobs:
   # real quantized model (M1 spec §Nightly tier).
   differential:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
