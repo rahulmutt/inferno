@@ -31,6 +31,29 @@ fn oracle(dtype: &DType, wbytes: &[u8], rows: usize, k: usize, x: &[f32]) -> Vec
     inferno_graph::ops::matmul(&xt, &wf, rows, k, None).data
 }
 
+/// Decode a q8a buffer (act.rs layout: per 36-byte block, `d: f32 LE` then
+/// 32 × `i8` qs) back to f32 — mirrors act.rs's private `#[cfg(test)]`
+/// helper, duplicated here because integration tests can't see it.
+fn decode_q8a(buf: &[u8]) -> Vec<f32> {
+    let mut out = Vec::new();
+    for b in buf.chunks_exact(36) {
+        let d = f32::from_le_bytes(b[..4].try_into().unwrap());
+        out.extend(b[4..36].iter().map(|&q| d * f32::from(q as i8)));
+    }
+    out
+}
+
+/// Decode a q8k buffer (act.rs layout: per 292-byte block, `d: f32 LE`,
+/// 256 × `i8` qs, then 8 × `i32` bsums, ignored here) back to f32.
+fn decode_q8k(buf: &[u8]) -> Vec<f32> {
+    let mut out = Vec::new();
+    for b in buf.chunks_exact(292) {
+        let d = f32::from_le_bytes(b[..4].try_into().unwrap());
+        out.extend(b[4..260].iter().map(|&q| d * f32::from(q as i8)));
+    }
+    out
+}
+
 fn assert_close(dtype: &DType, got: &[f32], want: &[f32]) {
     let scale = want.iter().fold(1f32, |m, v| m.max(v.abs()));
     let tol = gemv_rel_tol(dtype) * scale;
@@ -235,9 +258,15 @@ proptest! {
         let wbytes = quant::pack(&DType::Q8_0, &vals).unwrap();
         let w = q8_0::pack_q8_0_rs8(&wbytes, rows, k).unwrap();
         let xq = act::quantize_row_q8a(KernelIsa::Scalar, &x).unwrap();
-        // Oracle consumes the same quantized *weights*; activation quant is
-        // the kernel's own error and must fit gemv_rel_tol.
-        let want = oracle(&DType::Q8_0, &wbytes, rows, k, &x);
+        // Oracle consumes the same quantized weights AND the same
+        // kernel-quantized activations (x_hat, decoded from xq) as the
+        // kernel itself, so gemv_rel_tol only has to bound
+        // accumulation-order/fma rounding differences, not the much larger
+        // activation-quantization noise tail (see tolerance.rs doc comment
+        // and task-6-report.md's "BLOCKED" investigation for why comparing
+        // against the raw f32 activations was abandoned).
+        let x_hat = decode_q8a(&xq);
+        let want = oracle(&DType::Q8_0, &wbytes, rows, k, &x_hat);
         for isa in KernelIsa::all_available() {
             let mut y = vec![f32::NAN; rows];
             gemv_q8_0(isa, &w, &xq, rows, k, (0, rows), &mut y);
@@ -324,7 +353,9 @@ fn q8_0_pack_clamps_minus_128() {
 }
 
 /// Max-scale block (spec edge case): every value at the block amax, so
-/// quantized weights and activations all saturate to ±127.
+/// quantized weights and activations all saturate to ±127. The oracle
+/// consumes the same kernel-quantized activations (x_hat) as the kernel, so
+/// this only checks accumulation-order rounding, not quantization noise.
 #[test]
 fn q8_0_saturated_block_matches_oracle() {
     let (rows, k) = (3usize, 32usize);
@@ -337,7 +368,8 @@ fn q8_0_saturated_block_matches_oracle() {
     let wbytes = quant::pack(&DType::Q8_0, &vals).unwrap();
     let w = q8_0::pack_q8_0_rs8(&wbytes, rows, k).unwrap();
     let xq = act::quantize_row_q8a(KernelIsa::Scalar, &x).unwrap();
-    let want = oracle(&DType::Q8_0, &wbytes, rows, k, &x);
+    let x_hat = decode_q8a(&xq);
+    let want = oracle(&DType::Q8_0, &wbytes, rows, k, &x_hat);
     for isa in KernelIsa::all_available() {
         let mut y = vec![f32::NAN; rows];
         gemv_q8_0(isa, &w, &xq, rows, k, (0, rows), &mut y);
@@ -352,30 +384,70 @@ fn q8_0_pack_validates() {
     assert!(q8_0::pack_q8_0_rs8(&[], 0, 32).is_err());
 }
 
-/// Ignored diagnostic: prints the observed max relative error so
-/// gemv_rel_tol(Q8_0) is tuned from data (AGENTS.md tolerance rule).
+/// One (seed, rows, k) case's max relative error (same normalization as
+/// `assert_close`: scale = max(1, max|want|)).
+fn q8_0_case_max_rel(seed: u64, rows: usize, k: usize) -> f32 {
+    let vals = pseudo(seed, rows * k);
+    let x = pseudo(seed ^ 99, k);
+    let wbytes = quant::pack(&DType::Q8_0, &vals).unwrap();
+    let w = q8_0::pack_q8_0_rs8(&wbytes, rows, k).unwrap();
+    let xq = act::quantize_row_q8a(KernelIsa::Scalar, &x).unwrap();
+    let want = oracle(&DType::Q8_0, &wbytes, rows, k, &x);
+    let mut y = vec![f32::NAN; rows];
+    gemv_q8_0(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut y);
+    let scale = want.iter().fold(1f32, |m, v| m.max(v.abs()));
+    let mut max_rel = 0f32;
+    for (g, w_) in y.iter().zip(&want) {
+        max_rel = max_rel.max((g - w_).abs() / scale);
+    }
+    max_rel
+}
+
+/// Ignored diagnostic: end-to-end noise instrument. Unlike
+/// `q8_0_gemv_matches_oracle` (which compares against an oracle fed the
+/// kernel's own quantized activations, so it only measures rounding-order
+/// error and directly informs `gemv_rel_tol`), this measures the oracle
+/// against the RAW f32 activations — the full real-world error a caller
+/// sees comparing a quantized kernel's output to an unquantized reference,
+/// dominated by activation-quantization noise. Kept as a measurement tool,
+/// not a tolerance source; see `tolerance.rs`'s `gemv_rel_tol` doc comment
+/// for the 2026-07-05 data this produced (Q8_0 3.37e-2 @2k seeds → 6.25e-2
+/// @500k) and why that noise, not rounding error, made a constant-tolerance
+/// oracle-vs-raw-x comparison unworkable. Sweeps both the original fixed
+/// shape (rows=16, k=128) AND the property tests' actual shape distribution
+/// (rows 1..20, nb 1..5, k = 32*nb) — the fixed shape alone under-observes
+/// because it never hits the small-k, small-rows corner where
+/// activation-quant noise doesn't average out.
 /// Run: cargo nextest run -p inferno-kernels --run-ignored all observed_error_q8_0 --no-capture
 #[test]
 #[ignore = "diagnostic; prints observed gemv error distribution"]
 fn observed_error_q8_0() {
-    let mut max_rel = 0f32;
+    let mut overall_max = 0f32;
+
+    let mut fixed_max = 0f32;
     for seed in 0..500u64 {
-        let (rows, k) = (16usize, 128usize);
-        let vals = pseudo(seed, rows * k);
-        let x = pseudo(seed ^ 99, k);
-        let wbytes = quant::pack(&DType::Q8_0, &vals).unwrap();
-        let w = q8_0::pack_q8_0_rs8(&wbytes, rows, k).unwrap();
-        let xq = act::quantize_row_q8a(KernelIsa::Scalar, &x).unwrap();
-        let want = oracle(&DType::Q8_0, &wbytes, rows, k, &x);
-        let mut y = vec![f32::NAN; rows];
-        gemv_q8_0(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut y);
-        let scale = want.iter().fold(1f32, |m, v| m.max(v.abs()));
-        for (g, w_) in y.iter().zip(&want) {
-            max_rel = max_rel.max((g - w_).abs() / scale);
+        fixed_max = fixed_max.max(q8_0_case_max_rel(seed, 16, 128));
+    }
+    println!("q8_0 [fixed rows=16 k=128, 500 seeds] max rel error: {fixed_max:e}");
+    overall_max = overall_max.max(fixed_max);
+
+    // Property-test shape distribution: rows 1..20, nb 1..5 (k = 32*nb).
+    const SEEDS_PER_SHAPE: u64 = 30; // 19 * 4 * 30 = 2280 total cases
+    let mut total_cases = 0u64;
+    for rows in 1usize..20 {
+        for nb in 1usize..5 {
+            let k = nb * 32;
+            let mut shape_max = 0f32;
+            for seed in 0..SEEDS_PER_SHAPE {
+                shape_max = shape_max.max(q8_0_case_max_rel(seed, rows, k));
+                total_cases += 1;
+            }
+            println!("q8_0 [rows={rows} nb={nb} k={k}] max rel error: {shape_max:e}");
+            overall_max = overall_max.max(shape_max);
         }
     }
     println!(
-        "q8_0 observed max rel error: {max_rel:e} (tol {:e})",
+        "q8_0 observed OVERALL max rel error: {overall_max:e} over {total_cases} swept cases (+500 fixed-shape) (tol {:e})",
         gemv_rel_tol(&DType::Q8_0)
     );
 }
@@ -426,7 +498,15 @@ proptest! {
         let wbytes = quant::pack(&DType::Q4_K, &vals).unwrap();
         let w = q4_k::pack_q4_k_rs8(&wbytes, rows, k).unwrap();
         let xq = act::quantize_row_q8k(KernelIsa::Scalar, &x).unwrap();
-        let want = oracle(&DType::Q4_K, &wbytes, rows, k, &x);
+        // Oracle consumes the same quantized weights AND the same
+        // kernel-quantized activations (x_hat, decoded from xq) as the
+        // kernel itself, so gemv_rel_tol only has to bound
+        // accumulation-order/fma rounding differences, not the much larger
+        // activation-quantization noise tail (see tolerance.rs doc comment
+        // and task-6-report.md's "BLOCKED" investigation for why comparing
+        // against the raw f32 activations was abandoned).
+        let x_hat = decode_q8k(&xq);
+        let want = oracle(&DType::Q4_K, &wbytes, rows, k, &x_hat);
         for isa in KernelIsa::all_available() {
             let mut y = vec![f32::NAN; rows];
             gemv_q4_k(isa, &w, &xq, rows, k, (0, rows), &mut y);
@@ -513,28 +593,57 @@ fn q4_k_pack_validates() {
     assert!(q4_k::pack_q4_k_rs8(&[], 0, 256).is_err());
 }
 
-/// Ignored diagnostic (see observed_error_q8_0).
+/// One (seed, rows, k) case's max relative error (see `q8_0_case_max_rel`).
+fn q4_k_case_max_rel(seed: u64, rows: usize, k: usize) -> f32 {
+    let vals = pseudo(seed, rows * k);
+    let x = pseudo(seed ^ 77, k);
+    let wbytes = quant::pack(&DType::Q4_K, &vals).unwrap();
+    let w = q4_k::pack_q4_k_rs8(&wbytes, rows, k).unwrap();
+    let xq = act::quantize_row_q8k(KernelIsa::Scalar, &x).unwrap();
+    let want = oracle(&DType::Q4_K, &wbytes, rows, k, &x);
+    let mut y = vec![f32::NAN; rows];
+    gemv_q4_k(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut y);
+    let scale = want.iter().fold(1f32, |m, v| m.max(v.abs()));
+    let mut max_rel = 0f32;
+    for (g, w_) in y.iter().zip(&want) {
+        max_rel = max_rel.max((g - w_).abs() / scale);
+    }
+    max_rel
+}
+
+/// Ignored diagnostic (see `observed_error_q8_0`): sweeps both the original
+/// fixed shape (rows=16, k=512) AND the property tests' actual shape
+/// distribution (rows 1..20, nsb 1..3, k = 256*nsb) — the fixed shape alone
+/// under-observes because it never hits the single-super-block corner.
 #[test]
 #[ignore = "diagnostic; prints observed gemv error distribution"]
 fn observed_error_q4_k() {
-    let mut max_rel = 0f32;
+    let mut overall_max = 0f32;
+
+    let mut fixed_max = 0f32;
     for seed in 0..500u64 {
-        let (rows, k) = (16usize, 512usize);
-        let vals = pseudo(seed, rows * k);
-        let x = pseudo(seed ^ 77, k);
-        let wbytes = quant::pack(&DType::Q4_K, &vals).unwrap();
-        let w = q4_k::pack_q4_k_rs8(&wbytes, rows, k).unwrap();
-        let xq = act::quantize_row_q8k(KernelIsa::Scalar, &x).unwrap();
-        let want = oracle(&DType::Q4_K, &wbytes, rows, k, &x);
-        let mut y = vec![f32::NAN; rows];
-        gemv_q4_k(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut y);
-        let scale = want.iter().fold(1f32, |m, v| m.max(v.abs()));
-        for (g, w_) in y.iter().zip(&want) {
-            max_rel = max_rel.max((g - w_).abs() / scale);
+        fixed_max = fixed_max.max(q4_k_case_max_rel(seed, 16, 512));
+    }
+    println!("q4_k [fixed rows=16 k=512, 500 seeds] max rel error: {fixed_max:e}");
+    overall_max = overall_max.max(fixed_max);
+
+    // Property-test shape distribution: rows 1..20, nsb 1..3 (k = 256*nsb).
+    const SEEDS_PER_SHAPE: u64 = 60; // 19 * 2 * 60 = 2280 total cases
+    let mut total_cases = 0u64;
+    for rows in 1usize..20 {
+        for nsb in 1usize..3 {
+            let k = nsb * 256;
+            let mut shape_max = 0f32;
+            for seed in 0..SEEDS_PER_SHAPE {
+                shape_max = shape_max.max(q4_k_case_max_rel(seed, rows, k));
+                total_cases += 1;
+            }
+            println!("q4_k [rows={rows} nsb={nsb} k={k}] max rel error: {shape_max:e}");
+            overall_max = overall_max.max(shape_max);
         }
     }
     println!(
-        "q4_k observed max rel error: {max_rel:e} (tol {:e})",
+        "q4_k observed OVERALL max rel error: {overall_max:e} over {total_cases} swept cases (+500 fixed-shape) (tol {:e})",
         gemv_rel_tol(&DType::Q4_K)
     );
 }
