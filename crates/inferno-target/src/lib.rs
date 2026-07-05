@@ -4,6 +4,7 @@
 //! same struct — that equivalence is the cross-compilation interface.
 
 mod desc;
+mod detect;
 mod error;
 mod profile;
 
