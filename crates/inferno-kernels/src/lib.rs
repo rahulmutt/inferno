@@ -14,10 +14,12 @@ pub mod act;
 mod buf;
 mod error;
 pub mod f32k;
+pub mod q8_0;
 
 pub use buf::AlignedBuf;
 pub use error::{KernelError, Result};
 pub use f32k::{inferno_gemv_f32_rs8_avx2, inferno_gemv_f32_rs8_scalar};
+pub use q8_0::{inferno_gemv_q8_0_rs8_avx2, inferno_gemv_q8_0_rs8_scalar};
 
 /// Rows per packed strip: every rs8 layout interleaves 8 rows.
 pub const STRIP: usize = 8;
