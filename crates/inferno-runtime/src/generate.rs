@@ -7,6 +7,7 @@ use std::time::Instant;
 use inferno_formats::{ModelDesc, load_desc};
 use inferno_graph::{Graph, Interpreter, KvCache, Tensor, build_graph};
 
+use crate::backend::{Backend, InterpBackend};
 use crate::sampler::Sampler;
 use crate::tokenizer::{Tokenizer, tokenizer_for};
 use crate::{Result, RuntimeError};
@@ -59,7 +60,7 @@ pub struct GenStats {
 pub struct Generator {
     desc: ModelDesc,
     graph: Graph,
-    interp: Interpreter,
+    backend: Box<dyn Backend>,
     tokenizer: Box<dyn Tokenizer>,
     max_seq_len: usize,
 }
@@ -76,10 +77,44 @@ impl Generator {
         } else {
             max_seq_len
         };
+        let backend = Box::new(InterpBackend::new(
+            desc.clone(),
+            graph.clone(),
+            max_seq_len,
+        )?);
         Ok(Generator {
             desc,
             graph,
-            interp: Interpreter::new(),
+            backend,
+            tokenizer,
+            max_seq_len,
+        })
+    }
+
+    /// Like [`Generator::load`], but drives generation through a
+    /// caller-supplied [`Backend`] instead of the default `InterpBackend`
+    /// (e.g. the M3 CLI injecting a `CompiledBackend`). `full_logits`
+    /// (teacher forcing) always uses its own local interpreter regardless
+    /// of which backend drives `generate`.
+    pub fn load_with_backend(
+        model: &Path,
+        max_seq_len: usize,
+        backend: Box<dyn Backend>,
+    ) -> Result<Generator> {
+        let desc = load_desc(model)?;
+        let graph = build_graph(&desc)?;
+        let spec = desc.tokenizer.as_ref().ok_or(RuntimeError::NoTokenizer)?;
+        let tokenizer = tokenizer_for(spec)?;
+        let ctx = desc.hyperparams.context_length as usize;
+        let max_seq_len = if ctx > 0 {
+            max_seq_len.min(ctx)
+        } else {
+            max_seq_len
+        };
+        Ok(Generator {
+            desc,
+            graph,
+            backend,
             tokenizer,
             max_seq_len,
         })
@@ -95,7 +130,9 @@ impl Generator {
     }
 
     /// Single full-sequence pass returning logits at every position
-    /// (teacher forcing / diff harness).
+    /// (teacher forcing / diff harness). Always uses a local interpreter —
+    /// a last-token-only backend (e.g. the compiled path) cannot produce
+    /// the all-position logits teacher forcing needs.
     pub fn full_logits(&mut self, tokens: &[u32]) -> Result<Tensor> {
         let mut kv = KvCache::new(&self.graph, self.max_seq_len)?;
         if tokens.len() > self.max_seq_len {
@@ -104,7 +141,8 @@ impl Generator {
                 max: self.max_seq_len,
             });
         }
-        Ok(self.interp.run(&self.desc, &self.graph, tokens, &mut kv)?)
+        let mut interp = Interpreter::new();
+        Ok(interp.run(&self.desc, &self.graph, tokens, &mut kv)?)
     }
 
     /// Runs generation, streaming decoded bytes to `on_bytes` as they become
@@ -126,21 +164,17 @@ impl Generator {
                 max: self.max_seq_len,
             });
         }
-        let mut kv = KvCache::new(&self.graph, self.max_seq_len)?;
-        let vocab = self.vocab_size();
+        self.backend.reset();
         let eos = self.tokenizer.eos();
         let mut buf = Utf8Buffer::default();
         let mut out_ids = Vec::new();
 
         let t0 = Instant::now();
-        let logits = self
-            .interp
-            .run(&self.desc, &self.graph, &prompt_ids, &mut kv)?;
+        let mut last = self.backend.forward(&prompt_ids)?;
         let prefill_secs = t0.elapsed().as_secs_f64();
-        let mut last = logits.data[(prompt_ids.len() - 1) * vocab..].to_vec();
 
         let t1 = Instant::now();
-        for _ in 0..max_tokens {
+        for step in 0..max_tokens {
             let next = sampler.sample(&last);
             if Some(next) == eos {
                 break;
@@ -150,11 +184,15 @@ impl Generator {
             if !chunk.is_empty() && on_bytes(&chunk).is_break() {
                 break; // consumer signaled stop (e.g. broken pipe)
             }
-            if kv.len() + 1 > self.max_seq_len {
+            // Mirrors the backend's own KV length (prompt + steps decoded so
+            // far) so this matches the interpreter's
+            // `kv.len() + 1 > max_seq_len` check exactly, without the
+            // Generator reaching into the backend.
+            let seq_len = prompt_ids.len() + step;
+            if seq_len + 1 > self.max_seq_len {
                 break; // context full
             }
-            let step = self.interp.run(&self.desc, &self.graph, &[next], &mut kv)?;
-            last = step.data;
+            last = self.backend.forward(&[next])?;
         }
         let stats = GenStats {
             prompt_tokens: prompt_ids.len(),
