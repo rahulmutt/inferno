@@ -10,6 +10,7 @@ pub mod fixtures;
 pub mod gguf;
 pub mod limits;
 pub(crate) mod mlx;
+pub mod quant;
 mod read;
 pub mod safetensors;
 
