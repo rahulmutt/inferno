@@ -143,6 +143,12 @@ impl<'c> LlvmModule<'c> {
         &self.module
     }
 
+    /// Public accessor to the raw inkwell [`Module`], for object emission
+    /// (Task 11's `TargetMachine::write_to_file`).
+    pub fn raw_module(&self) -> &Module<'c> {
+        &self.module
+    }
+
     /// Run LLVM's module verifier; `Err` carries the verifier's diagnostic.
     pub fn verify(&self) -> Result<()> {
         self.module

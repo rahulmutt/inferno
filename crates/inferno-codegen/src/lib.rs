@@ -1,9 +1,11 @@
 //! Plan -> Loop IR -> LLVM IR (inkwell) -> object -> model.so. The only crate
 //! that links LLVM (18, matching devenv). See the M3 spec.
 
+pub mod emit;
 pub mod error;
 pub mod llvm;
 pub mod loopir;
+pub use emit::{Artifact, Meta, compile};
 pub use error::{CodegenError, Result};
 
 #[cfg(test)]

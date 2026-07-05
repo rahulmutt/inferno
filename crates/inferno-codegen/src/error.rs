@@ -12,6 +12,8 @@ pub enum CodegenError {
     Link(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("meta serialization failed: {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, CodegenError>;

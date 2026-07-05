@@ -12,9 +12,12 @@ inferno-kernels.workspace = true
 inferno-plan.workspace = true
 inkwell.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
