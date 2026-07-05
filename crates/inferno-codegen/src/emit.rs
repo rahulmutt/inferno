@@ -111,7 +111,12 @@ fn build_meta(desc: &inferno_formats::ModelDesc, plan: &inferno_plan::Plan) -> M
         inferno_version: env!("CARGO_PKG_VERSION").to_string(),
         vocab: desc.hyperparams.vocab_size as usize,
         n_layers: desc.hyperparams.n_layers as usize,
-        arena_f32: plan.arena.total_f32,
+        // The quantized-activation scratch region lives *inside* the arena
+        // buffer, immediately after the f32 arena (`act_scratch_off ==
+        // total_f32 * 4` bytes). The caller allocates a single arena of
+        // `arena_f32` f32s, so it must cover both regions or the GEMV
+        // activation-quantize writes out of bounds.
+        arena_f32: plan.arena.total_f32 + plan.arena.act_scratch_bytes.div_ceil(4),
         kv_total_bytes: plan.kv.total_bytes,
         max_seq_len: plan.max_seq_len,
         entry_prefill: "prefill".to_string(),
