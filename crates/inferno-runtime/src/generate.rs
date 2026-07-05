@@ -1,5 +1,6 @@
 //! The generation loop: tokenize → prefill → [sample → decode]* → stream.
 
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::time::Instant;
 
@@ -106,12 +107,17 @@ impl Generator {
         Ok(self.interp.run(&self.desc, &self.graph, tokens, &mut kv)?)
     }
 
+    /// Runs generation, streaming decoded bytes to `on_bytes` as they become
+    /// available. `on_bytes` returns `ControlFlow::Break(())` to signal that
+    /// the consumer is gone (e.g. a broken stdout pipe) — the decode loop
+    /// stops immediately rather than grinding through the remaining
+    /// `max_tokens`. Returning `ControlFlow::Continue(())` keeps generating.
     pub fn generate(
         &mut self,
         prompt: &str,
         max_tokens: usize,
         sampler: &mut dyn Sampler,
-        on_bytes: &mut dyn FnMut(&[u8]),
+        on_bytes: &mut dyn FnMut(&[u8]) -> ControlFlow<()>,
     ) -> Result<(Vec<u32>, GenStats)> {
         let prompt_ids = self.encode(prompt)?;
         if prompt_ids.is_empty() || prompt_ids.len() >= self.max_seq_len {
@@ -141,8 +147,8 @@ impl Generator {
             }
             out_ids.push(next);
             let chunk = buf.push(&self.tokenizer.decode_token(next));
-            if !chunk.is_empty() {
-                on_bytes(&chunk);
+            if !chunk.is_empty() && on_bytes(&chunk).is_break() {
+                break; // consumer signaled stop (e.g. broken pipe)
             }
             if kv.len() + 1 > self.max_seq_len {
                 break; // context full
@@ -163,6 +169,7 @@ impl Generator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sampler::Greedy;
 
     #[test]
     fn utf8_buffer_holds_split_codepoints() {
@@ -179,5 +186,37 @@ mod tests {
         let mut b = Utf8Buffer::default();
         // 0xFF can never start a UTF-8 sequence → replacement char.
         assert_eq!(b.push(&[0xFF, b'a']), "\u{FFFD}a".as_bytes());
+    }
+
+    fn fixture(p: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../inferno-formats/tests/fixtures")
+            .join(p)
+    }
+
+    /// A consumer that signals stop (e.g. a closed stdout pipe) must halt
+    /// the decode loop immediately rather than grinding through the
+    /// remaining `max_tokens` — the bug this contract change fixes.
+    #[test]
+    fn on_bytes_break_stops_generation_early() {
+        let mut g = Generator::load(&fixture("tiny.gguf"), 64).unwrap();
+        let mut calls = 0usize;
+        let (ids, stats) = g
+            .generate("the", 50, &mut Greedy, &mut |_| {
+                calls += 1;
+                if calls == 2 {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .unwrap();
+        assert_eq!(calls, 2, "loop must stop right after the break signal");
+        assert!(
+            ids.len() < 50,
+            "generation should halt long before max_tokens: got {} ids",
+            ids.len()
+        );
+        assert_eq!(stats.generated, ids.len());
     }
 }

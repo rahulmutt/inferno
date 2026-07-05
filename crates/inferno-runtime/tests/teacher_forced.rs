@@ -15,7 +15,11 @@ fn own_greedy_output_agrees_perfectly() {
     // position must match (same weights, same math).
     let mut g = generator();
     let prompt = g.encode("the").unwrap();
-    let (ids, _) = g.generate("the", 6, &mut Greedy, &mut |_| {}).unwrap();
+    let (ids, _) = g
+        .generate("the", 6, &mut Greedy, &mut |_| {
+            std::ops::ControlFlow::Continue(())
+        })
+        .unwrap();
     let out = teacher_forced(&mut g, &prompt, &ids).unwrap();
     assert!(out.passed(), "mismatches: {:?}", out.mismatches);
     assert_eq!(out.checked, ids.len());
@@ -34,7 +38,11 @@ fn wrong_forced_token_is_reported_with_position_and_top5() {
     // hardcoding a position number that depends on fixture internals.
     let mut g = generator();
     let prompt = g.encode("cat dog").unwrap();
-    let (mut ids, _) = g.generate("cat dog", 6, &mut Greedy, &mut |_| {}).unwrap();
+    let (mut ids, _) = g
+        .generate("cat dog", 6, &mut Greedy, &mut |_| {
+            std::ops::ControlFlow::Continue(())
+        })
+        .unwrap();
     let logits = g
         .full_logits(&[prompt.clone(), ids.clone()].concat())
         .unwrap();

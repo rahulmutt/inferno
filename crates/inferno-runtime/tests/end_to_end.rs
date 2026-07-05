@@ -12,7 +12,10 @@ fn generate_ids(model: &Path) -> Vec<u32> {
     let mut g = Generator::load(model, 64).unwrap();
     let mut sink = Vec::new();
     let (ids, stats) = g
-        .generate("the", 8, &mut Greedy, &mut |b| sink.extend_from_slice(b))
+        .generate("the", 8, &mut Greedy, &mut |b| {
+            sink.extend_from_slice(b);
+            std::ops::ControlFlow::Continue(())
+        })
         .unwrap();
     assert_eq!(stats.generated, ids.len());
     assert!(stats.prompt_tokens >= 1);
@@ -40,14 +43,20 @@ fn gguf_and_mlx_generate_identical_tokens() {
 #[test]
 fn max_tokens_bounds_generation() {
     let mut g = Generator::load(&fixture("tiny.gguf"), 64).unwrap();
-    let (ids, _) = g.generate("the", 3, &mut Greedy, &mut |_| {}).unwrap();
+    let (ids, _) = g
+        .generate("the", 3, &mut Greedy, &mut |_| {
+            std::ops::ControlFlow::Continue(())
+        })
+        .unwrap();
     assert!(ids.len() <= 3);
 }
 
 #[test]
 fn prompt_longer_than_max_seq_len_is_typed_error() {
     let mut g = Generator::load(&fixture("tiny.gguf"), 2).unwrap();
-    let err = g.generate("the cat sat on the mat", 4, &mut Greedy, &mut |_| {});
+    let err = g.generate("the cat sat on the mat", 4, &mut Greedy, &mut |_| {
+        std::ops::ControlFlow::Continue(())
+    });
     assert!(matches!(
         err,
         Err(inferno_runtime::RuntimeError::PromptTooLong { .. })
