@@ -31,3 +31,18 @@ pub fn logits_abs_tol(dtype: &DType) -> f32 {
 /// Observed so far (Qwen2.5-0.5B-Instruct Q8_0, first nightly, 2026-07-05):
 /// 64 checked, 63 matched, 1 tie, min top-2 gap 0.0004.
 pub const LOGIT_TIE_EPSILON: f32 = 0.05;
+
+/// Kernel-GEMV vs dequant+reference-matmul, relative to max(1, max|y_ref|).
+/// Quant paths are dominated by on-the-fly activation quantization (8-bit
+/// blocks, ~0.4% per element); weight quantization error cancels because
+/// both sides consume identical quantized weights. Initial values; tuned
+/// against the observed error distributions printed by the rig's ignored
+/// `observed_error_*` diagnostics (see AGENTS.md tolerance rule).
+pub fn gemv_rel_tol(dtype: &DType) -> f32 {
+    match dtype {
+        DType::F32 => 1e-6, // fma-vs-mul+add rounding only
+        DType::Q8_0 | DType::Q4_K => 2e-2,
+        // No M2 kernels exist for these; the rig never asks.
+        DType::F16 | DType::BF16 | DType::Unsupported(_) => 0.0,
+    }
+}
