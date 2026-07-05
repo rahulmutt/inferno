@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 inferno-formats.workspace = true
+inferno-runtime.workspace = true
 clap.workspace = true
 
 [dev-dependencies]

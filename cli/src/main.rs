@@ -1,4 +1,5 @@
 mod inspect;
+mod run;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -22,6 +23,21 @@ enum Command {
         #[arg(long, default_value_t = 10)]
         tensors: usize,
     },
+    /// Generate text from a prompt (M1: reference interpreter — slow by
+    /// design; the compiler arrives in M3).
+    Run {
+        /// Path to a .gguf file, an MLX directory, or a .safetensors file.
+        model: PathBuf,
+        /// Prompt text (raw completion; no chat template).
+        #[arg(long, short)]
+        prompt: String,
+        /// Maximum tokens to generate.
+        #[arg(long, default_value_t = 128)]
+        max_tokens: usize,
+        /// KV-cache capacity (clamped to the model's context length).
+        #[arg(long, default_value_t = 4096)]
+        max_seq_len: usize,
+    },
 }
 
 fn main() -> ExitCode {
@@ -37,5 +53,11 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Run {
+            model,
+            prompt,
+            max_tokens,
+            max_seq_len,
+        } => run::run(&model, &prompt, max_tokens, max_seq_len),
     }
 }

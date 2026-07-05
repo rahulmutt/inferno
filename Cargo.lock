@@ -440,6 +440,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "inferno-formats",
+ "inferno-runtime",
  "insta",
  "predicates",
 ]
