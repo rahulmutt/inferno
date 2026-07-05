@@ -6,8 +6,28 @@ license.workspace = true
 
 [dependencies]
 inferno-target.workspace = true
+inferno-formats.workspace = true
+inferno-graph.workspace = true
+inferno-codegen.workspace = true
+inferno-kernels.workspace = true
+libloading.workspace = true
+# rustix `mm` gives us a read-only, page-aligned mmap without a new
+# supply-chain dependency (rustix is already vendored for `param`). Page
+# alignment (4096) satisfies the rs8 AVX2 kernels' 32-byte aligned-load
+# requirement on the weight base — see artifact.rs.
+rustix = { workspace = true, features = ["mm"] }
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 
-[lints]
-workspace = true
+[dev-dependencies]
+tempfile.workspace = true
+
+# This crate carries M3's `unsafe` (mmap + dlopen + calling the compiled entry
+# points by raw fn pointer). The workspace lints deny `unsafe_code`; like
+# `inferno-kernels`, this crate opts out with its OWN lint table (NOT
+# `workspace = true`) and instead denies `unsafe_op_in_unsafe_fn` so every
+# unsafe op inside an unsafe fn still needs an explicit block + `// SAFETY:`.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
