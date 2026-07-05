@@ -15,6 +15,10 @@
   ];
 
   env.LLVM_SYS_180_PREFIX = "${pkgs.llvmPackages_18.llvm.dev}";
+  # ggml CPU backend for `mise run bench-kernels` (--features ggml-compare).
+  # haswell = AVX2+FMA — the same ISA class as inferno's M2 kernels, so the
+  # comparison is apples-to-apples. The per-arch backends live under bin/.
+  env.INFERNO_GGML_CPU_LIB = "${pkgs.llama-cpp}/bin/libggml-cpu-haswell.so";
 
   enterShell = ''
     echo "inferno devenv: LLVM $(llvm-config --version)"
