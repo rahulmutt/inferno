@@ -71,6 +71,25 @@ fn compiled_prefill_matches_interpreter() {
 }
 
 #[test]
+#[should_panic(expected = "max_seq_len")]
+fn prefill_past_max_seq_len_panics_not_oob() {
+    use_temp_cache();
+    let model = model_path();
+    let target = TargetDesc::detect().unwrap();
+    let max_seq_len = 64usize;
+    let art = Artifact::load_or_compile(&model, &target, max_seq_len).unwrap();
+
+    let vocab = load_desc(&model).unwrap().hyperparams.vocab_size as usize;
+    let mut kv = vec![0f32; art.meta().kv_total_bytes / 4];
+    let mut arena = vec![0f32; art.meta().arena_f32];
+    let mut logits = vec![0f32; vocab];
+    // pos_off + tokens.len() = max_seq_len + 1 > max_seq_len: the position guard
+    // must fire (clean panic) rather than let the compiled kernel write OOB.
+    let tokens = vec![1u32];
+    art.prefill(&tokens, max_seq_len, &mut kv, &mut arena, &mut logits);
+}
+
+#[test]
 fn tampered_meta_is_rejected() {
     use_temp_cache();
     let model = model_path();

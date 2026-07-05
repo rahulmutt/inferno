@@ -248,11 +248,28 @@ impl Artifact {
         logits_out: &mut [f32],
     ) {
         self.assert_buffers(kv, arena, logits_out);
+        // The `kv` buffer is sized for `max_seq_len`; the compiled kernels write
+        // KV entries at positions `pos_off..pos_off+tokens.len()`. A caller that
+        // exceeds `max_seq_len` would drive an OOB KV write through this SAFE
+        // method, so bound the write position here (checked add avoids an
+        // overflow wrapping past the guard). Hard `assert!` (release too): this
+        // converts UB into a clean panic; position management is the caller's job.
+        let end = pos_off
+            .checked_add(tokens.len())
+            .expect("prefill: pos_off + tokens overflows usize");
+        assert!(
+            end <= self.meta.max_seq_len,
+            "prefill: pos_off ({pos_off}) + tokens ({}) exceeds max_seq_len ({})",
+            tokens.len(),
+            self.meta.max_seq_len
+        );
         // SAFETY: `tokens` is a valid `&[u32]` (ptr+len passed together); the
         // weight base is the page-aligned mmap owned by `self`; `kv`/`arena`/
-        // `logits_out` are exclusive `&mut` slices asserted large enough above.
-        // The fn pointer's ABI matches `PrefillFn` and `self._lib`/`self.weights`
-        // outlive this call. The compiled code only writes within these buffers.
+        // `logits_out` are exclusive `&mut` slices asserted large enough above,
+        // and the write position `pos_off+tokens.len() <= max_seq_len` is
+        // asserted, so every KV write lands inside `kv`. The fn pointer's ABI
+        // matches `PrefillFn` and `self._lib`/`self.weights` outlive this call.
+        // The compiled code only writes within these buffers.
         unsafe {
             (self.prefill)(
                 tokens.as_ptr(),
@@ -277,9 +294,19 @@ impl Artifact {
         logits_out: &mut [f32],
     ) {
         self.assert_buffers(kv, arena, logits_out);
+        // Bound the KV write position: the kernel writes the KV entry at `pos`,
+        // and `kv` is sized for `max_seq_len`. A loop calling `decode_step` past
+        // `max_seq_len` would write OOB through this SAFE method. Hard `assert!`
+        // (release too) turns that UB into a clean panic.
+        assert!(
+            pos < self.meta.max_seq_len,
+            "decode_step: pos ({pos}) >= max_seq_len ({})",
+            self.meta.max_seq_len
+        );
         // SAFETY: identical invariants to `prefill`; `token`/`pos` are scalars,
-        // the weight base is the owned page-aligned mmap, and the `&mut` buffers
-        // are exclusive and asserted large enough.
+        // the weight base is the owned page-aligned mmap, the `&mut` buffers are
+        // exclusive and asserted large enough, and `pos < max_seq_len` is
+        // asserted so the KV write lands inside `kv`.
         unsafe {
             (self.decode)(
                 token,
