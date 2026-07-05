@@ -177,6 +177,28 @@ impl<'c, 'a> Codegen<'c, 'a> {
         self.builder.build_store(ptr, val).unwrap();
     }
 
+    /// Build an `alloca` in the current function's **entry block** (before its
+    /// first instruction), regardless of where the builder currently sits, then
+    /// restore the prior insert position. Hoisting keeps every stack slot
+    /// allocated once per call — an alloca left in a loop body (e.g. inside
+    /// prefill's per-token loop) would allocate a fresh slot each iteration and
+    /// leak until return, growing prefill stack to O(n × allocas/token).
+    fn entry_alloca<T: inkwell::types::BasicType<'c>>(
+        &self,
+        ty: T,
+        name: &str,
+    ) -> PointerValue<'c> {
+        let saved = self.builder.get_insert_block().unwrap();
+        let entry = saved.get_parent().unwrap().get_first_basic_block().unwrap();
+        match entry.get_first_instruction() {
+            Some(first) => self.builder.position_before(&first),
+            None => self.builder.position_at_end(entry),
+        }
+        let slot = self.builder.build_alloca(ty, name).unwrap();
+        self.builder.position_at_end(saved);
+        slot
+    }
+
     fn call_unary(&self, f: FunctionValue<'c>, x: FloatValue<'c>) -> FloatValue<'c> {
         self.builder
             .build_call(f, &[x.into()], "call")
@@ -204,6 +226,18 @@ impl<'c, 'a> Codegen<'c, 'a> {
 
     /// Element index of value `v`'s row for this frame: `offset + row*row_len`.
     fn row_base(&self, frame: &Frame<'c>, v: usize) -> IntValue<'c> {
+        // Invariant: every arena activation routed through here is `[Seq, ..]`,
+        // so `row_len` (non-Seq dims) is a genuine per-row stride and `row`
+        // (0..max_seq_len) indexes distinct rows. A shape without `Seq` would
+        // make `row > 0` alias past the slot.
+        debug_assert!(
+            self.graph.nodes[v - 1]
+                .out_shape
+                .0
+                .iter()
+                .any(|d| matches!(d, Dim::Seq)),
+            "value {v} routed through row_base has no Seq dim"
+        );
         let off = self.const_i64(self.plan.arena.slots[v - 1].offset as u64);
         let rl = self.const_i64(self.row_len(v));
         let ro = self.builder.build_int_mul(frame.row, rl, "rowoff").unwrap();
@@ -287,7 +321,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let body_bb = self.ctx.append_basic_block(func, "loop.body");
         let exit = self.ctx.append_basic_block(func, "loop.exit");
 
-        let idx = self.builder.build_alloca(self.i64_t, "i").unwrap();
+        let idx = self.entry_alloca(self.i64_t, "i");
         self.builder
             .build_store(idx, self.i64_t.const_zero())
             .unwrap();
@@ -461,7 +495,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
             let out_chunk = self.add(out_base, chunk);
 
             // sum-of-squares, accumulated left-to-right (matches oracle .sum()).
-            let acc = self.builder.build_alloca(self.f32_t, "ss").unwrap();
+            let acc = self.entry_alloca(self.f32_t, "ss");
             self.builder
                 .build_store(acc, self.f32_t.const_zero())
                 .unwrap();
