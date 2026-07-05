@@ -624,6 +624,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "inferno-plan"
+version = "0.1.0"
+dependencies = [
+ "inferno-formats",
+ "inferno-graph",
+ "inferno-kernels",
+ "inferno-target",
+ "insta",
+ "thiserror",
+]
+
+[[package]]
 name = "inferno-runtime"
 version = "0.1.0"
 dependencies = [
