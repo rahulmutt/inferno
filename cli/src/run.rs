@@ -3,10 +3,22 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::process::ExitCode;
 
+use inferno_core::Engine;
 use inferno_runtime::{Generator, Greedy};
 
-pub fn run(model: &Path, prompt: &str, max_tokens: usize, max_seq_len: usize) -> ExitCode {
-    let mut generator = match Generator::load(model, max_seq_len) {
+pub fn run(
+    model: &Path,
+    prompt: &str,
+    max_tokens: usize,
+    max_seq_len: usize,
+    interp: bool,
+) -> ExitCode {
+    let generator = if interp {
+        Generator::load(model, max_seq_len).map_err(|e| e.to_string())
+    } else {
+        load_compiled(model, max_seq_len).map_err(|e| e.to_string())
+    };
+    let mut generator = match generator {
         Ok(g) => g,
         Err(e) => {
             eprintln!("error: {e}");
@@ -52,4 +64,32 @@ pub fn run(model: &Path, prompt: &str, max_tokens: usize, max_seq_len: usize) ->
             ExitCode::FAILURE
         }
     }
+}
+
+/// Build a `Generator` driven by a `CompiledBackend` (the default, non
+/// `--interp` path).
+///
+/// `max_seq_len` MUST be the exact same value used to build the `Engine`
+/// (which sizes the `CompiledBackend`'s KV cache) and the `Generator`
+/// (which uses it for its own context-full bookkeeping) — a mismatch would
+/// desync the decode loop's stop condition from the backend's real KV
+/// capacity. We clamp it ONCE here (mirroring `Generator::load`'s own
+/// clamp against the model's context length) and hand the identical clamped
+/// value to both `Engine::load` and `Generator::load_with_backend` below, so
+/// there is exactly one number in play.
+fn load_compiled(
+    model: &Path,
+    max_seq_len: usize,
+) -> Result<Generator, Box<dyn std::error::Error>> {
+    let desc = inferno_formats::load_desc(model)?;
+    let ctx = desc.hyperparams.context_length as usize;
+    let max_seq_len = if ctx > 0 {
+        max_seq_len.min(ctx)
+    } else {
+        max_seq_len
+    };
+    let engine = Engine::load(model, max_seq_len)?;
+    let backend = engine.compiled_backend()?;
+    let generator = Generator::load_with_backend(model, max_seq_len, Box::new(backend))?;
+    Ok(generator)
 }

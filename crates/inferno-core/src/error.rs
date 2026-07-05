@@ -10,6 +10,8 @@ pub enum CoreError {
     Graph(#[from] inferno_graph::GraphError),
     #[error("codegen: {0}")]
     Codegen(#[from] inferno_codegen::CodegenError),
+    #[error("target: {0}")]
+    Target(#[from] inferno_target::TargetError),
     #[error("meta json: {0}")]
     Json(#[from] serde_json::Error),
     #[error("dlopen/symbol: {0}")]

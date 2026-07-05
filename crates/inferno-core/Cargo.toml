@@ -10,12 +10,21 @@ inferno-formats.workspace = true
 inferno-graph.workspace = true
 inferno-codegen.workspace = true
 inferno-kernels.workspace = true
+inferno-runtime.workspace = true
 libloading.workspace = true
 # rustix `mm` gives us a read-only, page-aligned mmap without a new
 # supply-chain dependency (rustix is already vendored for `param`). Page
 # alignment (4096) satisfies the rs8 AVX2 kernels' 32-byte aligned-load
 # requirement on the weight base — see artifact.rs.
-rustix = { workspace = true, features = ["mm"] }
+#
+# `std` is required on top of the workspace default (`default-features =
+# false`): `mmap`'s `AsFd` bound only accepts rustix's OWN `BorrowedFd`
+# without it, so `std::fs::File::as_fd()` (a *different*, same-named trait)
+# fails to satisfy it. Without an explicit `std` request here, a plain
+# `cargo build` (no dev-dependencies in the graph to pull it in transitively)
+# fails this exact way even though `cargo test` masked it — this crate must
+# request it directly since it is the one calling `mmap`.
+rustix = { workspace = true, features = ["mm", "std"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
