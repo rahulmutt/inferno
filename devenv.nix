@@ -20,6 +20,20 @@
   # comparison is apples-to-apples. The per-arch backends live under bin/.
   env.INFERNO_GGML_CPU_LIB = "${pkgs.llama-cpp}/bin/libggml-cpu-haswell.so";
 
+  # Runtime deps of the statically-linked LLVM libs that inferno-codegen pulls
+  # in via llvm-sys/inkwell (libstdc++ since LLVM is C++, libffi/libxml2/zlib
+  # since LLVM is built against them, ncurses for terminfo). Without this,
+  # `cargo test -p inferno-codegen` links fine but fails at runtime with
+  # "error while loading shared libraries" because the devenv shell's glibc
+  # doesn't consult the host's /etc/ld.so.cache.
+  env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+    pkgs.stdenv.cc.cc.lib
+    pkgs.libffi
+    pkgs.libxml2
+    pkgs.zlib
+    pkgs.ncurses
+  ];
+
   enterShell = ''
     echo "inferno devenv: LLVM $(llvm-config --version)"
   '';
