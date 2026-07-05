@@ -1,0 +1,32 @@
+---
+source: crates/inferno-plan/src/plan.rs
+expression: plan.dump()
+---
+plan (max_seq_len=64)
+islands:
+  Embed nodes[0..1] embed
+  AttnProj nodes[1..7] attnproj
+  Attention nodes[7..8] attention@7
+  Ffn nodes[8..16] ffn
+  AttnProj nodes[16..22] attnproj
+  Attention nodes[22..23] attention@22
+  Ffn nodes[23..31] ffn
+  Logits nodes[31..33] logits
+weights: image_bytes=388608
+  t3 Q8_0/rs8 rows=64 k=64 @0+4608
+  t4 Q8_0/rs8 rows=32 k=64 @4608+2304
+  t5 F32/rs8 rows=32 k=64 @6912+8192
+  t6 Q8_0/rs8 rows=64 k=64 @15104+4608
+  t8 F32/rs8 rows=256 k=64 @19712+65536
+  t9 F32/rs8 rows=256 k=64 @85248+65536
+  t10 Q4_K/rs8 rows=64 k=256 @150784+9728
+  t12 Q8_0/rs8 rows=64 k=64 @160512+4608
+  t13 Q8_0/rs8 rows=32 k=64 @165120+2304
+  t14 F32/rs8 rows=32 k=64 @167424+8192
+  t15 Q8_0/rs8 rows=64 k=64 @175616+4608
+  t17 F32/rs8 rows=256 k=64 @180224+65536
+  t18 F32/rs8 rows=256 k=64 @245760+65536
+  t19 Q4_K/rs8 rows=64 k=256 @311296+9728
+  t0 F32/rs8 rows=260 k=64 @321024+67584
+arena: total_f32=61440 act_scratch=@245760+292
+kv: layers=2 kv_dim=32 per_layer=8192 total=16384
