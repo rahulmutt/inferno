@@ -11,6 +11,9 @@
 //! `arena`, `logits_out`) uses that one opaque `ptr` type; only scalars stay
 //! distinctly typed (`i64` for `size_t`, `i32` for the raw `token` id).
 
+mod ops;
+pub use ops::build_full_module;
+
 use crate::Result;
 use inkwell::AddressSpace;
 use inkwell::context::Context;
@@ -76,10 +79,12 @@ impl<'c> LlvmModule<'c> {
         }
     }
 
-    /// Define the two generated entry points with empty (`ret void`) bodies.
-    /// Tasks 9-10 replace the bodies with real op lowering; the signatures
-    /// here must not change since later tasks depend on them.
-    pub fn define_entry_points(&self) -> (FunctionValue<'c>, FunctionValue<'c>) {
+    /// Declare the two generated entry points (signatures only, *no* body).
+    /// Task 9's `build_full_module` fills the bodies with real op lowering;
+    /// [`define_entry_points`](Self::define_entry_points) is the empty-body
+    /// variant kept for the scaffold test. Signatures must not change — later
+    /// tasks depend on the exact parameter order/types.
+    pub(crate) fn declare_entry_points(&self) -> (FunctionValue<'c>, FunctionValue<'c>) {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i64_t = self.ctx.i64_type();
         let i32_t = self.ctx.i32_type();
@@ -116,14 +121,26 @@ impl<'c> LlvmModule<'c> {
             .module
             .add_function("decode_step", decode_step_ty, None);
 
+        (prefill, decode_step)
+    }
+
+    /// Define the two generated entry points with empty (`ret void`) bodies.
+    /// Only used by the scaffold test; real lowering goes through
+    /// [`build_full_module`](crate::llvm::build_full_module).
+    pub fn define_entry_points(&self) -> (FunctionValue<'c>, FunctionValue<'c>) {
+        let (prefill, decode_step) = self.declare_entry_points();
         for f in [prefill, decode_step] {
             let bb = self.ctx.append_basic_block(f, "entry");
             let builder = self.ctx.create_builder();
             builder.position_at_end(bb);
             builder.build_return(None).unwrap();
         }
-
         (prefill, decode_step)
+    }
+
+    /// Access to the wrapped module (for op lowering in [`ops`]).
+    pub(crate) fn module(&self) -> &Module<'c> {
+        &self.module
     }
 
     /// Run LLVM's module verifier; `Err` carries the verifier's diagnostic.
@@ -142,6 +159,29 @@ impl<'c> LlvmModule<'c> {
 mod tests {
     use super::*;
     use inkwell::context::Context;
+
+    #[test]
+    fn lowered_module_verifies_on_tiny() {
+        use inferno_formats::load_desc;
+        use inferno_graph::build_graph;
+        use inferno_target::TargetDesc;
+        use std::path::Path;
+
+        let desc = load_desc(Path::new("../inferno-formats/tests/fixtures/tiny.gguf")).unwrap();
+        let graph = build_graph(&desc).unwrap();
+        let target = TargetDesc::detect().unwrap();
+        let plan = inferno_plan::plan(&desc, &graph, &target, 64).unwrap();
+
+        let ctx = Context::create();
+        let module = super::build_full_module(&ctx, &plan, &graph, &desc).unwrap();
+        // Correctness (numeric) is Task 12; this catches malformed IR early:
+        // bad pointer arithmetic, type mismatches, missing terminators.
+        assert!(
+            module.verify().is_ok(),
+            "module failed verification:\n{}",
+            module.print_to_string()
+        );
+    }
 
     #[test]
     fn scaffold_verifies() {
