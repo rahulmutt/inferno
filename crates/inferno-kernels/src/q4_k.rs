@@ -6,6 +6,8 @@
 use inferno_formats::quant::{f16_to_f32, get_scale_min_k4};
 
 use crate::act::{Q8K_BLOCK_BYTES, hsum_i32};
+#[cfg(target_arch = "x86_64")]
+use crate::q8_0::hsum8_i32;
 use crate::{AlignedBuf, KernelError, Result, STRIP};
 
 const WBLOCK: usize = 256; // weight elements per super-block
@@ -139,8 +141,82 @@ pub unsafe extern "C" fn inferno_gemv_q4_k_rs8_avx2(
     let nsb = k / WBLOCK;
     let ones = _mm256_set1_epi16(1);
     let nib = _mm256_set1_epi8(0x0F);
-    for r in row_start..row_end {
-        let (strip, lane) = (r / STRIP, r % STRIP);
+    let mut r = row_start;
+    while r < row_end {
+        let strip = r / STRIP;
+        let lane0 = r - strip * STRIP;
+        // Fast path: a whole strip lies in range → process its 8 rows lane-
+        // parallel (acc lane = row), reading each group and the activation
+        // super-block once instead of 8×. Within each row the chunk products
+        // are accumulated in the vector domain (mullo by the broadcast scale)
+        // and reduced once per super-block instead of 8× per-chunk hsums.
+        if lane0 == 0 && r + STRIP <= row_end {
+            let mut acc = _mm256_setzero_ps();
+            for sb in 0..nsb {
+                let g = unsafe { w.add((strip * nsb + sb) * GROUP_BYTES) };
+                let xb = unsafe { x.add(sb * Q8K_BLOCK_BYTES) };
+                let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
+                let xqs = unsafe { xb.add(4) };
+                // Activation qs + bsums, shared across the strip's 8 rows.
+                let mut xlo = [_mm256_setzero_si256(); 4];
+                let mut xhi = [_mm256_setzero_si256(); 4];
+                for c in 0..4 {
+                    xlo[c] = unsafe { _mm256_loadu_si256(xqs.add(c * 64).cast()) };
+                    xhi[c] = unsafe { _mm256_loadu_si256(xqs.add(c * 64 + 32).cast()) };
+                }
+                let bsums = unsafe { _mm256_loadu_si256(xb.add(260).cast()) };
+                let sc0 = unsafe { g.add(OFF_SC) };
+                let m0 = unsafe { g.add(OFF_M) };
+                let qs0 = unsafe { g.add(OFF_QS) };
+                let mut dv = [_mm256_setzero_si256(); STRIP]; // per-lane Σ sc·dot
+                let mut mv = [_mm256_setzero_si256(); STRIP]; // per-lane m·bsum products
+                for lane in 0..STRIP {
+                    let sc = unsafe { sc0.add(lane * 8) };
+                    let qs = unsafe { qs0.add(lane * 128) };
+                    let mut sumd = _mm256_setzero_si256();
+                    for c in 0..4 {
+                        // Aligned: g 32-aligned, OFF_QS=192, lane*128, c*32.
+                        let qv = unsafe { _mm256_load_si256(qs.add(c * 32).cast()) };
+                        let lo = _mm256_and_si256(qv, nib);
+                        let hi = _mm256_and_si256(_mm256_srli_epi16::<4>(qv), nib);
+                        // Nibbles unsigned 0..=15 → valid u8 operand for maddubs;
+                        // pairs sum ≤ 2·15·127 < i16::MAX, no saturation.
+                        let plo = _mm256_madd_epi16(_mm256_maddubs_epi16(lo, xlo[c]), ones);
+                        let phi = _mm256_madd_epi16(_mm256_maddubs_epi16(hi, xhi[c]), ones);
+                        // Weight each chunk's 8 partial sums by its 6-bit scale
+                        // and accumulate; sc·dot < 2^22, Σ < 2^25 → mullo exact.
+                        let sclo = _mm256_set1_epi32(i32::from(unsafe { sc.add(2 * c).read() }));
+                        let schi =
+                            _mm256_set1_epi32(i32::from(unsafe { sc.add(2 * c + 1).read() }));
+                        sumd = _mm256_add_epi32(sumd, _mm256_mullo_epi32(plo, sclo));
+                        sumd = _mm256_add_epi32(sumd, _mm256_mullo_epi32(phi, schi));
+                    }
+                    dv[lane] = sumd;
+                    // m·bsum products (8 lanes, j = sub-block index); reduced below.
+                    let mw =
+                        _mm256_cvtepu8_epi32(unsafe { _mm_loadl_epi64(m0.add(lane * 8).cast()) });
+                    mv[lane] = _mm256_mullo_epi32(mw, bsums);
+                }
+                // Transpose-reduce: sumd/summ lane i = row i (integer-exact).
+                let sumd = _mm256_cvtepi32_ps(hsum8_i32(dv));
+                let summ = _mm256_cvtepi32_ps(hsum8_i32(mv));
+                // 8 groups' d / dmin are contiguous → one aligned load each,
+                // lane = row, matching acc lane order.
+                let dw = unsafe { _mm256_load_ps(g.cast()) };
+                let dmin = unsafe { _mm256_load_ps(g.add(OFF_DMIN).cast()) };
+                let dxv = _mm256_set1_ps(dx);
+                // Per lane: acc = (dw*dx).mul_add(sumd, acc) then
+                // (dmin*dx).mul_add(-summ, acc) — bit-identical to scalar.
+                acc = _mm256_fmadd_ps(_mm256_mul_ps(dw, dxv), sumd, acc);
+                let neg_summ = _mm256_sub_ps(_mm256_setzero_ps(), summ);
+                acc = _mm256_fmadd_ps(_mm256_mul_ps(dmin, dxv), neg_summ, acc);
+            }
+            unsafe { _mm256_storeu_ps(y.add(r), acc) };
+            r += STRIP;
+            continue;
+        }
+        // Partial head/tail row: the original per-row path (already bit-identical).
+        let lane = lane0;
         let mut acc = 0f32;
         for sb in 0..nsb {
             let g = unsafe { w.add((strip * nsb + sb) * GROUP_BYTES) };
@@ -179,5 +255,6 @@ pub unsafe extern "C" fn inferno_gemv_q4_k_rs8_avx2(
             acc = (dmin * dx).mul_add(-(summ as f32), acc);
         }
         unsafe { y.add(r).write(acc) };
+        r += 1;
     }
 }
