@@ -1,0 +1,29 @@
+# AMD Ryzen 9 3900 (Zen 2), captured 2026-07-05 from live detection.
+# L3 is the per-CCX slice a single core sees, not the package total.
+isa = "x86-64-v3"
+features = []
+page_size = 4096
+memory_bw_class = "consumer"
+
+[topology]
+physical_cores = 12
+logical_cores = 24
+smt = true
+
+[[caches]]
+level = 1
+size_bytes = 32768
+line_bytes = 64
+shared_by = 2
+
+[[caches]]
+level = 2
+size_bytes = 524288
+line_bytes = 64
+shared_by = 2
+
+[[caches]]
+level = 3
+size_bytes = 16777216
+line_bytes = 64
+shared_by = 6
