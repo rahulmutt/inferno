@@ -650,12 +650,15 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
+ "inferno-core",
  "inferno-formats",
+ "inferno-graph",
  "inferno-runtime",
  "insta",
  "predicates",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -684,6 +687,7 @@ dependencies = [
  "inferno-formats",
  "inferno-graph",
  "inferno-kernels",
+ "inferno-runtime",
  "inferno-target",
  "libloading",
  "rustix",

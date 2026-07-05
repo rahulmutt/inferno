@@ -9,7 +9,9 @@ name = "inferno"
 path = "src/main.rs"
 
 [dependencies]
+inferno-core.workspace = true
 inferno-formats.workspace = true
+inferno-graph.workspace = true
 inferno-runtime.workspace = true
 clap.workspace = true
 serde.workspace = true
@@ -19,6 +21,7 @@ serde_json.workspace = true
 assert_cmd.workspace = true
 insta.workspace = true
 predicates.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

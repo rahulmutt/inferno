@@ -19,12 +19,54 @@ pub fn content_hash(bytes: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 
+/// Read the bytes that identify `model`'s content for hashing.
+///
+/// A single-file model (GGUF, `.safetensors`) is read directly. A
+/// directory-based model (MLX: `config.json` + `model.safetensors` +
+/// `tokenizer.json`) has no single canonical byte stream, so its content is
+/// the concatenation of every regular file's `(relative path, length, bytes)`
+/// beneath it, walked in a stable (lexicographically path-sorted) order —
+/// deterministic across runs/platforms and sensitive to any file in the
+/// directory changing, being added, or being removed.
+pub(crate) fn read_model_bytes(model: &Path) -> Result<Vec<u8>> {
+    if std::fs::metadata(model)?.is_dir() {
+        let mut files = Vec::new();
+        collect_files(model, &mut files)?;
+        files.sort();
+        let mut buf = Vec::new();
+        for path in files {
+            let rel = path.strip_prefix(model).unwrap_or(&path);
+            buf.extend_from_slice(rel.to_string_lossy().as_bytes());
+            buf.push(0);
+            let bytes = std::fs::read(&path)?;
+            buf.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+            buf.extend_from_slice(&bytes);
+        }
+        Ok(buf)
+    } else {
+        Ok(std::fs::read(model)?)
+    }
+}
+
+/// Recursively collect every regular file beneath `dir` into `out`.
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_files(&path, out)?;
+        } else {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
 /// Content-addressed key for a compiled artifact: a stable hex digest of the
 /// model bytes, the target description, `max_seq_len`, and this crate's
 /// version. Deterministic for identical inputs; changes whenever any input
 /// changes.
 pub fn cache_key(model_path: &Path, target: &TargetDesc, max_seq_len: usize) -> Result<String> {
-    let model_bytes = std::fs::read(model_path)?;
+    let model_bytes = read_model_bytes(model_path)?;
     let mut h = Sha256::new();
     h.update(content_hash(&model_bytes).as_bytes());
     // TargetDesc is Debug+deterministic; hash its debug form (isa, features, caches).

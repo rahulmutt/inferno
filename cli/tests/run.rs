@@ -50,3 +50,52 @@ fn run_reports_model_errors_cleanly() {
         .failure()
         .stderr(predicate::str::contains("error:"));
 }
+
+/// Task 16 gate: the compiled path (default `inferno run`) and the
+/// interpreter path (`--interp`) must produce IDENTICAL greedy token text.
+/// This runs the REAL `inferno` binary through the compiled `dlopen` path —
+/// it is the end-to-end proof that `-rdynamic` + kernel retention +
+/// `CompiledBackend` all work together (a resolution failure here surfaces as
+/// an `undefined symbol: inferno_gemv_*` dlopen error, not a silent mismatch).
+#[test]
+fn compiled_and_interp_agree_on_greedy_tokens() {
+    // Point both invocations at an isolated cache dir so this test doesn't
+    // race other tests / prior runs over the default `~/.cache/inferno`.
+    let cache = tempfile::tempdir().unwrap();
+
+    let compiled = Command::cargo_bin("inferno")
+        .unwrap()
+        .env("XDG_CACHE_HOME", cache.path())
+        .args([
+            "run",
+            &fixture("tiny.gguf"),
+            "--prompt",
+            "the",
+            "--max-tokens",
+            "8",
+        ])
+        .assert()
+        .success();
+    let compiled_stdout = String::from_utf8(compiled.get_output().stdout.clone()).unwrap();
+
+    let interp = Command::cargo_bin("inferno")
+        .unwrap()
+        .env("XDG_CACHE_HOME", cache.path())
+        .args([
+            "run",
+            &fixture("tiny.gguf"),
+            "--prompt",
+            "the",
+            "--max-tokens",
+            "8",
+            "--interp",
+        ])
+        .assert()
+        .success();
+    let interp_stdout = String::from_utf8(interp.get_output().stdout.clone()).unwrap();
+
+    assert_eq!(
+        compiled_stdout, interp_stdout,
+        "compiled and interpreter paths must produce identical greedy token text"
+    );
+}

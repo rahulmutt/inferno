@@ -373,7 +373,9 @@ pub fn verify_cache(dir: &Path, model: &Path) -> Result<Meta> {
     if content_hash(&weights) != meta.weights_hash {
         return fail("weights.bin hash mismatch");
     }
-    let model_bytes = std::fs::read(model)?;
+    // `model` may be a single file (GGUF/safetensors) or a directory (MLX);
+    // `read_model_bytes` handles both the same way `cache_key` does.
+    let model_bytes = crate::cache::read_model_bytes(model)?;
     if content_hash(&model_bytes) != meta.model_hash {
         return fail("model hash mismatch");
     }
@@ -385,7 +387,7 @@ pub fn verify_cache(dir: &Path, model: &Path) -> Result<Meta> {
 fn finalize_meta(dir: &Path, model: &Path, target: &TargetDesc) -> Result<Meta> {
     let mut meta: Meta = serde_json::from_slice(&std::fs::read(dir.join("meta.json"))?)?;
     meta.weights_hash = content_hash(&std::fs::read(dir.join("weights.bin"))?);
-    meta.model_hash = content_hash(&std::fs::read(model)?);
+    meta.model_hash = content_hash(&crate::cache::read_model_bytes(model)?);
     meta.target_hash = content_hash(format!("{target:?}").as_bytes());
     std::fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
     Ok(meta)
