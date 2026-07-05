@@ -9,7 +9,9 @@ use std::io::Read;
 use value::GgufValue;
 
 use crate::read::*;
-use crate::{Architecture, DType, FormatError, HyperParams, ModelDesc, Result, TensorDesc, limits};
+use crate::{
+    Architecture, DType, FormatError, HyperParams, ModelDesc, Result, RopeStyle, TensorDesc, limits,
+};
 
 /// `io::Read` wrapper that tracks the byte position, so we can compute where
 /// the aligned data section starts without requiring `Seek`.
@@ -155,6 +157,67 @@ pub fn parse<R: Read>(r: &mut R) -> Result<ModelDesc> {
         tensors,
         weight_files: Vec::new(), // caller (load_desc) records the path
         data_section_offsets: vec![data_section],
+        tokenizer: extract_tokenizer(&meta),
+    })
+}
+
+fn extract_tokenizer(meta: &BTreeMap<String, GgufValue>) -> Option<crate::desc::TokenizerSpec> {
+    use crate::desc::{SpecialTokens, TokenizerKind, TokenizerSpec};
+    let kind = match meta
+        .get("tokenizer.ggml.model")
+        .and_then(GgufValue::as_str)?
+    {
+        "gpt2" => TokenizerKind::Bpe,
+        "llama" => TokenizerKind::Spm,
+        _ => return None, // unsupported tokenizer family → model parses, can't run
+    };
+    let str_array = |key: &str| -> Vec<String> {
+        meta.get(key)
+            .and_then(GgufValue::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let tokens = str_array("tokenizer.ggml.tokens");
+    if tokens.is_empty() {
+        return None;
+    }
+    let scores = meta
+        .get("tokenizer.ggml.scores")
+        .and_then(GgufValue::as_array)
+        .map(|a| a.iter().filter_map(GgufValue::as_f32).collect())
+        .unwrap_or_default();
+    let token_types = meta
+        .get("tokenizer.ggml.token_type")
+        .and_then(GgufValue::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_i64().map(|i| i as i32))
+                .collect()
+        })
+        .unwrap_or_default();
+    let get_id = |key: &str| meta.get(key).and_then(GgufValue::as_u64).map(|v| v as u32);
+    Some(TokenizerSpec::Embedded {
+        kind,
+        merges: str_array("tokenizer.ggml.merges"),
+        pre: meta
+            .get("tokenizer.ggml.pre")
+            .and_then(GgufValue::as_str)
+            .map(str::to_string),
+        special: SpecialTokens {
+            bos: get_id("tokenizer.ggml.bos_token_id"),
+            eos: get_id("tokenizer.ggml.eos_token_id"),
+        },
+        add_bos: meta
+            .get("tokenizer.ggml.add_bos_token")
+            .and_then(GgufValue::as_bool)
+            .unwrap_or(kind == TokenizerKind::Spm), // SPM models add BOS by default
+        tokens,
+        scores,
+        token_types,
     })
 }
 
@@ -173,6 +236,12 @@ fn extract_hyperparams(
         .and_then(GgufValue::as_str)
         .ok_or_else(|| FormatError::MissingKey("general.architecture".into()))?;
     let architecture = Architecture::from_id(arch_id);
+    let rope_style = match architecture {
+        // Qwen2/Qwen3 GGUFs keep HF half-split layout; llama-arch GGUFs
+        // (Llama, Mistral) had Q/K rows permuted at conversion.
+        Architecture::Qwen2 | Architecture::Qwen3 => RopeStyle::HalfSplit,
+        _ => RopeStyle::Interleaved,
+    };
     let name = meta
         .get("general.name")
         .and_then(GgufValue::as_str)
@@ -214,6 +283,7 @@ fn extract_hyperparams(
                 .and_then(GgufValue::as_f32)
                 .unwrap_or(1e-5),
             context_length: get_u64(meta, &k("context_length")).unwrap_or(0),
+            rope_style,
         },
     ))
 }
@@ -331,6 +401,49 @@ mod tests {
             parse(&mut Cursor::new(&bytes)),
             Err(crate::FormatError::Malformed { .. })
         ));
+    }
+
+    #[test]
+    fn extracts_bpe_tokenizer_spec() {
+        // fixtures::tiny_llama_gguf() gains tokenizer keys in Task 5; until
+        // then, hand-assemble a minimal GGUF with the fixture KV helpers.
+        use crate::desc::{TokenizerKind, TokenizerSpec};
+        use crate::fixtures::{put_kv_str, put_kv_str_array, put_kv_u32};
+        let mut out = Vec::new();
+        out.extend_from_slice(b"GGUF");
+        out.extend_from_slice(&3u32.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes()); // tensors
+        out.extend_from_slice(&8u64.to_le_bytes()); // kv count
+        put_kv_str(&mut out, "general.architecture", "llama");
+        put_kv_u32(&mut out, "llama.block_count", 1);
+        put_kv_u32(&mut out, "llama.embedding_length", 8);
+        put_kv_u32(&mut out, "llama.attention.head_count", 2);
+        put_kv_u32(&mut out, "llama.feed_forward_length", 16);
+        put_kv_str(&mut out, "tokenizer.ggml.model", "gpt2");
+        put_kv_str_array(&mut out, "tokenizer.ggml.tokens", &["a".into(), "b".into()]);
+        put_kv_str_array(&mut out, "tokenizer.ggml.merges", &["a b".into()]);
+        let desc = parse(&mut Cursor::new(&out)).unwrap();
+        let Some(TokenizerSpec::Embedded {
+            kind,
+            tokens,
+            merges,
+            add_bos,
+            ..
+        }) = desc.tokenizer
+        else {
+            panic!("expected embedded tokenizer");
+        };
+        assert_eq!(kind, TokenizerKind::Bpe);
+        assert_eq!(tokens, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(merges, vec!["a b".to_string()]);
+        assert!(!add_bos); // BPE default when key absent
+    }
+
+    #[test]
+    fn rope_style_by_architecture() {
+        // llama-arch GGUF → Interleaved (conversion permutes Q/K).
+        let desc = parse(&mut Cursor::new(&fixtures::tiny_llama_gguf())).unwrap();
+        assert_eq!(desc.hyperparams.rope_style, crate::RopeStyle::Interleaved);
     }
 
     #[test]

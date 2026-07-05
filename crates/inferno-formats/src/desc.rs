@@ -59,6 +59,44 @@ impl Architecture {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum RopeStyle {
+    /// GGML "NORM": rotate adjacent pairs (x[2i], x[2i+1]). GGUF llama-arch
+    /// files use this because conversion permutes Q/K weight rows.
+    Interleaved,
+    /// GPT-NeoX / HF: rotate half-split pairs (x[i], x[i+head_dim/2]).
+    HalfSplit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenizerKind {
+    Bpe,
+    Spm,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SpecialTokens {
+    pub bos: Option<u32>,
+    pub eos: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenizerSpec {
+    Embedded {
+        kind: TokenizerKind,
+        tokens: Vec<String>,
+        scores: Vec<f32>,      // empty for BPE
+        token_types: Vec<i32>, // GGUF type ids (1=normal 3=control 6=byte); empty if absent
+        merges: Vec<String>,   // "left right" pairs; empty for SPM
+        pre: Option<String>,   // GGUF pre-tokenizer id, e.g. "qwen2"
+        special: SpecialTokens,
+        add_bos: bool,
+    },
+    HfJson {
+        path: PathBuf,
+    },
+}
+
 /// Llama-family transformer hyperparameters (spec §Graph IR).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct HyperParams {
@@ -71,6 +109,7 @@ pub struct HyperParams {
     pub rope_theta: f32,
     pub norm_eps: f32,
     pub context_length: u64,
+    pub rope_style: RopeStyle,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -100,6 +139,9 @@ pub struct ModelDesc {
     pub weight_files: Vec<PathBuf>,
     /// Byte offset of the data section in each weight file (parallel array).
     pub data_section_offsets: Vec<u64>,
+    /// Not serialized: vocab-scale payload would bloat snapshots.
+    #[serde(skip)]
+    pub tokenizer: Option<TokenizerSpec>,
 }
 
 #[cfg(test)]

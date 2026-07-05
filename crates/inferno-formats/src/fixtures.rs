@@ -15,30 +15,44 @@ pub fn tiny_hyperparams() -> HyperParams {
         rope_theta: 10000.0,
         norm_eps: 1e-5,
         context_length: 128,
+        rope_style: crate::RopeStyle::Interleaved,
     }
 }
 
-fn put_str(out: &mut Vec<u8>, s: &str) {
+pub(crate) fn put_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&(s.len() as u64).to_le_bytes());
     out.extend_from_slice(s.as_bytes());
 }
 
-fn put_kv_u32(out: &mut Vec<u8>, key: &str, v: u32) {
+pub(crate) fn put_kv_u32(out: &mut Vec<u8>, key: &str, v: u32) {
     put_str(out, key);
     out.extend_from_slice(&4u32.to_le_bytes());
     out.extend_from_slice(&v.to_le_bytes());
 }
 
-fn put_kv_f32(out: &mut Vec<u8>, key: &str, v: f32) {
+pub(crate) fn put_kv_f32(out: &mut Vec<u8>, key: &str, v: f32) {
     put_str(out, key);
     out.extend_from_slice(&6u32.to_le_bytes());
     out.extend_from_slice(&v.to_le_bytes());
 }
 
-fn put_kv_str(out: &mut Vec<u8>, key: &str, v: &str) {
+pub(crate) fn put_kv_str(out: &mut Vec<u8>, key: &str, v: &str) {
     put_str(out, key);
     out.extend_from_slice(&8u32.to_le_bytes());
     put_str(out, v);
+}
+
+// Only exercised by unit tests until Task 5 wires tokenizer keys into
+// `tiny_llama_gguf()`; cfg(test)-gated so non-test builds don't see dead code.
+#[cfg(test)]
+pub(crate) fn put_kv_str_array(out: &mut Vec<u8>, key: &str, items: &[String]) {
+    put_str(out, key);
+    out.extend_from_slice(&9u32.to_le_bytes()); // array
+    out.extend_from_slice(&8u32.to_le_bytes()); // elem: string
+    out.extend_from_slice(&(items.len() as u64).to_le_bytes());
+    for s in items {
+        put_str(out, s);
+    }
 }
 
 /// Tensor list for the tiny llama: (name, row-major shape).

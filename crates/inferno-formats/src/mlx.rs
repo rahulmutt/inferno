@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::{Architecture, FormatError, HyperParams, ModelDesc, Result, safetensors};
+use crate::{Architecture, FormatError, HyperParams, ModelDesc, Result, RopeStyle, safetensors};
 
 #[derive(Deserialize)]
 struct MlxConfig {
@@ -61,6 +61,13 @@ pub fn load_dir(dir: &Path) -> Result<ModelDesc> {
         data_section_offsets.push(data_off);
     }
 
+    let tokenizer_json = dir.join("tokenizer.json");
+    let tokenizer = tokenizer_json
+        .is_file()
+        .then_some(crate::desc::TokenizerSpec::HfJson {
+            path: tokenizer_json,
+        });
+
     Ok(ModelDesc {
         architecture: Architecture::from_id(&config.model_type),
         name: dir.file_name().map(|n| n.to_string_lossy().into_owned()),
@@ -76,10 +83,12 @@ pub fn load_dir(dir: &Path) -> Result<ModelDesc> {
             rope_theta: config.rope_theta,
             norm_eps: config.rms_norm_eps,
             context_length: config.max_position_embeddings,
+            rope_style: RopeStyle::HalfSplit,
         },
         tensors,
         weight_files: shard_paths,
         data_section_offsets,
+        tokenizer,
     })
 }
 
@@ -111,7 +120,15 @@ mod tests {
         let dir = write_tiny_mlx_dir();
         let desc = load_dir(dir.path()).unwrap();
         assert_eq!(desc.architecture, Architecture::Llama);
-        assert_eq!(desc.hyperparams, fixtures::tiny_hyperparams());
+        // MLX models are always HF half-split rope layout, unlike the
+        // GGUF-oriented fixtures::tiny_hyperparams() default.
+        assert_eq!(
+            desc.hyperparams,
+            HyperParams {
+                rope_style: RopeStyle::HalfSplit,
+                ..fixtures::tiny_hyperparams()
+            }
+        );
         assert_eq!(desc.tensors.len(), fixtures::tiny_tensor_shapes().len());
         assert_eq!(
             desc.weight_files,
@@ -165,6 +182,26 @@ mod tests {
         assert_eq!(desc.hyperparams.rope_theta, 10000.0);
         assert_eq!(desc.hyperparams.norm_eps, 1e-5);
         assert_eq!(desc.hyperparams.context_length, 0);
+    }
+
+    #[test]
+    fn detects_tokenizer_json_and_halfsplit_rope() {
+        let dir = write_tiny_mlx_dir();
+        std::fs::write(dir.path().join("tokenizer.json"), "{}").unwrap();
+        let desc = load_dir(dir.path()).unwrap();
+        assert_eq!(desc.hyperparams.rope_style, crate::RopeStyle::HalfSplit);
+        match desc.tokenizer {
+            Some(crate::desc::TokenizerSpec::HfJson { path }) => {
+                assert_eq!(path, dir.path().join("tokenizer.json"));
+            }
+            other => panic!("expected HfJson, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_tokenizer_json_means_none() {
+        let dir = write_tiny_mlx_dir();
+        assert!(load_dir(dir.path()).unwrap().tokenizer.is_none());
     }
 
     #[test]

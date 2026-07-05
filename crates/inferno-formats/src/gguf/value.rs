@@ -107,6 +107,34 @@ impl GgufValue {
             _ => None,
         }
     }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match *self {
+            Self::Bool(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match *self {
+            Self::U8(v) => Some(v.into()),
+            Self::U16(v) => Some(v.into()),
+            Self::U32(v) => Some(v.into()),
+            Self::U64(v) => i64::try_from(v).ok(),
+            Self::I8(v) => Some(v.into()),
+            Self::I16(v) => Some(v.into()),
+            Self::I32(v) => Some(v.into()),
+            Self::I64(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&[GgufValue]> {
+        match self {
+            Self::Array(v) => Some(v),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

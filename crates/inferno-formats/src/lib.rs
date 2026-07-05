@@ -17,7 +17,10 @@ mod read;
 pub mod safetensors;
 
 pub use data::read_tensor_bytes;
-pub use desc::{Architecture, DType, HyperParams, ModelDesc, TensorDesc};
+pub use desc::{
+    Architecture, DType, HyperParams, ModelDesc, RopeStyle, SpecialTokens, TensorDesc,
+    TokenizerKind, TokenizerSpec,
+};
 pub use error::{FormatError, Result};
 
 use std::fs::File;

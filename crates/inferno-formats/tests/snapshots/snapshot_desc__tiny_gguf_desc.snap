@@ -14,6 +14,7 @@ hyperparams:
   rope_theta: 10000
   norm_eps: 0.00001
   context_length: 128
+  rope_style: Interleaved
 tensors:
   - name: token_embed.weight
     shape:
