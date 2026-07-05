@@ -37,3 +37,12 @@ for the v1 design.
   the gap distributions printed by `mise run differential` — adjust it with
   observed data, never to make a red nightly green without understanding the
   divergence.
+- **`inferno-kernels` is the only crate allowed `unsafe`** (intrinsics + the
+  C ABI); it opts out of the workspace lint deliberately. Scalar and SIMD
+  kernel variants must stay bit-identical — the rig asserts exact equality.
+- **Kernel perf numbers come only from `mise run bench-kernels`** inside the
+  devenv shell on quiet hardware; CI runners are noise. Record data points in
+  the M2 spec's amendments section.
+- **`gemv_rel_tol`** follows the same rule as `LOGIT_TIE_EPSILON`: tuned
+  against observed error distributions (the rig's ignored `observed_error_*`
+  diagnostics), never to make a red test green.

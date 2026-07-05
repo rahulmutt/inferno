@@ -222,3 +222,74 @@ must be understood before M3 starts.
 - `mise run bench-kernels` produces side-by-side inferno-vs-ggml numbers;
   first data points recorded in docs, at or approaching parity (see the risk
   exit criterion above).
+
+## Amendments (2026-07-05, during planning and implementation)
+
+- **ggml comparison mechanism:** the pinned llama.cpp exports the needed
+  kernels from its per-arch CPU backends (`bin/libggml-cpu-<arch>.so`), not
+  from `libggml.so`. The bench `dlopen`s `libggml-cpu-haswell.so` (AVX2+FMA)
+  via `$INFERNO_GGML_CPU_LIB` instead of link-time FFI; the `ggml_mul_mat`
+  fallback was unnecessary. Verified: all five symbols export.
+- **detect==profile placement:** GitHub runners are not the dev machine, so
+  the equivalence test is gated on `INFERNO_EXPECT_PROFILE` (vacuous when
+  unset) rather than nightly-scheduled; nightly CI instead runs the full
+  suite with `PROPTEST_CASES=1024`.
+- **`pack_*` is safe Rust, not a C symbol** — its only caller (M3 planner)
+  is Rust. `quantize_row_*`/`gemv_*` remain `extern "C"`.
+- **ISA variants are bit-identical**, not ~1e-6-close: integer block dots are
+  exact and the f32 combine order is fixed. The rig asserts exact equality.
+- **`pack_q8_0_rs8` clamps weight bytes −128 → −127** so the AVX2 sign-trick
+  stays exact on hostile files (ggml's quantizer never emits −128).
+- **Benches report GB/s only** (criterion `Throughput::Bytes` on the weight
+  stream — the metric that matters for a memory-bound GEMV). GFLOPS is
+  derivable as `2·rows·k / time` and was dropped rather than double-reported.
+- **Oracle rig determinism (commit cc072c9):** the spec/plan's kernel-vs-oracle
+  comparison originally fed the oracle raw f32 activations; measured
+  activation-quantization noise (Q8_0 6.25e-2 rel @500k seeds, Q4_K tail
+  ~0.142 @3M seeds — small-k/small-|y| worst) exceeds any meaningful constant
+  tolerance, making the rig proptests unfixably flaky. The oracle-match tests
+  now decode the kernel's own q8a/q8k activation buffer and feed that to the
+  oracle: both sides consume identical quantized weights AND activations, so
+  `gemv_rel_tol` bounds only combine-order/fma rounding and was retuned
+  ~2000× tighter from observed data (Q8_0 1e-5, observed 2.384e-6; Q4_K 4e-5,
+  observed 9.239e-6). End-to-end activation-quant noise remains covered by
+  act.rs round-trip tests and measured by the rig's ignored
+  `observed_error_*` diagnostics (raw-f32 comparison, sweeping the property
+  shape distribution).
+- **Strip-parallel AVX2 tuning (commit 4d430d8):** initial bench parity vs
+  ggml fell below the spec bar on k>=4096 shapes (Q8_0 0.35–0.74×, Q4_K
+  0.25–0.61×); the plan-anticipated optimizations (process whole strips per
+  pass; batch integer reductions — one transpose-reduction per 8 lanes /
+  vector-domain scale accumulation) landed as a Task 8 follow-up, preserving
+  the bitwise scalar/AVX2 contract. Result: Q8_0 1.09–1.72× (above parity),
+  Q4_K 0.72–0.80× (remaining gap is shuffle-port-bound integer work; closing
+  it needs VNNI/AVX-512, out of M2 scope).
+
+### First bench data points (dev Ryzen 9 3900, 2026-07-05)
+
+Criterion GB/s, midpoint estimates, `mise run bench-kernels` inside the
+devenv shell on quiet hardware (raw log: `/tmp/bench-kernels-m2.txt`). Note:
+inferno's byte basis is the packed weight image, ggml's is its own file
+image (F32 identical; quantized dtypes ~5.6–5.9% apart), so the GB/s columns
+across engines aren't directly comparable — the ratio column is computed
+from wall-clock time (`t_ggml / t_avx2`; >1× means inferno-avx2 is faster)
+on identical `rows × k`, which is basis-independent.
+
+| dtype | shape (rows x k) | scalar GiB/s | avx2 GiB/s | ggml GiB/s | avx2:ggml (time) |
+|-------|-----------------|-------------:|-----------:|-----------:|------------------:|
+| F32  | 4096x4096   | 1.77 | 20.07 | 19.74 | 1.02x |
+| Q8_0 | 896x896     | 10.34 | 43.74 | 23.99 | 1.72x |
+| Q8_0 | 4864x896    | 10.27 | 43.28 | 24.01 | 1.70x |
+| Q8_0 | 896x4864    | 10.94 | 43.57 | 25.16 | 1.64x |
+| Q8_0 | 151936x896  | 5.62 | 16.43 | 13.35 | 1.16x |
+| Q8_0 | 4096x4096   | 3.91 | 18.51 | 16.02 | 1.09x |
+| Q8_0 | 14336x4096  | 3.65 | 16.57 | 13.75 | 1.14x |
+| Q4_K | 4096x4096   | 2.46 | 14.90 | 18.98 | 0.74x |
+| Q4_K | 14336x4096  | 2.28 | 10.14 | 12.65 | 0.76x |
+| Q4_K | 4096x14336  | 1.98 | 10.71 | 12.71 | 0.80x |
+| Q4_K | 128256x4096 | 2.29 | 9.63 | 12.57 | 0.73x |
+
+F32 and Q8_0 (small-k, cache-resident, and large DRAM-bound shapes) are at
+or above parity with ggml; Q4_K clears the ~0.7× approaching-parity bar on
+every k>=4096 shape but remains compute-bound behind ggml's tuned
+scale-folded accumulation (see the strip-parallel amendment above).

@@ -77,3 +77,14 @@ jobs:
           path: ~/.cache/inferno-tests
           key: inferno-test-models-qwen25-05b-v1
       - run: devenv shell -- mise run differential
+
+  # Full suite incl. ignored/slow tests, with enlarged property-test runs.
+  test-full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - run: mise run test-full
+        env:
+          PROPTEST_CASES: "1024"
