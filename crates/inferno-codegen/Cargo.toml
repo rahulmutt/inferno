@@ -1,0 +1,20 @@
+[package]
+name = "inferno-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+inferno-formats.workspace = true
+inferno-graph.workspace = true
+inferno-target.workspace = true
+inferno-kernels.workspace = true
+inferno-plan.workspace = true
+inkwell.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true
