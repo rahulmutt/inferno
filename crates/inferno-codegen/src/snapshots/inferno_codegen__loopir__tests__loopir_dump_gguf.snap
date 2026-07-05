@@ -14,7 +14,7 @@ island AttnProj
   Rope { src: 3, out: 6, n_heads: 2, head_dim: 32, theta: 10000.0, style: Interleaved }
   Rope { src: 4, out: 7, n_heads: 1, head_dim: 32, theta: 10000.0, style: Interleaved }
 island Attention
-  Attention { q: 6, layer: 0, n_heads: 2, n_kv_heads: 1, head_dim: 32, out: 8 }
+  Attention { q: 6, k: 7, v: 5, layer: 0, n_heads: 2, n_kv_heads: 1, head_dim: 32, out: 8 }
 island Ffn
   Quantize { dtype: Q8_0, src: 8, k: 64 }
   gemv inferno_gemv_q8_0_rs8 w3 -> %9 rows=64 k=64
@@ -36,7 +36,7 @@ island AttnProj
   Rope { src: 18, out: 21, n_heads: 2, head_dim: 32, theta: 10000.0, style: Interleaved }
   Rope { src: 19, out: 22, n_heads: 1, head_dim: 32, theta: 10000.0, style: Interleaved }
 island Attention
-  Attention { q: 21, layer: 1, n_heads: 2, n_kv_heads: 1, head_dim: 32, out: 23 }
+  Attention { q: 21, k: 22, v: 20, layer: 1, n_heads: 2, n_kv_heads: 1, head_dim: 32, out: 23 }
 island Ffn
   Quantize { dtype: Q8_0, src: 23, k: 64 }
   gemv inferno_gemv_q8_0_rs8 w10 -> %24 rows=64 k=64
