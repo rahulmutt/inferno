@@ -1,0 +1,53 @@
+---
+source: crates/inferno-codegen/src/loopir.rs
+expression: lir.dump()
+---
+island Embed
+  Embed { table: 0, out: 1 }
+island AttnProj
+  RmsNorm { src: 1, weight: 2, eps: 1e-5, out: 2, head_dim: None }
+  Quantize { dtype: Q8_0, src: 2, k: 64 }
+  gemv inferno_gemv_q8_0_rs8 w0 -> %3 rows=64 k=64
+  Quantize { dtype: Q8_0, src: 2, k: 64 }
+  gemv inferno_gemv_q8_0_rs8 w1 -> %4 rows=32 k=64
+  gemv inferno_gemv_f32_rs8 w2 -> %5 rows=32 k=64
+  Rope { src: 3, out: 6, n_heads: 2, head_dim: 32, theta: 10000.0, style: Interleaved }
+  Rope { src: 4, out: 7, n_heads: 1, head_dim: 32, theta: 10000.0, style: Interleaved }
+island Attention
+  Attention { q: 6, layer: 0, n_heads: 2, n_kv_heads: 1, head_dim: 32, out: 8 }
+island Ffn
+  Quantize { dtype: Q8_0, src: 8, k: 64 }
+  gemv inferno_gemv_q8_0_rs8 w3 -> %9 rows=64 k=64
+  Add { a: 1, b: 9, out: 10 }
+  RmsNorm { src: 10, weight: 7, eps: 1e-5, out: 11, head_dim: None }
+  gemv inferno_gemv_f32_rs8 w4 -> %12 rows=256 k=64
+  gemv inferno_gemv_f32_rs8 w5 -> %13 rows=256 k=64
+  SwiGlu { gate: 12, up: 13, out: 14 }
+  Quantize { dtype: Q4_K, src: 14, k: 256 }
+  gemv inferno_gemv_q4_k_rs8 w6 -> %15 rows=64 k=256
+  Add { a: 10, b: 15, out: 16 }
+island AttnProj
+  RmsNorm { src: 16, weight: 11, eps: 1e-5, out: 17, head_dim: None }
+  Quantize { dtype: Q8_0, src: 17, k: 64 }
+  gemv inferno_gemv_q8_0_rs8 w7 -> %18 rows=64 k=64
+  Quantize { dtype: Q8_0, src: 17, k: 64 }
+  gemv inferno_gemv_q8_0_rs8 w8 -> %19 rows=32 k=64
+  gemv inferno_gemv_f32_rs8 w9 -> %20 rows=32 k=64
+  Rope { src: 18, out: 21, n_heads: 2, head_dim: 32, theta: 10000.0, style: Interleaved }
+  Rope { src: 19, out: 22, n_heads: 1, head_dim: 32, theta: 10000.0, style: Interleaved }
+island Attention
+  Attention { q: 21, layer: 1, n_heads: 2, n_kv_heads: 1, head_dim: 32, out: 23 }
+island Ffn
+  Quantize { dtype: Q8_0, src: 23, k: 64 }
+  gemv inferno_gemv_q8_0_rs8 w10 -> %24 rows=64 k=64
+  Add { a: 16, b: 24, out: 25 }
+  RmsNorm { src: 25, weight: 16, eps: 1e-5, out: 26, head_dim: None }
+  gemv inferno_gemv_f32_rs8 w11 -> %27 rows=256 k=64
+  gemv inferno_gemv_f32_rs8 w12 -> %28 rows=256 k=64
+  SwiGlu { gate: 27, up: 28, out: 29 }
+  Quantize { dtype: Q4_K, src: 29, k: 256 }
+  gemv inferno_gemv_q4_k_rs8 w13 -> %30 rows=64 k=256
+  Add { a: 25, b: 30, out: 31 }
+island Logits
+  RmsNorm { src: 31, weight: 1, eps: 1e-5, out: 32, head_dim: None }
+  gemv inferno_gemv_f32_rs8 w14 -> %33 rows=260 k=64
