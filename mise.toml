@@ -45,3 +45,7 @@ run = ["cargo audit", "cargo deny check advisories bans sources licenses"]
 [tasks.fuzz]
 description = "Run one fuzz target briefly (nightly rustc): mise run fuzz -- gguf_parse"
 run = "mise exec rust@nightly -- cargo fuzz run --fuzz-dir fuzz {{arg(name='target')}} -- -max_total_time=60"
+
+[tasks.differential]
+description = "Nightly teacher-forced differential vs llama.cpp (downloads a real model; run inside devenv shell)"
+run = "bash scripts/nightly-differential.sh"

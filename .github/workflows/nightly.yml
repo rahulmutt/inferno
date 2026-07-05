@@ -59,3 +59,20 @@ jobs:
       - run: devenv shell -- bash -c 'llvm-config --version && command -v llama-cli'
       - run: mise run test
       - run: cargo run -p inferno -- inspect crates/inferno-formats/tests/fixtures/tiny.gguf
+
+  # Teacher-forced greedy differential vs the devenv-pinned llama.cpp on a
+  # real quantized model (M1 spec §Nightly tier).
+  differential:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+      - run: nix profile install nixpkgs#devenv
+      - uses: jdx/mise-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/inferno-tests
+          key: inferno-test-models-qwen25-05b-v1
+      - run: devenv shell -- mise run differential

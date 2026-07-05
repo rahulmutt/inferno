@@ -23,6 +23,7 @@ Requires [devenv](https://devenv.sh) (native deps: LLVM, llama.cpp) and
 Try it:
 
     cargo run -p inferno -- inspect crates/inferno-formats/tests/fixtures/tiny.gguf
+    cargo run -p inferno -- run crates/inferno-formats/tests/fixtures/tiny.gguf --prompt "the" --max-tokens 4
 
 ## Common tasks
 

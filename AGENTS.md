@@ -25,3 +25,15 @@ for the v1 design.
 - Fixture files under `tests/fixtures/` and `fuzz/corpus/` are generated —
   regenerate with `cargo run -p inferno-formats --example gen_fixtures`,
   don't hand-edit.
+- **Rope style is coupled to weight layout:** GGUF llama-arch files carry
+  *row-permuted* Q/K weights (Interleaved rope); MLX/HF files are unpermuted
+  (HalfSplit). `HyperParams::rope_style` records which; the fixture
+  differential (`inferno-graph/tests/differential.rs`) guards the coupling.
+  Never "simplify" one side without the other.
+- **Embedded and JSON tokenizer fixtures must stay equivalent:**
+  `fixtures::tiny_vocab()` feeds both the GGUF metadata and
+  `mlx/tokenizer.json`; the BPE equivalence property tests depend on it.
+- **`LOGIT_TIE_EPSILON`** (`inferno-graph/src/tolerance.rs`) is tuned against
+  the gap distributions printed by `mise run differential` — adjust it with
+  observed data, never to make a red nightly green without understanding the
+  divergence.
