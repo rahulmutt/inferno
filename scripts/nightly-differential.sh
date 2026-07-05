@@ -11,10 +11,7 @@ CACHE="${INFERNO_TEST_MODEL_DIR:-$HOME/.cache/inferno-tests}"
 mkdir -p "$CACHE/qwen2.5-0.5b-mlx"
 HF="https://huggingface.co"
 
-GGUF="$CACHE/qwen2.5-0.5b-instruct-q8_0.gguf"
-[ -f "$GGUF" ] || { curl -fL --retry 3 -o "$GGUF.tmp" \
-  "$HF/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf" \
-  && mv "$GGUF.tmp" "$GGUF"; }
+GGUF="$(bash "$(dirname "$0")/fetch-qwen-gguf.sh")"
 
 MLX="$CACHE/qwen2.5-0.5b-mlx"
 for f in config.json model.safetensors tokenizer.json; do

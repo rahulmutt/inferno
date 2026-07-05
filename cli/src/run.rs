@@ -77,7 +77,7 @@ pub fn run(
 /// clamp against the model's context length) and hand the identical clamped
 /// value to both `Engine::load` and `Generator::load_with_backend` below, so
 /// there is exactly one number in play.
-fn load_compiled(
+pub(crate) fn load_compiled(
     model: &Path,
     max_seq_len: usize,
 ) -> Result<Generator, Box<dyn std::error::Error>> {

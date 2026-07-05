@@ -1,3 +1,4 @@
+mod bench;
 mod compile;
 mod diff;
 mod inspect;
@@ -80,6 +81,21 @@ enum Command {
         #[arg(long, default_value_t = 4096)]
         max_seq_len: usize,
     },
+    /// Decode-throughput speedup gate: generates `max_tokens` with the
+    /// compiled backend and with the interpreter and asserts compiled tok/s
+    /// clears a conservative multiple of interpreter tok/s (M3 nightly
+    /// "faster than the interpreter" gate; not part of the blocking PR
+    /// tier — see `mise run speedup`).
+    #[command(hide = true)]
+    BenchCompiled {
+        model: PathBuf,
+        #[arg(long, short)]
+        prompt: String,
+        #[arg(long, default_value_t = 48)]
+        max_tokens: usize,
+        #[arg(long, default_value_t = 4096)]
+        max_seq_len: usize,
+    },
 }
 
 fn main() -> ExitCode {
@@ -114,5 +130,11 @@ fn main() -> ExitCode {
             max_tokens,
             max_seq_len,
         } => diff::diff_compiled(&model, &prompt, max_tokens, max_seq_len),
+        Command::BenchCompiled {
+            model,
+            prompt,
+            max_tokens,
+            max_seq_len,
+        } => bench::bench_compiled(&model, &prompt, max_tokens, max_seq_len),
     }
 }

@@ -50,6 +50,10 @@ run = "mise exec rust@nightly -- cargo fuzz run --fuzz-dir fuzz {{arg(name='targ
 description = "Nightly teacher-forced differential vs llama.cpp (downloads a real model; run inside devenv shell)"
 run = "bash scripts/nightly-differential.sh"
 
+[tasks.speedup]
+description = "Nightly M3 gate: compiled decode tok/s vs interpreter, asserted by MARGIN (downloads a real model, first-compiles it; run inside devenv shell)"
+run = "bash scripts/nightly-speedup.sh"
+
 [tasks.bench-kernels]
 description = "Kernel µbenches vs pinned ggml (run inside devenv shell, on quiet hardware)"
 run = "cargo bench -p inferno-kernels --features ggml-compare"
