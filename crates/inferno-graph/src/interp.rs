@@ -23,8 +23,12 @@ pub struct KvCache {
 
 impl KvCache {
     pub fn new(graph: &Graph, max_seq_len: usize) -> Result<KvCache> {
-        let kv_dim = (graph.n_kv_heads * graph.head_dim) as usize;
-        let per_layer = (kv_dim as u64)
+        let kv_dim_u64 = graph
+            .n_kv_heads
+            .checked_mul(graph.head_dim)
+            .ok_or_else(|| GraphError::BadHyperParams("kv size overflow".into()))?;
+        let kv_dim = kv_dim_u64 as usize;
+        let per_layer = kv_dim_u64
             .checked_mul(max_seq_len as u64)
             .and_then(|n| n.checked_mul(8)) // k + v, 4 bytes each
             .ok_or_else(|| GraphError::BadHyperParams("kv size overflow".into()))?;

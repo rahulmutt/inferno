@@ -100,4 +100,9 @@ fn seq_overflow_and_hostile_kv_are_errors() {
     let mut big = graph.clone();
     big.n_layers = u64::MAX / 4;
     assert!(KvCache::new(&big, 1 << 20).is_err());
+    // Hostile n_kv_heads/head_dim cannot overflow the kv_dim multiplication.
+    let mut huge_kv_dim = graph.clone();
+    huge_kv_dim.n_kv_heads = u64::MAX / 4;
+    huge_kv_dim.head_dim = u64::MAX / 4;
+    assert!(KvCache::new(&huge_kv_dim, 1).is_err());
 }
