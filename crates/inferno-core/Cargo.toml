@@ -1,0 +1,13 @@
+[package]
+name = "inferno-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+inferno-target.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
