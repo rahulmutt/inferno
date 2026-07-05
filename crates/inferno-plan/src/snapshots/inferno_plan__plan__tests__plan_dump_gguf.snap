@@ -29,4 +29,4 @@ weights: image_bytes=388608
   t19 Q4_K/rs8 rows=64 k=256 @311296+9728
   t0 F32/rs8 rows=260 k=64 @321024+67584
 arena: total_f32=61440 act_scratch=@245760+292
-kv: layers=2 kv_dim=32 per_layer=8192 total=16384
+kv: layers=2 kv_dim=32 per_layer=16384 total=32768
