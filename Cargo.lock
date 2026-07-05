@@ -443,6 +443,8 @@ dependencies = [
  "inferno-runtime",
  "insta",
  "predicates",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

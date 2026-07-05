@@ -1,3 +1,4 @@
+mod diff;
 mod inspect;
 mod run;
 
@@ -38,6 +39,16 @@ enum Command {
         #[arg(long, default_value_t = 4096)]
         max_seq_len: usize,
     },
+    /// Teacher-forced differential vs an external reference (nightly harness).
+    #[command(hide = true)]
+    Diff {
+        #[arg(long)]
+        model: PathBuf,
+        #[arg(long)]
+        prompt_file: PathBuf,
+        #[arg(long)]
+        tokens_file: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -59,5 +70,10 @@ fn main() -> ExitCode {
             max_tokens,
             max_seq_len,
         } => run::run(&model, &prompt, max_tokens, max_seq_len),
+        Command::Diff {
+            model,
+            prompt_file,
+            tokens_file,
+        } => diff::diff(&model, &prompt_file, &tokens_file),
     }
 }
