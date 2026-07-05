@@ -86,3 +86,22 @@ fn wrong_forced_token_is_reported_with_position_and_top5() {
     assert_eq!(first.expected, worst);
     assert_eq!(first.top.len(), 5);
 }
+
+#[test]
+fn vocab_size_one_is_a_typed_error_not_a_panic() {
+    // Hostile model: build_graph only rejects vocab_size == 0, and a
+    // 1-token tokenizer parses cleanly, so `inferno diff` would otherwise
+    // reach `top[1]` in diff.rs's top-2 gap computation with a vocab of
+    // size 1 and panic. teacher_forced() must reject it up front instead.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hostile.gguf");
+    std::fs::write(&path, inferno_formats::fixtures::hostile_vocab1_gguf()).unwrap();
+    let mut g = Generator::load(&path, 8).unwrap();
+    assert_eq!(g.vocab_size(), 1);
+
+    let err = teacher_forced(&mut g, &[0], &[0]);
+    assert!(
+        matches!(err, Err(inferno_runtime::RuntimeError::VocabTooSmall(1))),
+        "expected a typed VocabTooSmall error, got {err:?}"
+    );
+}

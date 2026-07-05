@@ -7,6 +7,8 @@ pub enum RuntimeError {
     Tokenizer(String),
     #[error("prompt ({got} tokens) exceeds max sequence length ({max})")]
     PromptTooLong { got: usize, max: usize },
+    #[error("model vocab_size {0} is too small for top-5 comparison (need >= 2)")]
+    VocabTooSmall(usize),
     #[error(transparent)]
     Graph(#[from] inferno_graph::GraphError),
     #[error(transparent)]

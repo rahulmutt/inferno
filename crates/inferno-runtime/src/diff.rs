@@ -52,6 +52,13 @@ pub fn teacher_forced(
             "teacher forcing needs a non-empty prompt".into(),
         ));
     }
+    let vocab_size = generator.vocab_size();
+    if vocab_size < 2 {
+        // top_n(row, 5) below indexes top[1] unconditionally; a hostile
+        // vocab_size=1 model (accepted by build_graph and a 1-token
+        // tokenizer) would otherwise panic instead of failing cleanly.
+        return Err(crate::RuntimeError::VocabTooSmall(vocab_size));
+    }
     let full: Vec<u32> = prompt_tokens.iter().chain(forced).copied().collect();
     let logits = generator.full_logits(&full)?;
     let vocab = generator.vocab_size();

@@ -360,6 +360,105 @@ pub fn tiny_llama_gguf() -> Vec<u8> {
     out
 }
 
+/// A hostile-but-structurally-valid model: `vocab_size = 1`, a single layer,
+/// and a 1-token tokenizer. `build_graph` only rejects `vocab_size == 0`
+/// (spec's allocation guard), and a 1-token BPE tokenizer parses cleanly, so
+/// this is accepted all the way through `Generator::load` — exactly the
+/// hostile input the diff harness's `top[1]` indexing must reject with a
+/// typed error instead of panicking (there is no top-2 with 1 token).
+pub fn hostile_vocab1_gguf() -> Vec<u8> {
+    let h: u64 = 2; // hidden_size: smallest even value (rope needs head_dim even)
+    let v: u64 = 1; // vocab_size: the hostile part
+    let f: u64 = 2; // ffn_hidden_size
+    let n_layers: u64 = 1;
+
+    let named = |name: &str, shape: Vec<u64>, seed: u64| -> FixtureTensor {
+        let n: usize = shape.iter().product::<u64>() as usize;
+        FixtureTensor {
+            name: name.into(),
+            shape,
+            dtype: DType::F32,
+            data: quant::pack(&DType::F32, &weight_stream(seed, n)).unwrap(),
+        }
+    };
+
+    let mut tensors = vec![
+        named("token_embd.weight", vec![v, h], 1),
+        named("output_norm.weight", vec![h], 2),
+    ];
+    for i in 0..n_layers {
+        let g = |s: &str| format!("blk.{i}.{s}");
+        tensors.extend([
+            named(&g("attn_norm.weight"), vec![h], 10),
+            named(&g("attn_q.weight"), vec![h, h], 11),
+            named(&g("attn_k.weight"), vec![h, h], 12),
+            named(&g("attn_v.weight"), vec![h, h], 13),
+            named(&g("attn_output.weight"), vec![h, h], 14),
+            named(&g("ffn_norm.weight"), vec![h], 15),
+            named(&g("ffn_gate.weight"), vec![f, h], 16),
+            named(&g("ffn_up.weight"), vec![f, h], 17),
+            named(&g("ffn_down.weight"), vec![h, f], 18),
+        ]);
+    }
+
+    let one = |f: &dyn Fn(&mut Vec<u8>)| {
+        let mut b = Vec::new();
+        f(&mut b);
+        b
+    };
+    let tokens = vec!["a".to_string()];
+    let token_types = vec![1i32];
+    let kvs: Vec<Vec<u8>> = vec![
+        one(&|o| put_kv_str(o, "general.architecture", "llama")),
+        one(&|o| put_kv_str(o, "general.name", "hostile-vocab1-test")),
+        one(&|o| put_kv_u32(o, "general.alignment", 32)),
+        one(&|o| put_kv_u32(o, "llama.block_count", n_layers as u32)),
+        one(&|o| put_kv_u32(o, "llama.embedding_length", h as u32)),
+        one(&|o| put_kv_u32(o, "llama.attention.head_count", 1)),
+        one(&|o| put_kv_u32(o, "llama.attention.head_count_kv", 1)),
+        one(&|o| put_kv_u32(o, "llama.feed_forward_length", f as u32)),
+        one(&|o| put_kv_u32(o, "llama.context_length", 8)),
+        one(&|o| put_kv_f32(o, "llama.attention.layer_norm_rms_epsilon", 1e-5)),
+        one(&|o| put_kv_str(o, "tokenizer.ggml.model", "gpt2")),
+        one(&|o| put_kv_str(o, "tokenizer.ggml.pre", "default")),
+        one(&|o| put_kv_str_array(o, "tokenizer.ggml.tokens", &tokens)),
+        one(&|o| put_kv_str_array(o, "tokenizer.ggml.merges", &[])),
+        one(&|o| put_kv_i32_array(o, "tokenizer.ggml.token_type", &token_types)),
+        one(&|o| put_kv_bool(o, "tokenizer.ggml.add_bos_token", false)),
+    ];
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"GGUF");
+    out.extend_from_slice(&3u32.to_le_bytes());
+    out.extend_from_slice(&(tensors.len() as u64).to_le_bytes());
+    out.extend_from_slice(&(kvs.len() as u64).to_le_bytes());
+    for kv in &kvs {
+        out.extend_from_slice(kv);
+    }
+
+    let mut offset = 0u64;
+    for t in &tensors {
+        put_str(&mut out, &t.name);
+        out.extend_from_slice(&(t.shape.len() as u32).to_le_bytes());
+        for d in t.shape.iter().rev() {
+            out.extend_from_slice(&d.to_le_bytes());
+        }
+        out.extend_from_slice(&ggml_dtype_id(&t.dtype).to_le_bytes());
+        out.extend_from_slice(&offset.to_le_bytes());
+        offset += (t.data.len() as u64).next_multiple_of(32);
+    }
+    while out.len() % 32 != 0 {
+        out.push(0);
+    }
+    for t in &tensors {
+        out.extend_from_slice(&t.data);
+        while out.len() % 32 != 0 {
+            out.push(0);
+        }
+    }
+    out
+}
+
 /// The tiny llama as a single MLX-style safetensors file: same effective
 /// weights as `tiny_llama_gguf()`, HF names, unpermuted, tied embeddings.
 pub fn tiny_llama_safetensors() -> Vec<u8> {
@@ -508,6 +607,16 @@ mod task5_tests {
             .unwrap();
             assert_eq!(gv, mv, "{name}");
         }
+    }
+
+    #[test]
+    fn hostile_vocab1_gguf_parses_with_vocab_size_one() {
+        // Regression guard for the inferno-runtime diff harness panic: this
+        // fixture must remain parseable (and vocab_size must stay 1) so the
+        // downstream typed-error guard has something hostile to reject.
+        let desc = crate::gguf::parse(&mut Cursor::new(&hostile_vocab1_gguf())).unwrap();
+        assert_eq!(desc.hyperparams.vocab_size, 1);
+        assert!(desc.tokenizer.is_some());
     }
 
     #[test]
