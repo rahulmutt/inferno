@@ -1,0 +1,20 @@
+[package]
+name = "inferno-pool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+inferno-kernels.workspace = true
+inferno-formats.workspace = true
+
+# The workspace lints deny `unsafe_code`; this crate is the third sanctioned
+# exception (after inferno-kernels and inferno-core): it ships raw pointers
+# across threads inside the fork-join dispatcher and exposes the
+# `inferno_par_gemv` C-ABI symbol generated code calls. Like the other two,
+# it opts out with its OWN lint table and denies `unsafe_op_in_unsafe_fn`.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

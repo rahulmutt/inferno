@@ -747,6 +747,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "inferno-pool"
+version = "0.1.0"
+dependencies = [
+ "inferno-formats",
+ "inferno-kernels",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "inferno-runtime"
 version = "0.1.0"
 dependencies = [
