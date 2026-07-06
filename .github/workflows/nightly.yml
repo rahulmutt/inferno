@@ -27,7 +27,9 @@ jobs:
     container: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
-      - run: semgrep scan --config p/rust --error
+      # Command lives in scripts/semgrep.sh so `mise run semgrep` matches CI
+      # (excludes the blanket unsafe-usage rule — see the script for why).
+      - run: sh scripts/semgrep.sh
 
   mutants:
     runs-on: ubuntu-latest

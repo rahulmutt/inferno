@@ -54,6 +54,10 @@ run = "bash scripts/nightly-differential.sh"
 description = "Nightly M3 gate: compiled decode tok/s vs interpreter, asserted by MARGIN (downloads a real model, first-compiles it; run inside devenv shell)"
 run = "bash scripts/nightly-speedup.sh"
 
+[tasks.semgrep]
+description = "Nightly SAST scan (semgrep p/rust, minus the blanket unsafe rule); needs semgrep on PATH or the semgrep/semgrep container"
+run = "sh scripts/semgrep.sh"
+
 [tasks.bench-kernels]
 description = "Kernel µbenches vs pinned ggml (run inside devenv shell, on quiet hardware)"
 run = "cargo bench -p inferno-kernels --features ggml-compare"
