@@ -8,7 +8,6 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[allow(dead_code)] // consumed in Task 8
 pub struct LlamaBenchRow {
     pub build_commit: String,
     pub cpu_info: String,
@@ -21,7 +20,6 @@ pub struct LlamaBenchRow {
     pub stddev_ts: f64,
 }
 
-#[allow(dead_code)] // consumed in Task 7-8
 pub fn parse(json: &str) -> Result<Vec<LlamaBenchRow>, String> {
     serde_json::from_str(json).map_err(|e| {
         format!(
@@ -31,7 +29,6 @@ pub fn parse(json: &str) -> Result<Vec<LlamaBenchRow>, String> {
     })
 }
 
-#[allow(dead_code)] // consumed in Task 7-8
 pub fn find_row(
     rows: &[LlamaBenchRow],
     n_prompt: u64,
@@ -42,7 +39,6 @@ pub fn find_row(
         .find(|r| r.n_prompt == n_prompt && r.n_gen == n_gen && r.n_threads == n_threads)
 }
 
-#[allow(dead_code)] // consumed in Task 7-8
 pub fn run_llama_bench(
     bin: &Path,
     model: &Path,

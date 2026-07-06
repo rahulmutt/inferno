@@ -61,3 +61,7 @@ run = "sh scripts/semgrep.sh"
 [tasks.bench-kernels]
 description = "Kernel µbenches vs pinned ggml (run inside devenv shell, on quiet hardware)"
 run = "cargo bench -p inferno-kernels --features ggml-compare"
+
+[tasks.bench]
+description = "inferno vs llama.cpp comparison (M4a protocol: run inside devenv shell, quiet hardware; record data points in the M4a spec): mise run bench -- <model.gguf>"
+run = "cargo run --release -p inferno -- bench"

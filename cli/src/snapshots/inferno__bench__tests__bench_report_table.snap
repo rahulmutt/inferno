@@ -1,0 +1,14 @@
+---
+source: cli/src/bench.rs
+expression: render_table(&r)
+---
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: AMD Ryzen 9 3900 12-Core Processor (12 physical / 24 logical cores)
+inferno 0.1.0 (0b09ece) vs llama.cpp 3ab8b3a9 | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           1      110.20 ± 1.40        26.10 ± 0.30 
+llama.cpp                   12      486.40 ± 4.90        84.00 ± 0.80 
+llama.cpp (t=1 diag)         1       52.10 ± 0.50         9.30 ± 0.10 
+
+ratio (inferno/llama.cpp): pp 0.23x | tg 0.31x

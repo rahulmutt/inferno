@@ -90,13 +90,11 @@ use inferno_runtime::{Backend, Sampler};
 
 use crate::run::clamp_max_seq_len;
 
-#[allow(dead_code)] // fields consumed in Task 8
 pub struct Measurement {
     pub mean_tok_s: f64,
     pub stddev_tok_s: f64,
 }
 
-#[allow(dead_code)] // fields consumed in Task 8
 pub struct InfernoNumbers {
     pub pp: Measurement,
     pub tg: Measurement,
@@ -116,7 +114,6 @@ fn mean_stddev(samples: &[f64]) -> (f64, f64) {
 /// Measure compiled prefill (pp synthetic tokens) and decode (tg greedy
 /// steps) throughput, `reps` timed repetitions after one untimed warmup.
 /// Drives the `Backend` directly: no tokenizer/EOS/UTF-8 in the timed path.
-#[allow(dead_code)] // consumed in Task 8
 pub fn measure_inferno(
     model: &Path,
     pp: usize,
@@ -182,6 +179,212 @@ pub fn measure_inferno(
     })
 }
 
+/// One recorded comparison data point (the `--json` shape; the human table
+/// is rendered from the same struct). Recorded in the M4a spec's
+/// Amendments section per the protocol.
+#[derive(serde::Serialize)]
+pub struct BenchReport {
+    pub model: String,
+    pub model_type: String,
+    pub cpu_info: String,
+    pub physical_cores: u32,
+    pub logical_cores: u32,
+    pub inferno_version: String,
+    pub inferno_git: String,
+    pub llama_build_commit: String,
+    pub pp: u64,
+    pub tg: u64,
+    pub reps: u64,
+    /// M3 generated code is single-threaded; recorded so old data points
+    /// stay interpretable after M4b lands threading.
+    pub inferno_threads: u64,
+    pub llama_threads: u64,
+    pub inferno_pp_tok_s: f64,
+    pub inferno_pp_stddev: f64,
+    pub inferno_tg_tok_s: f64,
+    pub inferno_tg_stddev: f64,
+    pub llama_pp_tok_s: f64,
+    pub llama_pp_stddev: f64,
+    pub llama_tg_tok_s: f64,
+    pub llama_tg_stddev: f64,
+    /// The `-t 1` per-thread-parity diagnostic rows (None when the
+    /// full-thread run already was `-t 1`).
+    pub llama_t1_pp_tok_s: Option<f64>,
+    pub llama_t1_pp_stddev: Option<f64>,
+    pub llama_t1_tg_tok_s: Option<f64>,
+    pub llama_t1_tg_stddev: Option<f64>,
+}
+
+fn render_table(r: &BenchReport) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(s, "model: {} ({})", r.model, r.model_type);
+    let _ = writeln!(
+        s,
+        "cpu: {} ({} physical / {} logical cores)",
+        r.cpu_info, r.physical_cores, r.logical_cores
+    );
+    let _ = writeln!(
+        s,
+        "inferno {} ({}) vs llama.cpp {} | pp={} tg={} reps={}",
+        r.inferno_version, r.inferno_git, r.llama_build_commit, r.pp, r.tg, r.reps
+    );
+    let _ = writeln!(s);
+    let _ = writeln!(
+        s,
+        "{:<22} {:>7} {:>18} {:>18}",
+        "engine",
+        "threads",
+        format!("pp{} tok/s", r.pp),
+        format!("tg{} tok/s", r.tg)
+    );
+    let mut row = |name: &str, threads: u64, pp: f64, pps: f64, tg: f64, tgs: f64| {
+        let _ = writeln!(
+            s,
+            "{:<22} {:>7} {:>11.2} ± {:<5.2} {:>11.2} ± {:<5.2}",
+            name, threads, pp, pps, tg, tgs
+        );
+    };
+    row(
+        "inferno (compiled)",
+        r.inferno_threads,
+        r.inferno_pp_tok_s,
+        r.inferno_pp_stddev,
+        r.inferno_tg_tok_s,
+        r.inferno_tg_stddev,
+    );
+    row(
+        "llama.cpp",
+        r.llama_threads,
+        r.llama_pp_tok_s,
+        r.llama_pp_stddev,
+        r.llama_tg_tok_s,
+        r.llama_tg_stddev,
+    );
+    if let (Some(pp), Some(pps), Some(tg), Some(tgs)) = (
+        r.llama_t1_pp_tok_s,
+        r.llama_t1_pp_stddev,
+        r.llama_t1_tg_tok_s,
+        r.llama_t1_tg_stddev,
+    ) {
+        row("llama.cpp (t=1 diag)", 1, pp, pps, tg, tgs);
+    }
+    let _ = writeln!(s);
+    let _ = writeln!(
+        s,
+        "ratio (inferno/llama.cpp): pp {:.2}x | tg {:.2}x",
+        r.inferno_pp_tok_s / r.llama_pp_tok_s.max(1e-9),
+        r.inferno_tg_tok_s / r.llama_tg_tok_s.max(1e-9),
+    );
+    s
+}
+
+fn git_short_hash() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+/// `inferno bench`: the M4a manual comparison protocol (see the spec —
+/// quiet hardware, devenv shell, release build; data points recorded in
+/// the spec's Amendments, never a CI gate).
+#[allow(clippy::too_many_arguments)]
+pub fn bench(
+    model: &Path,
+    pp: u64,
+    tg: u64,
+    reps: u64,
+    threads: u64,
+    llama_bench_bin: Option<&Path>,
+    json: bool,
+) -> ExitCode {
+    let inner = || -> Result<BenchReport, Box<dyn std::error::Error>> {
+        if pp == 0 || tg == 0 || reps == 0 {
+            return Err("--pp, --tg, and --reps must all be > 0".into());
+        }
+        let target = inferno_target::TargetDesc::detect()?;
+        let threads = if threads == 0 {
+            u64::from(target.topology.physical_cores)
+        } else {
+            threads
+        };
+        let inferno = measure_inferno(model, pp as usize, tg as usize, reps as usize)?;
+        let bin = llama_bench_bin
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| "llama-bench".into());
+        let t_list: Vec<u64> = if threads == 1 {
+            vec![1]
+        } else {
+            vec![threads, 1]
+        };
+        let rows = crate::llama_bench::run_llama_bench(&bin, model, pp, tg, &t_list, reps)?;
+        let pick = |n_prompt: u64, n_gen: u64, t: u64| {
+            crate::llama_bench::find_row(&rows, n_prompt, n_gen, t).ok_or_else(|| {
+                format!("llama-bench output missing the (pp={n_prompt}, tg={n_gen}, t={t}) row")
+            })
+        };
+        let lpp = pick(pp, 0, threads)?;
+        let ltg = pick(0, tg, threads)?;
+        let (t1pp, t1tg) = if threads == 1 {
+            (None, None)
+        } else {
+            (Some(pick(pp, 0, 1)?), Some(pick(0, tg, 1)?))
+        };
+        Ok(BenchReport {
+            model: model
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| model.display().to_string()),
+            model_type: lpp.model_type.clone(),
+            cpu_info: lpp.cpu_info.clone(),
+            physical_cores: target.topology.physical_cores,
+            logical_cores: target.topology.logical_cores,
+            inferno_version: env!("CARGO_PKG_VERSION").into(),
+            inferno_git: git_short_hash(),
+            llama_build_commit: lpp.build_commit.clone(),
+            pp,
+            tg,
+            reps,
+            inferno_threads: 1, // M3 generated code is single-threaded
+            llama_threads: threads,
+            inferno_pp_tok_s: inferno.pp.mean_tok_s,
+            inferno_pp_stddev: inferno.pp.stddev_tok_s,
+            inferno_tg_tok_s: inferno.tg.mean_tok_s,
+            inferno_tg_stddev: inferno.tg.stddev_tok_s,
+            llama_pp_tok_s: lpp.avg_ts,
+            llama_pp_stddev: lpp.stddev_ts,
+            llama_tg_tok_s: ltg.avg_ts,
+            llama_tg_stddev: ltg.stddev_ts,
+            llama_t1_pp_tok_s: t1pp.map(|r| r.avg_ts),
+            llama_t1_pp_stddev: t1pp.map(|r| r.stddev_ts),
+            llama_t1_tg_tok_s: t1tg.map(|r| r.avg_ts),
+            llama_t1_tg_stddev: t1tg.map(|r| r.stddev_ts),
+        })
+    };
+    match inner() {
+        Ok(report) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report)
+                        .expect("BenchReport serializes: plain numbers and strings")
+                );
+            } else {
+                print!("{}", render_table(&report));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,5 +419,37 @@ mod tests {
             .join("../crates/inferno-formats/tests/fixtures/tiny.gguf");
         // tiny.gguf's context length is far below 1<<20.
         assert!(measure_inferno(&model, 1 << 20, 4, 1).is_err());
+    }
+
+    #[test]
+    fn render_table_snapshot() {
+        let r = BenchReport {
+            model: "qwen2.5-0.5b-instruct-q8_0.gguf".into(),
+            model_type: "qwen2 1B Q8_0".into(),
+            cpu_info: "AMD Ryzen 9 3900 12-Core Processor".into(),
+            physical_cores: 12,
+            logical_cores: 24,
+            inferno_version: "0.1.0".into(),
+            inferno_git: "0b09ece".into(),
+            llama_build_commit: "3ab8b3a9".into(),
+            pp: 512,
+            tg: 128,
+            reps: 5,
+            inferno_threads: 1,
+            llama_threads: 12,
+            inferno_pp_tok_s: 110.2,
+            inferno_pp_stddev: 1.4,
+            inferno_tg_tok_s: 26.1,
+            inferno_tg_stddev: 0.3,
+            llama_pp_tok_s: 486.4,
+            llama_pp_stddev: 4.9,
+            llama_tg_tok_s: 84.0,
+            llama_tg_stddev: 0.8,
+            llama_t1_pp_tok_s: Some(52.1),
+            llama_t1_pp_stddev: Some(0.5),
+            llama_t1_tg_tok_s: Some(9.3),
+            llama_t1_tg_stddev: Some(0.1),
+        };
+        insta::assert_snapshot!("bench_report_table", render_table(&r));
     }
 }
