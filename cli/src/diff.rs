@@ -80,6 +80,11 @@ pub fn diff_compiled(
     max_seq_len: usize,
 ) -> ExitCode {
     let inner = || -> Result<bool, Box<dyn std::error::Error>> {
+        // Clamp ONCE (same helper the `inferno run` compiled path uses) and feed
+        // the identical value to both the interpreter Generator and the compiled
+        // Engine below, so diff-compiled compiles/keys the SAME artifact `inferno
+        // run` executes for this model + requested --max-seq-len.
+        let max_seq_len = crate::run::clamp_max_seq_len(model, max_seq_len)?;
         let mut generator = Generator::load(model, max_seq_len)?;
         let prompt_tokens = generator.encode(prompt)?;
         if prompt_tokens.is_empty() {

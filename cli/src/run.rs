@@ -81,15 +81,28 @@ pub(crate) fn load_compiled(
     model: &Path,
     max_seq_len: usize,
 ) -> Result<Generator, Box<dyn std::error::Error>> {
-    let desc = inferno_formats::load_desc(model)?;
-    let ctx = desc.hyperparams.context_length as usize;
-    let max_seq_len = if ctx > 0 {
-        max_seq_len.min(ctx)
-    } else {
-        max_seq_len
-    };
+    let max_seq_len = clamp_max_seq_len(model, max_seq_len)?;
     let engine = Engine::load(model, max_seq_len)?;
     let backend = engine.compiled_backend()?;
     let generator = Generator::load_with_backend(model, max_seq_len, Box::new(backend))?;
     Ok(generator)
+}
+
+/// Clamp a requested `max_seq_len` to the model's declared context length
+/// (mirroring `Generator::load`'s own clamp), so the compiled `Engine` and the
+/// `Generator` are keyed on the SAME effective sequence length. A model with
+/// `context_length == 0` (unknown) keeps the requested value. Shared by the
+/// `inferno run` compiled path and `inferno diff-compiled` so both compile and
+/// key the identical artifact for a given model + requested `--max-seq-len`.
+pub(crate) fn clamp_max_seq_len(
+    model: &Path,
+    requested: usize,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let desc = inferno_formats::load_desc(model)?;
+    let ctx = desc.hyperparams.context_length as usize;
+    Ok(if ctx > 0 {
+        requested.min(ctx)
+    } else {
+        requested
+    })
 }
