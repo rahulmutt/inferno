@@ -22,6 +22,11 @@ Present (M0–M3):
   is the future cross-compile interface.
 - `crates/inferno-kernels` — hand-tuned matmul microkernels behind a fixed
   C ABI, selected by symbol from generated code.
+- `crates/inferno-pool` — persistent fork-join thread pool + the
+  `inferno_par_gemv` dispatcher generated code calls for every GEMV. This
+  crate is "the caller" the kernel boundary rule refers to: it partitions
+  row ranges into 8-row-aligned shards and calls the unchanged
+  single-threaded kernels. Third sanctioned `unsafe` crate.
 - `crates/inferno-plan` — fusion islands, weight-layout repacking, static
   memory plan. Pure data: no LLVM, no codegen, just `Plan`/`Island`/layout
   structs consumed by `inferno-codegen`.
@@ -45,7 +50,10 @@ Present (M0–M3):
 - Kernel ISA variants are bit-identical by construction (exact integer block
   dots, fixed f32 combine order); the rig asserts exact equality, so any
   "harmless" reassociation in a kernel is a contract break, not an optimization.
-- Kernels are single-threaded and row-range partitioned; parallelism is the
-  caller's job. M3's compiled path still calls every kernel with the full
-  `row_start=0, row_end=rows` range (generated code is single-threaded);
-  splitting that range across a thread pool is additive M4 work.
+- Kernels are single-threaded and row-range partitioned; parallelism lives
+  in `inferno-pool`'s `inferno_par_gemv` dispatcher, which generated code
+  calls with the full range (M4b.1). Shards are 8-row-aligned, so each
+  output row is computed entirely by one thread with the kernel's fixed
+  combine order — **thread count never changes output bits**, and the
+  tests assert exact equality. A host that never initializes the pool runs
+  serially (the dispatcher falls back to one direct kernel call).

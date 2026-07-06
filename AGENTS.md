@@ -15,7 +15,7 @@ for the v1 design.
   major.minor there must match the `inkwell` feature flag in
   `inferno-codegen` (M3+) exactly — currently `llvm18-1` (`Cargo.toml`)
   against LLVM 18.1.8 (`devenv.nix`'s `pkgs.llvmPackages_18`,
-  `LLVM_SYS_180_PREFIX`). Bumping one without the other breaks the build.
+  `LLVM_SYS_181_PREFIX`). Bumping one without the other breaks the build.
 - **`inferno-formats` must stay `#![forbid(unsafe_code)]`** and every parser
   read bounded — model files are untrusted input (see
   [docs/threat-model.md](docs/threat-model.md)). Touching parser code means
@@ -54,6 +54,10 @@ for the v1 design.
   M4a spec's Amendments section
   (`docs/superpowers/specs/2026-07-06-m4a-bench-sampling-design.md`) and
   never edit a recorded data point.
+- **The nightly speedup gate (`bench-compiled`) is pinned to `--threads 1`
+  on purpose**: it measures codegen quality vs the interpreter, and
+  threading would hide codegen regressions behind parallelism. Never "fix"
+  a red nightly by unpinning it.
 - **`gemv_rel_tol`** follows the same rule as `LOGIT_TIE_EPSILON`: tuned
   against observed error distributions (the rig's ignored `observed_error_*`
   diagnostics), never to make a red test green.
