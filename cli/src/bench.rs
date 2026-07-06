@@ -282,6 +282,7 @@ fn render_table(r: &BenchReport) -> String {
 fn git_short_hash() -> String {
     std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .ok()
         .filter(|o| o.status.success())
