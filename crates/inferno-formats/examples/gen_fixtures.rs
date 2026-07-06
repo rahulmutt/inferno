@@ -11,6 +11,7 @@ fn main() {
     let fix = root.join("tests/fixtures");
     fs::create_dir_all(fix.join("mlx")).unwrap();
     fs::write(fix.join("tiny.gguf"), fixtures::tiny_llama_gguf()).unwrap();
+    fs::write(fix.join("tiny_bias.gguf"), fixtures::tiny_bias_llama_gguf()).unwrap();
     fs::write(
         fix.join("mlx/config.json"),
         fixtures::tiny_llama_config_json(),

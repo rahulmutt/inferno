@@ -169,3 +169,28 @@ fn differential_tiny_gguf() {
 fn differential_tiny_mlx() {
     differential_for("../inferno-formats/tests/fixtures/mlx");
 }
+
+#[test]
+fn differential_tiny_bias() {
+    // tiny_bias.gguf carries q/k/v attention biases (as Qwen2/Qwen2.5 do), so
+    // `build_graph` emits `Op::MatMul { bias: Some(_) }` and the compiled
+    // `Step::Bias` lowering (`lower_bias`) is exercised. This is the ONLY
+    // differential that puts the compiled bias-add under the correctness gate.
+    let fixture = "../inferno-formats/tests/fixtures/tiny_bias.gguf";
+
+    // Guard: the fixture must genuinely produce biased MatMuls, or the gate is
+    // vacuous. If this fails, the fixture is wrong (missing/misnamed biases).
+    let desc = load_desc(Path::new(fixture)).unwrap();
+    let graph = build_graph(&desc).unwrap();
+    let biased = graph
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.op, inferno_graph::Op::MatMul { bias: Some(_), .. }))
+        .count();
+    assert!(
+        biased > 0,
+        "tiny_bias.gguf produced no biased MatMuls — bias lowering would not be exercised"
+    );
+
+    differential_for(fixture);
+}
