@@ -654,6 +654,7 @@ dependencies = [
  "inferno-formats",
  "inferno-graph",
  "inferno-runtime",
+ "inferno-target",
  "insta",
  "predicates",
  "serde",
