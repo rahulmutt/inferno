@@ -4,7 +4,6 @@
 //! versions, which would silently break the exact-pick sampler tests.
 
 /// splitmix64 step: advances `state` and returns the next output.
-#[allow(dead_code)]
 pub(crate) fn splitmix64(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9E3779B97F4A7C15);
     let mut z = *state;
@@ -13,12 +12,10 @@ pub(crate) fn splitmix64(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
-#[allow(dead_code)]
 pub(crate) struct Xoshiro256StarStar {
     s: [u64; 4],
 }
 
-#[allow(dead_code)]
 impl Xoshiro256StarStar {
     pub(crate) fn new(seed: u64) -> Xoshiro256StarStar {
         let mut state = seed;
@@ -31,6 +28,7 @@ impl Xoshiro256StarStar {
         Xoshiro256StarStar { s }
     }
 
+    #[allow(dead_code)] // consumed in Task 4
     pub(crate) fn next_u64(&mut self) -> u64 {
         let result = self.s[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
         let t = self.s[1] << 17;
@@ -44,6 +42,7 @@ impl Xoshiro256StarStar {
     }
 
     /// Uniform in [0, 1) from the top 53 bits (exactly representable in f64).
+    #[allow(dead_code)] // consumed in Task 4
     pub(crate) fn next_f64(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }

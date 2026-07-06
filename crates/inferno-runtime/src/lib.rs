@@ -14,5 +14,5 @@ pub use backend::{Backend, InterpBackend};
 pub use diff::{DiffOutcome, Mismatch, teacher_forced};
 pub use error::{Result, RuntimeError};
 pub use generate::{GenStats, Generator};
-pub use sampler::{Greedy, Sampler};
+pub use sampler::{ChainSampler, Greedy, Sampler, SamplerConfig};
 pub use tokenizer::{Tokenizer, tokenizer_for};
