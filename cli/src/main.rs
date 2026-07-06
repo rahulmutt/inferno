@@ -2,6 +2,7 @@ mod bench;
 mod compile;
 mod diff;
 mod inspect;
+mod llama_bench;
 mod run;
 
 use std::path::PathBuf;
