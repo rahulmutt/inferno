@@ -99,3 +99,48 @@ fn compiled_and_interp_agree_on_greedy_tokens() {
         "compiled and interpreter paths must produce identical greedy token text"
     );
 }
+
+#[test]
+fn run_sampling_same_seed_is_reproducible() {
+    let out = |seed: &str| {
+        let a = Command::cargo_bin("inferno")
+            .unwrap()
+            .args([
+                "run",
+                &fixture("tiny.gguf"),
+                "--interp",
+                "--prompt",
+                "the",
+                "--max-tokens",
+                "8",
+                "--max-seq-len",
+                "64",
+                "--temperature",
+                "5.0",
+                "--seed",
+                seed,
+            ])
+            .assert()
+            .success();
+        String::from_utf8(a.get_output().stdout.clone()).unwrap()
+    };
+    assert_eq!(out("7"), out("7"));
+}
+
+#[test]
+fn run_rejects_invalid_sampling_flags() {
+    Command::cargo_bin("inferno")
+        .unwrap()
+        .args([
+            "run",
+            &fixture("tiny.gguf"),
+            "--interp",
+            "--prompt",
+            "the",
+            "--top-p",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("top-p"));
+}

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use inferno_core::Engine;
-use inferno_runtime::{Generator, Greedy};
+use inferno_runtime::{ChainSampler, Generator, SamplerConfig};
 
 pub fn run(
     model: &Path,
@@ -12,7 +12,13 @@ pub fn run(
     max_tokens: usize,
     max_seq_len: usize,
     interp: bool,
+    sampling: SamplerConfig,
 ) -> ExitCode {
+    if let Err(e) = sampling.validate() {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    let mut sampler = ChainSampler::new(sampling);
     let generator = if interp {
         Generator::load(model, max_seq_len).map_err(|e| e.to_string())
     } else {
@@ -31,7 +37,7 @@ pub fn run(
     // instead of grinding through the remaining --max-tokens with a dead
     // consumer, then report failure — never SUCCESS on a broken pipe.
     let mut stdout_err: Option<std::io::Error> = None;
-    let result = generator.generate(prompt, max_tokens, &mut Greedy, &mut |bytes| match stdout
+    let result = generator.generate(prompt, max_tokens, &mut sampler, &mut |bytes| match stdout
         .write_all(bytes)
         .and_then(|()| stdout.flush())
     {
