@@ -3,6 +3,9 @@
 
 pub trait Sampler {
     fn sample(&mut self, logits: &[f32]) -> u32;
+    /// Observe a token appended to the sequence (prompt or sampled).
+    /// Default no-op; `ChainSampler` uses it for the repeat-penalty window.
+    fn accept(&mut self, _token: u32) {}
 }
 
 pub struct Greedy;

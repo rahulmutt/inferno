@@ -164,6 +164,9 @@ impl Generator {
                 max: self.max_seq_len,
             });
         }
+        for &t in &prompt_ids {
+            sampler.accept(t);
+        }
         self.backend.reset();
         let eos = self.tokenizer.eos();
         let mut buf = Utf8Buffer::default();
@@ -180,6 +183,7 @@ impl Generator {
                 break;
             }
             out_ids.push(next);
+            sampler.accept(next);
             let chunk = buf.push(&self.tokenizer.decode_token(next));
             if !chunk.is_empty() && on_bytes(&chunk).is_break() {
                 break; // consumer signaled stop (e.g. broken pipe)
@@ -256,5 +260,36 @@ mod tests {
             ids.len()
         );
         assert_eq!(stats.generated, ids.len());
+    }
+
+    /// The generator must feed every prompt token and every sampled token to
+    /// `Sampler::accept` — that is how repeat penalty (M4a) sees context.
+    #[test]
+    fn generator_accepts_prompt_and_sampled_tokens() {
+        struct Recording {
+            inner: Greedy,
+            accepted: Vec<u32>,
+        }
+        impl crate::sampler::Sampler for Recording {
+            fn sample(&mut self, logits: &[f32]) -> u32 {
+                self.inner.sample(logits)
+            }
+            fn accept(&mut self, token: u32) {
+                self.accepted.push(token);
+            }
+        }
+
+        let mut g = Generator::load(&fixture("tiny.gguf"), 64).unwrap();
+        let prompt_ids = g.encode("the").unwrap();
+        let mut s = Recording {
+            inner: Greedy,
+            accepted: Vec::new(),
+        };
+        let (out_ids, _) = g
+            .generate("the", 4, &mut s, &mut |_| ControlFlow::Continue(()))
+            .unwrap();
+        let mut want = prompt_ids;
+        want.extend_from_slice(&out_ids);
+        assert_eq!(s.accepted, want);
     }
 }
