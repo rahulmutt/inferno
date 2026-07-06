@@ -274,3 +274,20 @@ CLI flag validation as above.
   as directional rather than precise. This data point seeds M4b's plan:
   the gap is real and, per the design's risk note, expected — multi-threaded
   generated code is M4b's first lever.
+
+  **Per-thread read (follow-up note, same data):**
+
+  The headline ratios (pp 0.36x, tg 0.39x) compare inferno at 1 thread to
+  llama.cpp at 12 threads. The `-t 1` diagnostic row shows single-thread
+  parity:
+
+  - **Prefill (pp):** inferno ~16.2 tok/s vs llama.cpp t=1 pp 31.30–53.71 tok/s
+    across the two runs → inferno at roughly 0.30–0.52x of llama.cpp's
+    single-thread prefill rate.
+  - **Decode (tg):** inferno ~10.5 tok/s vs llama.cpp t=1 tg 15.16–23.76 tok/s
+    → roughly 0.44–0.70x single-thread decode.
+  - **Conclusion:** Even per-thread, inferno is behind — the full-thread gap is
+    NOT explained by thread count alone; part of it is per-thread kernel/codegen
+    quality. Both per-thread parity and M4b threading are needed to close the
+    headline 0.36x/0.39x gap. (The t=1 range is wide because of the scheduling
+    noise already noted above.)
