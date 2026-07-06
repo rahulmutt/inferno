@@ -6,6 +6,8 @@
 //! kernel's fixed combine order and **thread count never changes output
 //! bits**.
 
+pub mod pool;
 pub mod shard;
 
+pub use pool::{GemvFn, Pool};
 pub use shard::{SHARD_ALIGN, shard_table};
