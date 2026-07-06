@@ -72,3 +72,28 @@ fn reset_allows_a_fresh_sequence() {
     let b = backend.forward(&[1u32, 4, 7]).unwrap();
     assert_eq!(a, b, "identical prompt after reset must reproduce logits");
 }
+
+/// Thread count must be invisible in the logits, bit for bit: forward the
+/// same tokens at active-threads=4 and =1 on the same backend (M4b.1
+/// bit-identity contract, end-to-end through the dlopen'd artifact).
+#[test]
+fn threaded_forward_is_bit_identical_to_serial() {
+    use_temp_cache();
+    let mut engine = Engine::load(Path::new(MODEL), 64).unwrap();
+    engine.set_threads(4);
+    let mut backend = engine.compiled_backend().unwrap();
+    let tokens = [1u32, 4, 7];
+
+    assert!(inferno_pool::set_global_active_threads(4));
+    let threaded = backend.forward(&tokens).unwrap();
+
+    backend.reset();
+    assert!(inferno_pool::set_global_active_threads(1));
+    let serial = backend.forward(&tokens).unwrap();
+    assert!(inferno_pool::set_global_active_threads(4));
+
+    assert_eq!(threaded.len(), serial.len());
+    for (i, (a, b)) in threaded.iter().zip(&serial).enumerate() {
+        assert_eq!(a.to_bits(), b.to_bits(), "logit {i}");
+    }
+}
