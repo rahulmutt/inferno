@@ -292,13 +292,12 @@ fn ggml_dtype_id(d: &DType) -> u32 {
     }
 }
 
-pub fn tiny_llama_gguf() -> Vec<u8> {
+/// The tiny-llama KV metadata block (architecture, hyperparams, tokenizer).
+/// Each entry is one serialized KV pair; the header count is `kvs.len()` by
+/// construction, so it can never drift out of sync.
+fn tiny_kvs() -> Vec<Vec<u8>> {
     let hp = tiny_hyperparams();
-    let tensors = tiny_tensors_gguf();
     let (tokens, merges) = tiny_vocab();
-
-    // Each entry in `kvs` is one serialized KV pair; the count is
-    // kvs.len() by construction, so it can never drift out of sync.
     let mut token_types = vec![1i32; 256];
     token_types.extend([3, 3, 1, 1]); // bos/eos control, merged tokens normal
     let one = |f: &dyn Fn(&mut Vec<u8>)| {
@@ -306,7 +305,7 @@ pub fn tiny_llama_gguf() -> Vec<u8> {
         f(&mut b);
         b
     };
-    let kvs: Vec<Vec<u8>> = vec![
+    vec![
         one(&|o| put_kv_str(o, "general.architecture", "llama")),
         one(&|o| put_kv_str(o, "general.name", "tiny-llama-test")),
         one(&|o| put_kv_u32(o, "general.alignment", 32)),
@@ -325,20 +324,23 @@ pub fn tiny_llama_gguf() -> Vec<u8> {
         one(&|o| put_kv_u32(o, "tokenizer.ggml.bos_token_id", 256)),
         one(&|o| put_kv_u32(o, "tokenizer.ggml.eos_token_id", 257)),
         one(&|o| put_kv_bool(o, "tokenizer.ggml.add_bos_token", false)),
-    ];
+    ]
+}
 
+/// Serialize a GGUF v3 image from `tensors` + a pre-built `kvs` block. Tensor
+/// data lives in a 32-aligned section; each info's offset is relative to it.
+fn assemble_gguf(tensors: &[FixtureTensor], kvs: &[Vec<u8>]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(b"GGUF");
     out.extend_from_slice(&3u32.to_le_bytes());
     out.extend_from_slice(&(tensors.len() as u64).to_le_bytes());
     out.extend_from_slice(&(kvs.len() as u64).to_le_bytes());
-    for kv in &kvs {
+    for kv in kvs {
         out.extend_from_slice(kv);
     }
 
-    // Tensor infos: offsets relative to the 32-aligned data section.
     let mut offset = 0u64;
-    for t in &tensors {
+    for t in tensors {
         put_str(&mut out, &t.name);
         out.extend_from_slice(&(t.shape.len() as u32).to_le_bytes());
         for d in t.shape.iter().rev() {
@@ -351,13 +353,48 @@ pub fn tiny_llama_gguf() -> Vec<u8> {
     while out.len() % 32 != 0 {
         out.push(0);
     }
-    for t in &tensors {
+    for t in tensors {
         out.extend_from_slice(&t.data);
         while out.len() % 32 != 0 {
             out.push(0);
         }
     }
     out
+}
+
+pub fn tiny_llama_gguf() -> Vec<u8> {
+    assemble_gguf(&tiny_tensors_gguf(), &tiny_kvs())
+}
+
+/// Like `tiny_llama_gguf()`, but every attention projection also carries a
+/// q/k/v bias (as Qwen2/Qwen2.5 attention does). `build_graph` picks these up
+/// (`blk.{i}.attn_q.bias` → `layers.{i}.attn.q_proj.bias`, etc.) and emits
+/// `Op::MatMul { bias: Some(_) }`, so this fixture puts the compiled
+/// `Step::Bias` lowering under the compiled-vs-interpreter differential gate.
+/// Biases are plain F32; the differential compares the SAME GGUF through both
+/// paths, so no rope row-permutation of the bias is needed here.
+pub fn tiny_bias_llama_gguf() -> Vec<u8> {
+    let hp = tiny_hyperparams();
+    let kv = hp.hidden_size / hp.n_heads * hp.n_kv_heads; // 32 (kv_dim)
+    let mut tensors = tiny_tensors_gguf();
+    for i in 0..hp.n_layers {
+        let g = |s: &str| format!("blk.{i}.{s}");
+        // q bias spans all heads (h); k/v biases span the kv projection (kv_dim).
+        for (name, rows, seed) in [
+            (g("attn_q.bias"), hp.hidden_size, 0xB1A5u64),
+            (g("attn_k.bias"), kv, 0xB1A6),
+            (g("attn_v.bias"), kv, 0xB1A7),
+        ] {
+            let n = rows as usize;
+            tensors.push(FixtureTensor {
+                name,
+                shape: vec![rows],
+                dtype: DType::F32,
+                data: quant::pack(&DType::F32, &weight_stream(seed + i, n)).unwrap(),
+            });
+        }
+    }
+    assemble_gguf(&tensors, &tiny_kvs())
 }
 
 /// A hostile-but-structurally-valid model: `vocab_size = 1`, a single layer,
@@ -427,36 +464,7 @@ pub fn hostile_vocab1_gguf() -> Vec<u8> {
         one(&|o| put_kv_bool(o, "tokenizer.ggml.add_bos_token", false)),
     ];
 
-    let mut out = Vec::new();
-    out.extend_from_slice(b"GGUF");
-    out.extend_from_slice(&3u32.to_le_bytes());
-    out.extend_from_slice(&(tensors.len() as u64).to_le_bytes());
-    out.extend_from_slice(&(kvs.len() as u64).to_le_bytes());
-    for kv in &kvs {
-        out.extend_from_slice(kv);
-    }
-
-    let mut offset = 0u64;
-    for t in &tensors {
-        put_str(&mut out, &t.name);
-        out.extend_from_slice(&(t.shape.len() as u32).to_le_bytes());
-        for d in t.shape.iter().rev() {
-            out.extend_from_slice(&d.to_le_bytes());
-        }
-        out.extend_from_slice(&ggml_dtype_id(&t.dtype).to_le_bytes());
-        out.extend_from_slice(&offset.to_le_bytes());
-        offset += (t.data.len() as u64).next_multiple_of(32);
-    }
-    while out.len() % 32 != 0 {
-        out.push(0);
-    }
-    for t in &tensors {
-        out.extend_from_slice(&t.data);
-        while out.len() % 32 != 0 {
-            out.push(0);
-        }
-    }
-    out
+    assemble_gguf(&tensors, &kvs)
 }
 
 /// The tiny llama as a single MLX-style safetensors file: same effective
