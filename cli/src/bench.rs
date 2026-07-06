@@ -104,6 +104,13 @@ pub struct InfernoNumbers {
     pub tg: Measurement,
 }
 
+pub struct InfernoRun {
+    pub headline: InfernoNumbers,
+    /// Per-thread parity diagnostic: same backend, active threads capped to
+    /// 1. None when the headline itself ran at t=1.
+    pub t1: Option<InfernoNumbers>,
+}
+
 /// Sample mean and sample (n-1) standard deviation; stddev is 0 for n < 2.
 fn mean_stddev(samples: &[f64]) -> (f64, f64) {
     let n = samples.len() as f64;
@@ -115,15 +122,17 @@ fn mean_stddev(samples: &[f64]) -> (f64, f64) {
     (mean, var.sqrt())
 }
 
-/// Measure compiled prefill (pp synthetic tokens) and decode (tg greedy
-/// steps) throughput, `reps` timed repetitions after one untimed warmup.
-/// Drives the `Backend` directly: no tokenizer/EOS/UTF-8 in the timed path.
+/// Measure compiled prefill/decode throughput at `threads` lanes, plus an
+/// optional t=1 diagnostic pass over the SAME process-global pool (capped
+/// via `set_global_active_threads` — the pool is sized once per process).
 pub fn measure_inferno(
     model: &Path,
     pp: usize,
     tg: usize,
     reps: usize,
-) -> Result<InfernoNumbers, Box<dyn std::error::Error>> {
+    threads: usize,
+    t1_diag: bool,
+) -> Result<InfernoRun, Box<dyn std::error::Error>> {
     let needed = pp + tg;
     let max_seq_len = clamp_max_seq_len(model, needed)?;
     if max_seq_len < needed {
@@ -143,7 +152,8 @@ pub fn measure_inferno(
     let ids: Vec<u32> = (0..pp).map(|i| 1 + (i as u32 % (vocab - 1))).collect();
 
     // Compile (or cache-hit) happens here, outside any timed region.
-    let engine = Engine::load(model, max_seq_len)?;
+    let mut engine = Engine::load(model, max_seq_len)?;
+    engine.set_threads(threads);
     let mut backend = engine.compiled_backend()?;
 
     let run_once = |backend: &mut dyn Backend| -> Result<(f64, f64), Box<dyn std::error::Error>> {
@@ -171,7 +181,7 @@ pub fn measure_inferno(
     }
     let (pm, ps) = mean_stddev(&pp_samples);
     let (tm, ts) = mean_stddev(&tg_samples);
-    Ok(InfernoNumbers {
+    let headline = InfernoNumbers {
         pp: Measurement {
             mean_tok_s: pm,
             stddev_tok_s: ps,
@@ -180,7 +190,38 @@ pub fn measure_inferno(
             mean_tok_s: tm,
             stddev_tok_s: ts,
         },
-    })
+    };
+
+    let t1 = if t1_diag && engine.threads() > 1 {
+        assert!(
+            inferno_pool::set_global_active_threads(1),
+            "pool initialized by compiled_backend above"
+        );
+        run_once(&mut backend)?; // warmup at the new lane count
+        let mut pp_s = Vec::with_capacity(reps);
+        let mut tg_s = Vec::with_capacity(reps);
+        for _ in 0..reps {
+            let (p, t) = run_once(&mut backend)?;
+            pp_s.push(p);
+            tg_s.push(t);
+        }
+        inferno_pool::set_global_active_threads(engine.threads());
+        let (pm, ps) = mean_stddev(&pp_s);
+        let (tm, ts) = mean_stddev(&tg_s);
+        Some(InfernoNumbers {
+            pp: Measurement {
+                mean_tok_s: pm,
+                stddev_tok_s: ps,
+            },
+            tg: Measurement {
+                mean_tok_s: tm,
+                stddev_tok_s: ts,
+            },
+        })
+    } else {
+        None
+    };
+    Ok(InfernoRun { headline, t1 })
 }
 
 /// One recorded comparison data point (the `--json` shape; the human table
@@ -199,8 +240,7 @@ pub struct BenchReport {
     pub pp: u64,
     pub tg: u64,
     pub reps: u64,
-    /// M3 generated code is single-threaded; recorded so old data points
-    /// stay interpretable after M4b lands threading.
+    /// Headline inferno thread count (matched to llama.cpp's since M4b.1).
     pub inferno_threads: u64,
     pub llama_threads: u64,
     pub inferno_pp_tok_s: f64,
@@ -217,6 +257,13 @@ pub struct BenchReport {
     pub llama_t1_pp_stddev: Option<f64>,
     pub llama_t1_tg_tok_s: Option<f64>,
     pub llama_t1_tg_stddev: Option<f64>,
+    /// inferno's own t=1 diagnostic (same pool, active threads capped to 1);
+    /// None when the headline run was already t=1. Reads directly as the
+    /// M4b.1 prefill-scaling measurement: headline pp / t1 pp.
+    pub inferno_t1_pp_tok_s: Option<f64>,
+    pub inferno_t1_pp_stddev: Option<f64>,
+    pub inferno_t1_tg_tok_s: Option<f64>,
+    pub inferno_t1_tg_stddev: Option<f64>,
 }
 
 fn render_table(r: &BenchReport) -> String {
@@ -257,6 +304,14 @@ fn render_table(r: &BenchReport) -> String {
         r.inferno_tg_tok_s,
         r.inferno_tg_stddev,
     );
+    if let (Some(pp), Some(pps), Some(tg), Some(tgs)) = (
+        r.inferno_t1_pp_tok_s,
+        r.inferno_t1_pp_stddev,
+        r.inferno_t1_tg_tok_s,
+        r.inferno_t1_tg_stddev,
+    ) {
+        row("inferno (t=1 diag)", 1, pp, pps, tg, tgs);
+    }
     row(
         "llama.cpp",
         r.llama_threads,
@@ -317,7 +372,14 @@ pub fn bench(
         } else {
             threads
         };
-        let inferno = measure_inferno(model, pp as usize, tg as usize, reps as usize)?;
+        let inferno = measure_inferno(
+            model,
+            pp as usize,
+            tg as usize,
+            reps as usize,
+            threads as usize,
+            true,
+        )?;
         let bin = llama_bench_bin
             .map(Path::to_path_buf)
             .unwrap_or_else(|| "llama-bench".into());
@@ -354,12 +416,12 @@ pub fn bench(
             pp,
             tg,
             reps,
-            inferno_threads: 1, // M3 generated code is single-threaded
+            inferno_threads: threads,
             llama_threads: threads,
-            inferno_pp_tok_s: inferno.pp.mean_tok_s,
-            inferno_pp_stddev: inferno.pp.stddev_tok_s,
-            inferno_tg_tok_s: inferno.tg.mean_tok_s,
-            inferno_tg_stddev: inferno.tg.stddev_tok_s,
+            inferno_pp_tok_s: inferno.headline.pp.mean_tok_s,
+            inferno_pp_stddev: inferno.headline.pp.stddev_tok_s,
+            inferno_tg_tok_s: inferno.headline.tg.mean_tok_s,
+            inferno_tg_stddev: inferno.headline.tg.stddev_tok_s,
             llama_pp_tok_s: lpp.avg_ts,
             llama_pp_stddev: lpp.stddev_ts,
             llama_tg_tok_s: ltg.avg_ts,
@@ -368,6 +430,10 @@ pub fn bench(
             llama_t1_pp_stddev: t1pp.map(|r| r.stddev_ts),
             llama_t1_tg_tok_s: t1tg.map(|r| r.avg_ts),
             llama_t1_tg_stddev: t1tg.map(|r| r.stddev_ts),
+            inferno_t1_pp_tok_s: inferno.t1.as_ref().map(|n| n.pp.mean_tok_s),
+            inferno_t1_pp_stddev: inferno.t1.as_ref().map(|n| n.pp.stddev_tok_s),
+            inferno_t1_tg_tok_s: inferno.t1.as_ref().map(|n| n.tg.mean_tok_s),
+            inferno_t1_tg_stddev: inferno.t1.as_ref().map(|n| n.tg.stddev_tok_s),
         })
     };
     match inner() {
@@ -411,8 +477,14 @@ mod tests {
     fn measure_inferno_smoke_on_fixture() {
         let model = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../crates/inferno-formats/tests/fixtures/tiny.gguf");
-        let n = measure_inferno(&model, 8, 4, 2).unwrap();
-        for m in [&n.pp, &n.tg] {
+        let n = measure_inferno(&model, 8, 4, 2, 2, true).unwrap();
+        for m in [&n.headline.pp, &n.headline.tg] {
+            assert!(m.mean_tok_s.is_finite() && m.mean_tok_s > 0.0);
+            assert!(m.stddev_tok_s.is_finite() && m.stddev_tok_s >= 0.0);
+        }
+        assert!(n.t1.is_some());
+        let t1 = n.t1.unwrap();
+        for m in [&t1.pp, &t1.tg] {
             assert!(m.mean_tok_s.is_finite() && m.mean_tok_s > 0.0);
             assert!(m.stddev_tok_s.is_finite() && m.stddev_tok_s >= 0.0);
         }
@@ -423,7 +495,7 @@ mod tests {
         let model = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../crates/inferno-formats/tests/fixtures/tiny.gguf");
         // tiny.gguf's context length is far below 1<<20.
-        assert!(measure_inferno(&model, 1 << 20, 4, 1).is_err());
+        assert!(measure_inferno(&model, 1 << 20, 4, 1, 1, false).is_err());
     }
 
     #[test]
@@ -454,6 +526,10 @@ mod tests {
             llama_t1_pp_stddev: Some(0.5),
             llama_t1_tg_tok_s: Some(9.3),
             llama_t1_tg_stddev: Some(0.1),
+            inferno_t1_pp_tok_s: Some(58.0),
+            inferno_t1_pp_stddev: Some(0.9),
+            inferno_t1_tg_tok_s: Some(21.4),
+            inferno_t1_tg_stddev: Some(0.2),
         };
         insta::assert_snapshot!("bench_report_table", render_table(&r));
     }

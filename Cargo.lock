@@ -653,6 +653,7 @@ dependencies = [
  "inferno-core",
  "inferno-formats",
  "inferno-graph",
+ "inferno-pool",
  "inferno-runtime",
  "inferno-target",
  "insta",
