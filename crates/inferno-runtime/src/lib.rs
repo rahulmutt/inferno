@@ -6,6 +6,7 @@ pub mod backend;
 mod diff;
 mod error;
 mod generate;
+mod rng;
 mod sampler;
 pub mod tokenizer;
 
