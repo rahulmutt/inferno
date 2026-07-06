@@ -77,6 +77,24 @@ impl<'c> LlvmModule<'c> {
                 );
             }
         }
+
+        // void inferno_par_gemv(ptr kernel, ptr y, ptr xq, ptr w, i64 k, i64 rows)
+        // — the M4b.1 host dispatcher; the kernel chosen by `gemv_symbol` is
+        // passed as a function pointer, so the per-(dtype, isa) selection
+        // logic is unchanged.
+        let par_gemv_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("inferno_par_gemv", par_gemv_ty, Some(Linkage::External));
     }
 
     /// Declare the two generated entry points (signatures only, *no* body).
@@ -199,5 +217,6 @@ mod tests {
         let ir = m.print_to_string();
         assert!(ir.contains("define"));
         assert!(ir.contains("declare") && ir.contains("inferno_gemv_"));
+        assert!(ir.contains("inferno_par_gemv"));
     }
 }

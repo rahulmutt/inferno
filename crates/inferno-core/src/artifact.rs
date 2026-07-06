@@ -394,13 +394,15 @@ fn finalize_meta(dir: &Path, model: &Path, target: &TargetDesc) -> Result<Meta> 
 }
 
 /// Force the linker to retain (and, in a `-rdynamic` binary, export) every
-/// kernel symbol a compiled `model.so` resolves against the host binary.
+/// kernel symbol *and the `inferno_par_gemv` dispatcher* a compiled
+/// `model.so` resolves against the host binary.
 ///
 /// Without at least one live reference the linker may drop `inferno-kernels`
-/// entirely, leaving nothing to export and `dlopen` failing on the first
-/// undefined `inferno_gemv_*` / `inferno_quantize_row_*` symbol. This is the
-/// reusable retention mechanism (Task 16's CLI calls it too); the CLI must
-/// additionally pass `-rdynamic` at link time (see build.rs note).
+/// (or `inferno-pool`) entirely, leaving nothing to export and `dlopen`
+/// failing on the first undefined `inferno_gemv_*` / `inferno_quantize_row_*`
+/// / `inferno_par_gemv` symbol. This is the reusable retention mechanism
+/// (Task 16's CLI calls it too); the CLI must additionally pass `-rdynamic`
+/// at link time (see build.rs note).
 pub fn ensure_kernels_linked() {
     use std::hint::black_box;
     let p = |f: *const ()| black_box(f as usize);
@@ -414,4 +416,5 @@ pub fn ensure_kernels_linked() {
     p(inferno_kernels::act::inferno_quantize_row_q8a_avx2 as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_scalar as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_avx2 as *const ());
+    p(inferno_pool::inferno_par_gemv as *const ());
 }

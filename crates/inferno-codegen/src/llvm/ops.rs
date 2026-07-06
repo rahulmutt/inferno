@@ -786,8 +786,9 @@ impl<'c, 'a> Codegen<'c, 'a> {
     /// activation source is the MatMul's input-0 value (node `out-1`). For a
     /// quantized weight the source row is quantized into the shared act-scratch
     /// region first; for an F32 (native or widened F16/BF16) weight the raw f32
-    /// source row is passed straight through. `w_ptr = weights + offset` and
-    /// row range `[0, rows)` (single-threaded), mirroring the decode kernel.
+    /// source row is passed straight through. `w_ptr = weights + offset`,
+    /// dispatched through `inferno_par_gemv`, which shards `[0, rows)` across
+    /// the host thread pool (serial when the pool is uninitialized).
     fn lower_gemv(
         &self,
         frame: &Frame<'c>,
@@ -831,20 +832,23 @@ impl<'c, 'a> Codegen<'c, 'a> {
             .module
             .get_function(symbol)
             .expect("gemv kernel declared (Task 8)");
-        let zero = self.i64_t.const_zero();
+        let pfn = self
+            .module
+            .get_function("inferno_par_gemv")
+            .expect("par gemv dispatcher declared");
         let rows_c = self.const_i64(rows as u64);
         self.builder
             .build_call(
-                gfn,
+                pfn,
                 &[
+                    gfn.as_global_value().as_pointer_value().into(),
                     out_ptr.into(),
                     xq_ptr.into(),
                     w_ptr.into(),
                     k_c.into(),
-                    zero.into(),
                     rows_c.into(),
                 ],
-                "gemv",
+                "par_gemv",
             )
             .unwrap();
     }
