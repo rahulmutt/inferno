@@ -163,7 +163,9 @@ impl Pool {
     /// every row in `0..rows` (`y` valid for `rows` f32 writes; `xq`/`w`
     /// valid packed buffers for this `k`/`rows`; 32-byte alignment where
     /// the kernel requires it), and all buffers must stay live and
-    /// otherwise-untouched until this call returns.
+    /// otherwise-untouched until this call returns. Calls to `par_gemv` must
+    /// not overlap; the pool runs one job at a time, and concurrent dispatches
+    /// would corrupt the job/epoch/remaining protocol.
     pub unsafe fn par_gemv(
         &self,
         kernel: GemvFn,
@@ -247,11 +249,16 @@ impl Drop for Pool {
 }
 
 fn worker_loop(shared: &Shared, idx: usize) {
+    // Load the current epoch before registering this worker. If we registered
+    // first, Pool::new would return, the dispatcher could bump the epoch and
+    // dispatch the first job, and when we finally load epoch here, we'd see
+    // the bumped value and mistakenly treat the first dispatch as "nothing new",
+    // never decrementing remaining and causing the dispatcher to hang forever.
+    let mut seen = shared.epoch.load(Ordering::SeqCst);
     shared.slots[idx]
         .thread
         .set(std::thread::current())
         .expect("worker slot set once");
-    let mut seen = shared.epoch.load(Ordering::SeqCst);
     loop {
         // Wait for a new epoch: bounded spin, then park.
         let mut spins = 0u32;
