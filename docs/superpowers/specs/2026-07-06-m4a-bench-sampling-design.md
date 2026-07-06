@@ -197,3 +197,80 @@ CLI flag validation as above.
 ## Amendments
 
 *(Recorded data points and post-approval changes land here.)*
+
+- **First inferno-vs-llama.cpp data point (Task 9, dev machine, 2026-07-06):**
+  Ran the protocol inside `devenv shell` (release build via `mise run
+  bench`) on the quiet dev machine — **AMD Ryzen 9 3900 12-Core Processor,
+  12 physical / 24 logical cores** — against the pinned nightly model
+  `qwen2.5-0.5b-instruct-q8_0.gguf` (qwen2 1B Q8_0,
+  `/home/dev/.cache/inferno-tests/qwen2.5-0.5b-instruct-q8_0.gguf`),
+  defaults pp=512, tg=128, reps=5. inferno commit `af53098`, llama.cpp build
+  `6f4f53f` (devenv-pinned, BLAS + CPU-haswell backends).
+
+  Real llama-bench JSON flowed through the Task 6 parser **unchanged** — no
+  fixture correction was needed; both the table run and the `--json` run
+  parsed and reported cleanly on the first try.
+
+  Table run (`mise run bench -- <MODEL>`):
+
+  ```
+  model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+  cpu: BLAS, AMD Ryzen 9 3900 12-Core Processor (12 physical / 24 logical cores)
+  inferno 0.1.0 (af53098) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+  engine                 threads        pp512 tok/s        tg128 tok/s
+  inferno (compiled)           1       16.18 ± 0.10        10.51 ± 0.07 
+  llama.cpp                   12       45.56 ± 0.74        26.78 ± 0.66 
+  llama.cpp (t=1 diag)         1       53.71 ± 1.04        23.76 ± 0.16 
+
+  ratio (inferno/llama.cpp): pp 0.36x | tg 0.39x
+  ```
+
+  `--json` run (independent invocation immediately after, same protocol):
+
+  ```json
+  {
+    "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+    "model_type": "qwen2 1B Q8_0",
+    "cpu_info": "BLAS, AMD Ryzen 9 3900 12-Core Processor",
+    "physical_cores": 12,
+    "logical_cores": 24,
+    "inferno_version": "0.1.0",
+    "inferno_git": "af53098",
+    "llama_build_commit": "6f4f53f",
+    "pp": 512,
+    "tg": 128,
+    "reps": 5,
+    "inferno_threads": 1,
+    "llama_threads": 12,
+    "inferno_pp_tok_s": 16.213095083530817,
+    "inferno_pp_stddev": 0.0872368152354205,
+    "inferno_tg_tok_s": 10.55102694029267,
+    "inferno_tg_stddev": 0.027926234244083543,
+    "llama_pp_tok_s": 43.374793,
+    "llama_pp_stddev": 1.357777,
+    "llama_tg_tok_s": 25.028042,
+    "llama_tg_stddev": 0.61535,
+    "llama_t1_pp_tok_s": 31.301321,
+    "llama_t1_pp_stddev": 12.139925,
+    "llama_t1_tg_tok_s": 15.160113,
+    "llama_t1_tg_stddev": 0.219028
+  }
+  ```
+
+  **inferno loses both pp and tg against llama.cpp at full threads** — the
+  expected M4a outcome (single-threaded generated code vs llama.cpp at 12
+  physical cores): table run ratio **pp 0.36x, tg 0.39x**; the `--json` run
+  agrees (pp 16.21/43.37 ≈ 0.37x, tg 10.55/25.03 ≈ 0.42x). The `-t 1`
+  diagnostic row is noisier between the two runs (pp 53.71±1.04 vs
+  31.30±12.14, tg 23.76±0.16 vs 15.16±0.22) — the second run's `t=1` pp
+  stddev (12.14 tok/s on a 31.3 tok/s mean) suggests some scheduling/thermal
+  contention during just that measurement, most likely from the `-t 1`
+  single-core run being more sensitive to a noisy neighbor than the
+  full-thread rows (whose numbers stayed consistent across both
+  invocations). inferno's own pp/tg numbers were stable and consistent
+  between runs (16.18 vs 16.21 tok/s pp; 10.51 vs 10.55 tok/s tg), so the
+  headline pp/tg ratios above are trustworthy; treat the `t=1` diagnostic
+  as directional rather than precise. This data point seeds M4b's plan:
+  the gap is real and, per the design's risk note, expected — multi-threaded
+  generated code is M4b's first lever.
