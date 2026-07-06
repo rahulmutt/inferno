@@ -28,7 +28,6 @@ impl Xoshiro256StarStar {
         Xoshiro256StarStar { s }
     }
 
-    #[allow(dead_code)] // consumed in Task 4
     pub(crate) fn next_u64(&mut self) -> u64 {
         let result = self.s[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
         let t = self.s[1] << 17;
@@ -42,7 +41,6 @@ impl Xoshiro256StarStar {
     }
 
     /// Uniform in [0, 1) from the top 53 bits (exactly representable in f64).
-    #[allow(dead_code)] // consumed in Task 4
     pub(crate) fn next_f64(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
