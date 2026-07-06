@@ -40,7 +40,11 @@ pub fn bench_compiled(
     let inner = || -> Result<(f64, f64), Box<dyn std::error::Error>> {
         // Compiled first: this is also the first compile, so its cost (LLVM
         // codegen + link) lands here rather than skewing the interpreter run.
-        let mut compiled = load_compiled(model, max_seq_len)?;
+        // Pinned to 1 thread ON PURPOSE (M4b.1 spec): this gate measures
+        // codegen quality against the interpreter; letting threading
+        // inflate the ratio would hide codegen regressions behind
+        // parallelism. Never "fix" a red nightly by unpinning this.
+        let mut compiled = load_compiled(model, max_seq_len, 1)?;
         let (_, compiled_stats) =
             compiled.generate(prompt, max_tokens, &mut Greedy, &mut |_| {
                 ControlFlow::Continue(())
