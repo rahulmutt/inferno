@@ -64,19 +64,19 @@ impl Default for SamplerConfig {
 
 impl SamplerConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if self.temperature < 0.0 {
+        if self.temperature.is_nan() || self.temperature < 0.0 {
             return Err(format!(
                 "temperature must be >= 0, got {}",
                 self.temperature
             ));
         }
-        if !(self.top_p > 0.0 && self.top_p <= 1.0) {
+        if self.top_p.is_nan() || !(self.top_p > 0.0 && self.top_p <= 1.0) {
             return Err(format!("top-p must be in (0, 1], got {}", self.top_p));
         }
-        if !(self.min_p >= 0.0 && self.min_p < 1.0) {
+        if self.min_p.is_nan() || !(self.min_p >= 0.0 && self.min_p < 1.0) {
             return Err(format!("min-p must be in [0, 1), got {}", self.min_p));
         }
-        if self.repeat_penalty <= 0.0 {
+        if self.repeat_penalty.is_nan() || self.repeat_penalty <= 0.0 {
             return Err(format!(
                 "repeat-penalty must be > 0, got {}",
                 self.repeat_penalty
@@ -219,11 +219,19 @@ mod tests {
                 ..Default::default()
             },
             SamplerConfig {
+                temperature: f32::NAN,
+                ..Default::default()
+            },
+            SamplerConfig {
                 top_p: 0.0,
                 ..Default::default()
             },
             SamplerConfig {
                 top_p: 1.5,
+                ..Default::default()
+            },
+            SamplerConfig {
+                top_p: f32::NAN,
                 ..Default::default()
             },
             SamplerConfig {
@@ -235,7 +243,15 @@ mod tests {
                 ..Default::default()
             },
             SamplerConfig {
+                min_p: f32::NAN,
+                ..Default::default()
+            },
+            SamplerConfig {
                 repeat_penalty: 0.0,
+                ..Default::default()
+            },
+            SamplerConfig {
+                repeat_penalty: f32::NAN,
                 ..Default::default()
             },
         ];
