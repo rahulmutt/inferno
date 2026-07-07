@@ -54,15 +54,33 @@ pub fn render(phase: &str, slots: &[String], counts: &[u64], bytes: &[u64], secs
 mod tests {
     #[test]
     fn render_sorts_and_computes_share() {
+        // rmsnorm is declared *after* matmul in `slots` but has more cycles
+        // (300 vs 100). If `render()` didn't sort by descending cycle count,
+        // the rmsnorm row would still come second (input order). Asserting
+        // it comes first below only passes because the sort actually ran.
         let slots = vec![
             "matmul:blk.*.attn_q.weight".to_string(),
             "rmsnorm".to_string(),
         ];
-        let out = super::render("decode", &slots, &[300, 100], &[6_000_000, 0], 0.5);
+        let out = super::render("decode", &slots, &[100, 300], &[6_000_000, 0], 0.5);
         assert!(out.contains("matmul:blk.*.attn_q.weight"));
-        assert!(out.contains("75.0%")); // 300/400
+
+        // The first data row (after the two header lines) must be rmsnorm:
+        // proof the higher-cycle op was sorted ahead of matmul.
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(
+            lines[2].contains("rmsnorm"),
+            "expected rmsnorm (300 cyc) sorted before matmul (100 cyc), got: {}",
+            lines[2]
+        );
+
+        assert!(out.contains("25.0%")); // matmul: 100/400
+        assert!(out.contains("75.0%")); // rmsnorm: 300/400
+
         // matmul row shows a GB/s number; rmsnorm shows '-'.
         let mm_line = out.lines().find(|l| l.contains("attn_q")).unwrap();
         assert!(mm_line.contains('.') && !mm_line.contains(" - "));
+        let rms_line = out.lines().find(|l| l.contains("rmsnorm")).unwrap();
+        assert!(rms_line.trim_end().ends_with('-'));
     }
 }
