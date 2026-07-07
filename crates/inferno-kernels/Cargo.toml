@@ -29,3 +29,7 @@ unsafe_op_in_unsafe_fn = "deny"
 [[bench]]
 name = "gemv"
 harness = false
+
+[[bench]]
+name = "attention"
+harness = false
