@@ -109,6 +109,10 @@ pub struct InfernoRun {
     /// Per-thread parity diagnostic: same backend, active threads capped to
     /// 1. None when the headline itself ran at t=1.
     pub t1: Option<InfernoNumbers>,
+    /// The thread count the engine actually ran at (`Engine::threads()`,
+    /// post-clamp to `1..=logical_cores`) — what the report must record,
+    /// since the raw CLI-resolved value can exceed logical cores.
+    pub threads: usize,
 }
 
 /// Sample mean and sample (n-1) standard deviation; stddev is 0 for n < 2.
@@ -221,7 +225,11 @@ pub fn measure_inferno(
     } else {
         None
     };
-    Ok(InfernoRun { headline, t1 })
+    Ok(InfernoRun {
+        headline,
+        t1,
+        threads: engine.threads(),
+    })
 }
 
 /// One recorded comparison data point (the `--json` shape; the human table
@@ -241,6 +249,9 @@ pub struct BenchReport {
     pub tg: u64,
     pub reps: u64,
     /// Headline inferno thread count (matched to llama.cpp's since M4b.1).
+    /// The actual post-clamp count the engine ran at (`Engine::threads()`),
+    /// not the raw CLI-resolved value — so this stays true even when
+    /// `--threads` exceeds logical cores.
     pub inferno_threads: u64,
     pub llama_threads: u64,
     pub inferno_pp_tok_s: f64,
@@ -416,7 +427,7 @@ pub fn bench(
             pp,
             tg,
             reps,
-            inferno_threads: threads,
+            inferno_threads: inferno.threads as u64,
             llama_threads: threads,
             inferno_pp_tok_s: inferno.headline.pp.mean_tok_s,
             inferno_pp_stddev: inferno.headline.pp.stddev_tok_s,

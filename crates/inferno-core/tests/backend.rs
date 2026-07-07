@@ -4,6 +4,16 @@
 //! so the crate's `build.rs` `cargo:rustc-link-arg-tests=-rdynamic` applies to
 //! this binary, exporting the statically-linked kernel symbols the
 //! `dlopen`ed `model.so` resolves against — see `tests/artifact.rs`.
+//!
+//! These tests rely on nextest's process-per-test model: each test gets its
+//! own process, so the process-global `inferno-pool` pool each
+//! `compiled_backend()` initializes, and the `set_global_active_threads`
+//! calls the threading tests make, never collide across tests. Under plain
+//! `cargo test` (test threads sharing one process) the global pool inits
+//! would collide and concurrent `forward` calls could overlap the same pool
+//! dispatch (compare `inferno-pool`'s `tests/global.rs`, which folds its
+//! global-state steps into a single `#[test]` fn for the same reason). Run
+//! this file with nextest, not plain `cargo test`.
 
 use std::path::Path;
 

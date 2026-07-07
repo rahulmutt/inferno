@@ -150,9 +150,14 @@ fn run_rejects_invalid_sampling_flags() {
 /// end-to-end through the real binary + dlopen'd artifact).
 #[test]
 fn run_threads_do_not_change_output() {
+    // Isolated cache dir (same pattern as compiled_and_interp_agree_on_greedy_tokens
+    // above): both invocations share it so this test doesn't race other tests /
+    // prior runs over the default `~/.cache/inferno`.
+    let cache = tempfile::tempdir().unwrap();
     let out = |threads: &str| {
         let a = Command::cargo_bin("inferno")
             .unwrap()
+            .env("XDG_CACHE_HOME", cache.path())
             .args([
                 "run",
                 &fixture("tiny.gguf"),
