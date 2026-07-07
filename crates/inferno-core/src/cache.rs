@@ -124,6 +124,18 @@ mod tests {
         )
         .unwrap();
         assert_ne!(k1, k_prof); // profiling is part of the key
+
+        let k_tile = cache_key(
+            m,
+            &t,
+            64,
+            &inferno_codegen::CompileOptions {
+                profile: false,
+                prefill_tile: 32,
+            },
+        )
+        .unwrap();
+        assert_ne!(k1, k_tile); // prefill_tile is part of the key
     }
 
     #[test]

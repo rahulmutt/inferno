@@ -738,6 +738,13 @@ impl<'c, 'a> Codegen<'c, 'a> {
                     Step::Gemv { .. } => {
                         self.profiled(&label, |cg| cg.lower_gemm(env, step, tile_start, m));
                     }
+                    // Quantization is folded into `lower_gemm` (it happens inline
+                    // while filling the activation panel for a quantized-weight
+                    // Gemv). `lower_step`'s own `Step::Quantize` arm is a no-op
+                    // for the same reason, so emitting a profiled range-loop here
+                    // would just be a dead m-loop plus a spurious ~0-cycle
+                    // "quantize" profiler accumulation. Skip it entirely.
+                    Step::Quantize { .. } => {}
                     _ => {
                         self.profiled(&label, |cg| {
                             cg.range_loop(m, |cg, ti| {
