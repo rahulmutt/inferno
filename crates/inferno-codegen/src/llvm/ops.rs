@@ -50,12 +50,23 @@ pub fn build_full_module<'c>(
     plan: &Plan,
     graph: &Graph,
     desc: &ModelDesc,
+    opts: &crate::CompileOptions,
+    slots: &crate::profile::ProfileSlots,
 ) -> Result<LlvmModule<'c>> {
     let lm = LlvmModule::new(ctx, "model");
     lm.declare_kernels();
+    let prof = if opts.profile {
+        lm.declare_prof_counters(slots.len())
+    } else {
+        None
+    };
     let (prefill, decode) = lm.declare_entry_points();
 
-    let cg = Codegen::new(ctx, lm.module(), plan, graph, desc);
+    let mut cg = Codegen::new(ctx, lm.module(), plan, graph, desc);
+    cg.prof_counters = prof;
+    if opts.profile {
+        cg.prof_slots = slots.index_map();
+    }
     let loopir = build_loopir(plan, graph, desc);
     cg.lower_prefill(prefill, &loopir);
     cg.lower_decode(decode, &loopir);
@@ -78,6 +89,22 @@ struct Frame<'c> {
     pos: IntValue<'c>,
     /// Token id for this row (used by `embed`), zero-extended to i64.
     token: IntValue<'c>,
+}
+
+/// Prefill entry-point pointers + `pos_off`, bundled once so a tile's per-row
+/// [`Frame`]s are cheap to materialize (`env.frame(cg, row)`). Unlike a
+/// [`Frame`] it is row-agnostic — it holds the loop-invariant parameters only.
+struct TileEnv<'c> {
+    /// The `tokens` param (`ptr` to i32 token ids).
+    tokens: PointerValue<'c>,
+    /// The `pos_off` param (absolute position of arena row 0), i64.
+    pos_off: IntValue<'c>,
+    /// The packed-weight image base pointer.
+    weights: PointerValue<'c>,
+    /// The KV-cache base pointer.
+    kv: PointerValue<'c>,
+    /// The activation-arena base pointer.
+    arena: PointerValue<'c>,
 }
 
 /// Holds the builder, cached types/intrinsics, and the compile-time constant
@@ -105,6 +132,14 @@ struct Codegen<'c, 'a> {
     weight_globals: RefCell<HashMap<usize, PointerValue<'c>>>,
     /// (theta bits, head_dim) -> `[half x float]` rope frequency table.
     rope_freqs: RefCell<HashMap<(u32, u64), PointerValue<'c>>>,
+
+    /// Profiler counter array base (`[N x i64]`), or None when not profiling.
+    prof_counters: Option<PointerValue<'c>>,
+    /// step-label -> slot index (empty when not profiling).
+    prof_slots: HashMap<String, usize>,
+    /// `llvm.readcyclecounter` declaration (always declared; only *called*
+    /// when `prof_counters` is Some).
+    readcyc_fn: FunctionValue<'c>,
 }
 
 impl<'c, 'a> Codegen<'c, 'a> {
@@ -141,6 +176,12 @@ impl<'c, 'a> Codegen<'c, 'a> {
             maxnum_fn: decl("llvm.maxnum"),
             weight_globals: RefCell::new(HashMap::new()),
             rope_freqs: RefCell::new(HashMap::new()),
+            readcyc_fn: Intrinsic::find("llvm.readcyclecounter")
+                .expect("readcyclecounter intrinsic")
+                .get_declaration(module, &[])
+                .expect("readcyclecounter declaration"),
+            prof_counters: None,
+            prof_slots: HashMap::new(),
         }
     }
 
@@ -196,6 +237,49 @@ impl<'c, 'a> Codegen<'c, 'a> {
     }
     fn store_f32(&self, ptr: PointerValue<'c>, val: FloatValue<'c>) {
         self.builder.build_store(ptr, val).unwrap();
+    }
+
+    // ---- profiler helpers ---------------------------------------------------
+
+    fn load_i64(&self, ptr: PointerValue<'c>) -> IntValue<'c> {
+        self.builder
+            .build_load(self.i64_t, ptr, "ld64")
+            .unwrap()
+            .into_int_value()
+    }
+
+    /// Read the CPU cycle counter (`llvm.readcyclecounter`, an i64).
+    fn readcyc(&self) -> IntValue<'c> {
+        self.builder
+            .build_call(self.readcyc_fn, &[], "rdtsc")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value()
+    }
+
+    /// Run `emit` (one op's lowering) bracketed by cycle-counter reads that
+    /// accumulate `t1 - t0` into this op's profiler slot. When not profiling
+    /// (`prof_counters` is None) it just runs `emit` — zero overhead, and the
+    /// emitted math is byte-for-byte identical (readcyclecounter is pure and
+    /// only reads a clock). The accumulation runs on the entry-point thread
+    /// (GEMV/GEMM shards join before the wrapper returns), so the plain
+    /// load/add/store needs no atomics; profiled artifacts are driven by the
+    /// single-threaded CLI generate loop.
+    fn profiled(&self, label: &str, emit: impl FnOnce(&Self)) {
+        let Some(base) = self.prof_counters else {
+            return emit(self);
+        };
+        let slot = self.prof_slots[label];
+        let t0 = self.readcyc();
+        emit(self);
+        let t1 = self.readcyc();
+        let delta = self.builder.build_int_sub(t1, t0, "cyc").unwrap();
+        let p = self.byte_ptr(base, self.const_i64((slot * 8) as u64));
+        let cur = self.load_i64(p);
+        let next = self.builder.build_int_add(cur, delta, "acc64").unwrap();
+        self.builder.build_store(p, next).unwrap();
     }
 
     /// Build an `alloca` in the current function's **entry block** (before its
@@ -305,6 +389,46 @@ impl<'c, 'a> Codegen<'c, 'a> {
         self.byte_ptr(frame.arena, off)
     }
 
+    /// Pointer to element 0 of value `v`'s row `row` in the given `arena`
+    /// (f32). Like [`arena_row_ptr`](Self::arena_row_ptr) but takes an explicit
+    /// arena pointer + row value rather than a [`Frame`] — the batched GEMM
+    /// panel path needs to address rows `tile_start..tile_start+m` directly.
+    fn arena_row_ptr_at(
+        &self,
+        arena: PointerValue<'c>,
+        v: usize,
+        row: IntValue<'c>,
+    ) -> PointerValue<'c> {
+        let off = self.const_i64(self.plan.arena.slots[v - 1].offset as u64);
+        let rl = self.const_i64(self.row_len(v));
+        let ro = self.builder.build_int_mul(row, rl, "rowoff").unwrap();
+        let base = self.builder.build_int_add(off, ro, "rowbase").unwrap();
+        self.elem_ptr(arena, base)
+    }
+
+    /// Base pointer of the quantized-activation scratch region for the given
+    /// `arena` (row 0 of the T-row GEMM panel). Same byte offset as
+    /// [`act_scratch_ptr`](Self::act_scratch_ptr) without a [`Frame`].
+    fn act_scratch_ptr_row0(&self, arena: PointerValue<'c>) -> PointerValue<'c> {
+        let off = self.const_i64(self.plan.arena.act_scratch_off as u64);
+        self.byte_ptr(arena, off)
+    }
+
+    /// Packed-activation byte length for a MatMul weight's stored dtype
+    /// (mirrors the kernel's internal `act_len(k)` and the planner's
+    /// `packed_act_bytes`). This is THIS matmul's own panel stride — the GEMM
+    /// kernel recomputes the identical value, so the panel must be packed at
+    /// exactly this stride (see [`lower_gemm`](Self::lower_gemm)).
+    fn packed_act_bytes(dtype: &inferno_formats::DType, k: usize) -> u64 {
+        use inferno_formats::DType::*;
+        (match dtype {
+            F32 => k * 4,
+            Q8_0 => inferno_kernels::act::q8a_len(k),
+            Q4_K => inferno_kernels::act::q8k_len(k),
+            other => unreachable!("non-matmul dtype {other:?} reached packed_act_bytes"),
+        }) as u64
+    }
+
     /// A private `[N x float]` global holding tensor `tensor_index` dequantized
     /// at compile time with the same `quant::dequant` the interpreter uses —
     /// guaranteeing bit-parity with the oracle. Cached per tensor.
@@ -403,6 +527,67 @@ impl<'c, 'a> Codegen<'c, 'a> {
         self.builder.position_at_end(exit);
     }
 
+    /// Emit `for tile_start in (0..count).step_by(step) { body(self,
+    /// tile_start, m) }` where `m = min(step, count - tile_start)` is the live
+    /// row count for this tile. A strided variant of [`range_loop`]; `body`
+    /// may itself emit blocks and must leave the builder on a terminator-free
+    /// block, which we close with the back-edge.
+    fn tile_loop(
+        &self,
+        count: IntValue<'c>,
+        step: IntValue<'c>,
+        body: impl FnOnce(&Self, IntValue<'c>, IntValue<'c>),
+    ) {
+        let func = self
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
+        let header = self.ctx.append_basic_block(func, "tile.header");
+        let body_bb = self.ctx.append_basic_block(func, "tile.body");
+        let exit = self.ctx.append_basic_block(func, "tile.exit");
+
+        let idx = self.entry_alloca(self.i64_t, "ts");
+        self.builder
+            .build_store(idx, self.i64_t.const_zero())
+            .unwrap();
+        self.builder.build_unconditional_branch(header).unwrap();
+
+        self.builder.position_at_end(header);
+        let ts = self
+            .builder
+            .build_load(self.i64_t, idx, "ts.load")
+            .unwrap()
+            .into_int_value();
+        let cond = self
+            .builder
+            .build_int_compare(IntPredicate::ULT, ts, count, "ts.lt")
+            .unwrap();
+        self.builder
+            .build_conditional_branch(cond, body_bb, exit)
+            .unwrap();
+
+        self.builder.position_at_end(body_bb);
+        // m = min(step, count - ts): the tail tile is short when count % step != 0.
+        let rem = self.builder.build_int_sub(count, ts, "rem").unwrap();
+        let short = self
+            .builder
+            .build_int_compare(IntPredicate::ULT, rem, step, "m.short")
+            .unwrap();
+        let m = self
+            .builder
+            .build_select(short, rem, step, "m")
+            .unwrap()
+            .into_int_value();
+        body(self, ts, m);
+        let next = self.builder.build_int_add(ts, step, "ts.next").unwrap();
+        self.builder.build_store(idx, next).unwrap();
+        self.builder.build_unconditional_branch(header).unwrap();
+
+        self.builder.position_at_end(exit);
+    }
+
     // ---- entry points -------------------------------------------------------
 
     fn lower_prefill(&self, func: FunctionValue<'c>, loopir: &LoopIr) {
@@ -416,28 +601,22 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let kv = func.get_nth_param(4).unwrap().into_pointer_value();
         let arena = func.get_nth_param(5).unwrap().into_pointer_value();
         let logits_out = func.get_nth_param(6).unwrap().into_pointer_value();
+        let t = self.const_i64(self.plan.prefill_tile as u64);
 
-        self.range_loop(n, |cg, r| {
-            let pos = cg.builder.build_int_add(pos_off, r, "pos").unwrap();
-            let tok_ptr = cg.elem_ptr(tokens, r);
-            let tok = cg
-                .builder
-                .build_load(cg.i32_t, tok_ptr, "tok")
-                .unwrap()
-                .into_int_value();
-            let token = cg
-                .builder
-                .build_int_z_extend(tok, cg.i64_t, "tok64")
-                .unwrap();
-            let frame = Frame {
-                arena,
-                weights,
-                kv,
-                row: r,
-                pos,
-                token,
-            };
-            cg.lower_body(loopir, &frame);
+        // Process tokens in tiles of `T = prefill_tile`: for each tile of
+        // `m <= T` rows, run the forward pass once — one batched GEMM per
+        // matmul (each weight strip read once for the whole tile) with every
+        // other op looped over the tile's `m` rows. Output is bitwise-invariant
+        // to `T` because each output row is computed independently.
+        let env = TileEnv {
+            tokens,
+            pos_off,
+            weights,
+            kv,
+            arena,
+        };
+        self.tile_loop(n, t, |cg, tile_start, m| {
+            cg.lower_tile(loopir, &env, tile_start, m);
         });
 
         // Copy the LAST token's logits row (row n-1) of the graph output slot
@@ -507,9 +686,171 @@ impl<'c, 'a> Codegen<'c, 'a> {
     fn lower_body(&self, loopir: &LoopIr, frame: &Frame<'c>) {
         for island in &loopir.islands {
             for step in &island.steps {
-                self.lower_step(frame, step);
+                let label = crate::profile::step_label(step, self.plan, self.desc);
+                self.profiled(&label, |cg| cg.lower_step(frame, step));
             }
         }
+    }
+
+    /// Materialize a per-row [`Frame`] for arena row `row` from the tile's
+    /// loop-invariant [`TileEnv`]: `pos = pos_off + row`, `token = tokens[row]`.
+    fn tile_frame(&self, env: &TileEnv<'c>, row: IntValue<'c>) -> Frame<'c> {
+        let pos = self.builder.build_int_add(env.pos_off, row, "pos").unwrap();
+        let tok_ptr = self.elem_ptr(env.tokens, row);
+        let tok = self
+            .builder
+            .build_load(self.i32_t, tok_ptr, "tok")
+            .unwrap()
+            .into_int_value();
+        let token = self
+            .builder
+            .build_int_z_extend(tok, self.i64_t, "tok64")
+            .unwrap();
+        Frame {
+            arena: env.arena,
+            weights: env.weights,
+            kv: env.kv,
+            row,
+            pos,
+            token,
+        }
+    }
+
+    /// One tile's forward pass over rows `tile_start..tile_start+m`: iterate the
+    /// program's steps once, batching each matmul into a single `inferno_par_gemm`
+    /// and looping every other op over the tile's `m` rows. Step order (and, for
+    /// attention, per-token KV-append order within the m-loop) is identical to
+    /// the old per-token body, so output is bit-identical and T-invariant.
+    ///
+    /// Profiling attributes per op-kind: the matmul is timed once per tile; each
+    /// elementwise/attention op is timed once per tile across its whole m-loop.
+    fn lower_tile(
+        &self,
+        loopir: &LoopIr,
+        env: &TileEnv<'c>,
+        tile_start: IntValue<'c>,
+        m: IntValue<'c>,
+    ) {
+        for island in &loopir.islands {
+            for step in &island.steps {
+                let label = crate::profile::step_label(step, self.plan, self.desc);
+                match step {
+                    Step::Gemv { .. } => {
+                        self.profiled(&label, |cg| cg.lower_gemm(env, step, tile_start, m));
+                    }
+                    // Quantization is folded into `lower_gemm` (it happens inline
+                    // while filling the activation panel for a quantized-weight
+                    // Gemv). `lower_step`'s own `Step::Quantize` arm is a no-op
+                    // for the same reason, so emitting a profiled range-loop here
+                    // would just be a dead m-loop plus a spurious ~0-cycle
+                    // "quantize" profiler accumulation. Skip it entirely.
+                    Step::Quantize { .. } => {}
+                    _ => {
+                        self.profiled(&label, |cg| {
+                            cg.range_loop(m, |cg, ti| {
+                                let row = cg.add(tile_start, ti);
+                                let frame = cg.tile_frame(env, row);
+                                cg.lower_step(&frame, step);
+                            });
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Batched matmul for a tile of `m` tokens starting at `tile_start`: fill an
+    /// `m`-row activation panel, then issue ONE `inferno_par_gemm` (the kernel
+    /// reads each weight strip once for the whole tile).
+    ///
+    /// Panel stride MUST equal the GEMM kernel's internal `act_len(k)` — for a
+    /// quantized weight we quantize token `ti`'s source row into
+    /// `act_scratch + ti * packed_act_bytes(dtype, k)` (this matmul's OWN
+    /// `act_len(k)`, NOT the arena's `max_act_row`), so the panel is tightly
+    /// packed for this GEMM. The scratch region is sized
+    /// `prefill_tile * max_act_row >= prefill_tile * this_act_row`, so it fits.
+    /// For an F32 weight the arena source rows are already a contiguous panel
+    /// (stride `k` f32) — no copy. Output is written token-major
+    /// (`y[ti*rows + r]`), which coincides with the arena rows of `out` starting
+    /// at `tile_start`.
+    fn lower_gemm(
+        &self,
+        env: &TileEnv<'c>,
+        step: &Step,
+        tile_start: IntValue<'c>,
+        m: IntValue<'c>,
+    ) {
+        let Step::Gemv {
+            weight,
+            out,
+            rows,
+            k,
+            ..
+        } = step
+        else {
+            unreachable!("lower_gemm called on non-Gemv step")
+        };
+        let pw = &self.plan.weights.weights[*weight];
+        // The activation feeding this matmul is the MatMul node's first input;
+        // the node produces value `out`, so it is `graph.nodes[out-1]`.
+        let src = self.graph.nodes[*out - 1].inputs[0];
+        let k_c = self.const_i64(*k as u64);
+        let rows_c = self.const_i64(*rows as u64);
+        let gemm_sym = crate::loopir::gemm_symbol(&pw.dtype, pw.isa);
+
+        let panel_ptr = if pw.dtype != inferno_formats::DType::F32 {
+            // Quantize each token's source row into scratch[ti * act_len(k)].
+            let act_row = Self::packed_act_bytes(&pw.dtype, *k);
+            let scratch = self.act_scratch_ptr_row0(env.arena);
+            let qsym = Self::quantize_symbol(&pw.dtype, pw.isa);
+            let qfn = self
+                .module
+                .get_function(&qsym)
+                .expect("quantize kernel declared (Task 8)");
+            self.range_loop(m, |cg, ti| {
+                let row = cg.add(tile_start, ti);
+                let src_ptr = cg.arena_row_ptr_at(env.arena, src, row);
+                let off = cg
+                    .builder
+                    .build_int_mul(ti, cg.const_i64(act_row), "actoff")
+                    .unwrap();
+                let dst = cg.byte_ptr(scratch, off);
+                cg.builder
+                    .build_call(qfn, &[src_ptr.into(), dst.into(), k_c.into()], "quantize")
+                    .unwrap();
+            });
+            scratch
+        } else {
+            // F32 weight: the source rows are already a contiguous f32 panel.
+            self.arena_row_ptr_at(env.arena, src, tile_start)
+        };
+
+        let y_ptr = self.arena_row_ptr_at(env.arena, *out, tile_start);
+        let w_ptr = self.byte_ptr(env.weights, self.const_i64(pw.offset as u64));
+        let gfn = self
+            .module
+            .get_function(&gemm_sym)
+            .expect("gemm kernel declared (Task 5)");
+        let pfn = self
+            .module
+            .get_function("inferno_par_gemm")
+            .expect("par gemm dispatcher declared");
+        self.builder
+            .build_call(
+                pfn,
+                &[
+                    gfn.as_global_value().as_pointer_value().into(),
+                    y_ptr.into(),
+                    panel_ptr.into(),
+                    w_ptr.into(),
+                    k_c.into(),
+                    m.into(),
+                    rows_c.into(),
+                ],
+                "par_gemm",
+            )
+            .unwrap();
+        // Bias (if any) is a separate Step handled in the elementwise m-loop.
     }
 
     // ---- per-op lowering ----------------------------------------------------

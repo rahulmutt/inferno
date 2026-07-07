@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use inferno_codegen::CompileOptions;
 use inferno_core::artifact::verify_cache;
 use inferno_core::{Artifact, CoreError, Meta, cache_dir, cache_key, content_hash};
 use inferno_formats::load_desc;
@@ -46,7 +47,7 @@ fn compiled_prefill_matches_interpreter() {
     use_temp_cache();
     let model = model_path();
     let target = TargetDesc::detect().unwrap();
-    let art = Artifact::load_or_compile(&model, &target, 64).unwrap();
+    let art = Artifact::load_or_compile(&model, &target, 64, &CompileOptions::default()).unwrap();
 
     let desc = load_desc(&model).unwrap();
     let graph = build_graph(&desc).unwrap();
@@ -79,7 +80,8 @@ fn prefill_past_max_seq_len_panics_not_oob() {
     let model = model_path();
     let target = TargetDesc::detect().unwrap();
     let max_seq_len = 64usize;
-    let art = Artifact::load_or_compile(&model, &target, max_seq_len).unwrap();
+    let art = Artifact::load_or_compile(&model, &target, max_seq_len, &CompileOptions::default())
+        .unwrap();
 
     let vocab = load_desc(&model).unwrap().hyperparams.vocab_size as usize;
     let mut kv = vec![0f32; art.meta().kv_total_bytes / 4];
@@ -136,7 +138,7 @@ fn concurrent_compile_publishes_atomically() {
             let target = target.clone();
             thread::spawn(move || {
                 barrier.wait();
-                Artifact::load_or_compile(&model, &target, max_seq_len)
+                Artifact::load_or_compile(&model, &target, max_seq_len, &CompileOptions::default())
             })
         })
         .collect();
@@ -168,7 +170,7 @@ fn tampered_meta_is_rejected() {
     let seq = 96usize;
 
     // Populate the cache and capture the correct logits.
-    let art = Artifact::load_or_compile(&model, &target, seq).unwrap();
+    let art = Artifact::load_or_compile(&model, &target, seq, &CompileOptions::default()).unwrap();
     let desc = load_desc(&model).unwrap();
     let vocab = desc.hyperparams.vocab_size as usize;
     let tokens = vec![1u32, 4, 7, 2];
@@ -179,7 +181,7 @@ fn tampered_meta_is_rejected() {
     drop(art);
 
     // Tamper: flip one byte of the cached weights.bin.
-    let dir = cache_dir(&cache_key(&model, &target, seq).unwrap());
+    let dir = cache_dir(&cache_key(&model, &target, seq, &CompileOptions::default()).unwrap());
     let wpath = dir.join("weights.bin");
     let mut bytes = std::fs::read(&wpath).unwrap();
     bytes[0] ^= 0xff;
@@ -201,7 +203,7 @@ fn tampered_meta_is_rejected() {
 
     // A reload must NOT dlopen the tampered artifact: it recompiles, restoring a
     // consistent weights.bin/meta pair and reproducing the exact logits.
-    let art2 = Artifact::load_or_compile(&model, &target, seq).unwrap();
+    let art2 = Artifact::load_or_compile(&model, &target, seq, &CompileOptions::default()).unwrap();
     let restored = std::fs::read(&wpath).unwrap();
     assert_eq!(
         content_hash(&restored),

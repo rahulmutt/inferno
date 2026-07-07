@@ -91,6 +91,7 @@ pub fn plan_arena(
     graph: &Graph,
     weights: &WeightImageLayout,
     max_seq_len: usize,
+    prefill_tile: usize,
 ) -> Result<ArenaLayout> {
     let n = graph.nodes.len();
     let mut slots: Vec<ValueSlot> = Vec::with_capacity(n);
@@ -129,12 +130,17 @@ pub fn plan_arena(
         });
     }
 
-    let act_scratch_bytes = weights
+    let per_row = weights
         .weights
         .iter()
         .map(|w| packed_act_bytes(&w.dtype, w.k))
         .max()
         .unwrap_or(0);
+    // The prefill GEMM activation panel holds `prefill_tile` quantized rows
+    // (decode uses row 0 only, which fits within the panel). Sizing the
+    // scratch ×T is the only arena change tiling needs — the f32 intermediate
+    // arena already reserves `max_seq_len` rows per value.
+    let act_scratch_bytes = per_row * prefill_tile.max(1);
     let act_scratch_off = total_f32 * 4;
 
     Ok(ArenaLayout {
@@ -165,7 +171,7 @@ mod tests {
     #[test]
     fn every_value_has_a_slot() {
         let (graph, weights) = setup();
-        let a = plan_arena(&graph, &weights, 128).unwrap();
+        let a = plan_arena(&graph, &weights, 128, 64).unwrap();
         assert_eq!(a.slots.len(), graph.nodes.len());
         for (i, s) in a.slots.iter().enumerate() {
             assert_eq!(s.value, i + 1);
@@ -175,7 +181,7 @@ mod tests {
     #[test]
     fn no_two_live_values_overlap() {
         let (graph, weights) = setup();
-        let a = plan_arena(&graph, &weights, 128).unwrap();
+        let a = plan_arena(&graph, &weights, 128, 64).unwrap();
         // For each pair with overlapping live ranges, byte ranges must be disjoint.
         for (i, si) in a.slots.iter().enumerate() {
             for sj in a.slots.iter().skip(i + 1) {
@@ -197,8 +203,19 @@ mod tests {
     fn reuse_shrinks_arena_below_bump() {
         // Liveness packing must be <= naive bump (sum of all value sizes).
         let (graph, weights) = setup();
-        let a = plan_arena(&graph, &weights, 128).unwrap();
+        let a = plan_arena(&graph, &weights, 128, 64).unwrap();
         let bump: usize = a.slots.iter().map(|s| s.len_elems).sum();
         assert!(a.total_f32 <= bump);
+    }
+
+    #[test]
+    fn act_scratch_scales_with_prefill_tile() {
+        let (graph, weights) = setup();
+        let a1 = plan_arena(&graph, &weights, 128, 1).unwrap();
+        let a64 = plan_arena(&graph, &weights, 128, 64).unwrap();
+        // f32 arena identical; only the quant panel grows ×T.
+        assert_eq!(a1.total_f32, a64.total_f32);
+        assert_eq!(a64.act_scratch_bytes, a1.act_scratch_bytes * 64);
+        assert_eq!(a64.act_scratch_off, a1.act_scratch_off);
     }
 }

@@ -21,10 +21,11 @@ pub fn plan(
     graph: &Graph,
     target: &TargetDesc,
     max_seq_len: usize,
+    prefill_tile: usize,
 ) -> Result<Plan> {
     let islands = island::partition(graph);
     let weights = weights::build_weight_image(desc, graph, target)?;
-    let arena = memory::plan_arena(graph, &weights, max_seq_len)?;
+    let arena = memory::plan_arena(graph, &weights, max_seq_len, prefill_tile)?;
     let kv = kv::plan_kv(graph, max_seq_len)?;
     Ok(Plan {
         islands,
@@ -32,5 +33,6 @@ pub fn plan(
         arena,
         kv,
         max_seq_len,
+        prefill_tile,
     })
 }

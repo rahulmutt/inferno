@@ -2,7 +2,7 @@
 source: crates/inferno-plan/src/plan.rs
 expression: plan.dump()
 ---
-plan (max_seq_len=64)
+plan (max_seq_len=64 prefill_tile=64)
 islands:
   Embed nodes[0..1] embed
   AttnProj nodes[1..7] attnproj
@@ -28,5 +28,5 @@ weights: image_bytes=388608
   t18 F32/rs8 rows=256 k=64 @245760+65536
   t19 Q4_K/rs8 rows=64 k=256 @311296+9728
   t0 F32/rs8 rows=260 k=64 @321024+67584
-arena: total_f32=61440 act_scratch=@245760+292
+arena: total_f32=61440 act_scratch=@245760+18688
 kv: layers=2 kv_dim=32 per_layer=16384 total=32768

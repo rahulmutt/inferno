@@ -114,3 +114,60 @@ fn q4_k_thread_count_is_bit_invisible() {
         256,
     );
 }
+
+#[test]
+fn par_gemm_bit_identical_across_threads() {
+    use inferno_kernels::{KernelIsa, act, q8_0};
+    let (rows, k, m) = (129usize, 64usize, 5usize);
+    let vals: Vec<f32> = (0..rows * k).map(|i| ((i as f32) * 0.001).sin()).collect();
+    let w = q8_0::pack_q8_0_rs8(
+        &inferno_formats::quant::pack(&inferno_formats::DType::Q8_0, &vals).unwrap(),
+        rows,
+        k,
+    )
+    .unwrap();
+    let mut panel = Vec::new();
+    for t in 0..m {
+        let x: Vec<f32> = (0..k).map(|i| ((i + t) as f32 * 0.01).cos()).collect();
+        panel.extend_from_slice(&act::quantize_row_q8a(KernelIsa::Scalar, &x).unwrap());
+    }
+    let kernel: inferno_pool::GemmFn = q8_0::inferno_gemm_q8_0_rs8_avx2;
+    // Serial reference (1 lane).
+    let mut want = vec![f32::NAN; m * rows];
+    // SAFETY: sized buffers; full range.
+    unsafe {
+        kernel(
+            want.as_mut_ptr(),
+            panel.as_ptr(),
+            w.as_ptr(),
+            k,
+            m,
+            rows,
+            0,
+            rows,
+        )
+    };
+    for threads in [1usize, 2, 3, 8] {
+        let pool = inferno_pool::Pool::new(threads);
+        let mut got = vec![f32::NAN; m * rows];
+        // SAFETY: buffers live for the call; no overlapping dispatch.
+        unsafe {
+            pool.par_gemm(
+                kernel,
+                got.as_mut_ptr(),
+                panel.as_ptr(),
+                w.as_ptr(),
+                k,
+                m,
+                rows,
+            )
+        };
+        for i in 0..m * rows {
+            assert_eq!(
+                got[i].to_bits(),
+                want[i].to_bits(),
+                "threads {threads} i {i}"
+            );
+        }
+    }
+}

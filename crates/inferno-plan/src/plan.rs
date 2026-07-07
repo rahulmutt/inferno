@@ -16,6 +16,9 @@ pub struct Plan {
     pub kv: KvLayout,
     /// Compile-time sequence bound the arena/KV were sized for.
     pub max_seq_len: usize,
+    /// Prefill tile length (tokens per batched forward pass); sizes the GEMM
+    /// activation panel and the codegen tile loop.
+    pub prefill_tile: usize,
 }
 
 impl Plan {
@@ -26,7 +29,12 @@ impl Plan {
     pub fn dump(&self) -> String {
         use std::fmt::Write;
         let mut s = String::new();
-        writeln!(s, "plan (max_seq_len={})", self.max_seq_len).unwrap();
+        writeln!(
+            s,
+            "plan (max_seq_len={} prefill_tile={})",
+            self.max_seq_len, self.prefill_tile
+        )
+        .unwrap();
         writeln!(s, "islands:").unwrap();
         for isl in &self.islands {
             writeln!(
@@ -73,7 +81,7 @@ mod tests {
         let desc = load_desc(Path::new("../inferno-formats/tests/fixtures/tiny.gguf")).unwrap();
         let graph = build_graph(&desc).unwrap();
         let target = TargetDesc::detect().unwrap();
-        let plan = crate::plan(&desc, &graph, &target, 64).unwrap();
+        let plan = crate::plan(&desc, &graph, &target, 64, 64).unwrap();
         insta::assert_snapshot!(plan.dump());
     }
 }

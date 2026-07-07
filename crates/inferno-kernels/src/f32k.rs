@@ -117,3 +117,85 @@ pub unsafe extern "C" fn inferno_gemv_f32_rs8_avx2(
         unsafe { gemv_rows(y, xf, wf, k, r, row_end) };
     }
 }
+
+/// Batched F32 GEMM. Same per-(t,r) fma order as `inferno_gemv_f32_rs8_*`
+/// (`gemm(m=1) ≡ gemv`). `xq` is `m` contiguous rows of `k` LE f32.
+///
+/// # Safety
+/// As the F32 GEMV symbol, with `xq` valid for `m*k` f32, `y` for `m*rows`.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_gemm_f32_rs8_scalar(
+    y: *mut f32,
+    xq: *const u8,
+    w: *const u8,
+    k: usize,
+    m: usize,
+    rows: usize,
+    row_start: usize,
+    row_end: usize,
+) {
+    let x = xq.cast::<f32>();
+    let wf = w.cast::<f32>();
+    for r in row_start..row_end {
+        let (strip, lane) = (r / STRIP, r % STRIP);
+        let base = unsafe { wf.add(strip * k * STRIP + lane) };
+        let mut acc = vec![0f32; m];
+        for c in 0..k {
+            let wv = unsafe { base.add(c * STRIP).read() };
+            for (t, at) in acc.iter_mut().enumerate() {
+                let xv = unsafe { x.add(t * k + c).read_unaligned() };
+                *at = wv.mul_add(xv, *at);
+            }
+        }
+        for (t, at) in acc.iter().enumerate() {
+            unsafe { y.add(t * rows + r).write(*at) };
+        }
+    }
+}
+
+/// # Safety
+/// As [`inferno_gemm_f32_rs8_scalar`]; additionally requires AVX2+FMA.
+#[allow(clippy::too_many_arguments)]
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_gemm_f32_rs8_avx2(
+    y: *mut f32,
+    xq: *const u8,
+    w: *const u8,
+    k: usize,
+    m: usize,
+    rows: usize,
+    row_start: usize,
+    row_end: usize,
+) {
+    use std::arch::x86_64::*;
+    let x = xq.cast::<f32>();
+    let wf = w.cast::<f32>();
+    let mut r = row_start;
+    let head = row_start.next_multiple_of(STRIP).min(row_end);
+    if head > r {
+        // Partial head: scalar per-row (bit-identical), one acc per token.
+        unsafe { inferno_gemm_f32_rs8_scalar(y, xq, w, k, m, rows, r, head) };
+        r = head;
+    }
+    while r + STRIP <= row_end {
+        let base = unsafe { wf.add((r / STRIP) * k * STRIP) };
+        let mut acc = vec![_mm256_setzero_ps(); m];
+        for c in 0..k {
+            let wv = unsafe { _mm256_load_ps(base.add(c * STRIP)) };
+            for (t, at) in acc.iter_mut().enumerate() {
+                let xv = _mm256_set1_ps(unsafe { x.add(t * k + c).read_unaligned() });
+                *at = _mm256_fmadd_ps(wv, xv, *at);
+            }
+        }
+        for (t, at) in acc.iter().enumerate() {
+            unsafe { _mm256_storeu_ps(y.add(t * rows + r), *at) };
+        }
+        r += STRIP;
+    }
+    if r < row_end {
+        unsafe { inferno_gemm_f32_rs8_scalar(y, xq, w, k, m, rows, r, row_end) };
+    }
+}

@@ -198,6 +198,92 @@ mod ggml {
             })
         });
     }
+
+    /// ggml's naive batched path for comparison against `KernelSet::gemm`:
+    /// ggml's plain CPU kernels expose no fused M-panel GEMM entry point over
+    /// this dlopen ABI (that lives in the templated llamafile/tinyBLAS path),
+    /// so the honest baseline is the same per-row `vec_dot` called once per
+    /// token (`nrc=1`) with no weight-row reuse across tokens — i.e. exactly
+    /// `m` independent GEMV passes. Same MACs throughput basis as the inferno
+    /// `gemm` benchmark for a direct comparison.
+    pub fn bench_gemm(
+        group: &mut criterion::BenchmarkGroup<'_, WallTime>,
+        dtype: &DType,
+        file: &[u8],
+        rows: usize,
+        k: usize,
+        m: usize,
+    ) {
+        let (dot_sym, quant_sym, act_bytes, row_bytes): (&[u8], Option<&[u8]>, usize, usize) =
+            match dtype {
+                DType::F32 => (b"ggml_vec_dot_f32", None, k * 4, k * 4),
+                DType::Q8_0 => (
+                    b"ggml_vec_dot_q8_0_q8_0",
+                    Some(b"quantize_row_q8_0"),
+                    k / 32 * 34,
+                    k / 32 * 34,
+                ),
+                DType::Q4_K => (
+                    b"ggml_vec_dot_q4_K_q8_K",
+                    Some(b"quantize_row_q8_K"),
+                    k / 256 * 292,
+                    k / 256 * 144,
+                ),
+                _ => return,
+            };
+        // SAFETY: signatures match the pinned ggml's headers.
+        let dot: libloading::Symbol<'_, VecDot> = unsafe { lib().get(dot_sym).unwrap() };
+        // m-row activation panel, quantized through ggml's own quantize_row
+        // (or raw f32 bytes for the unquantized path), one block per token.
+        let mut panel = vec![0u8; act_bytes * m];
+        for t in 0..m {
+            let x = super::pseudo_f32(42 + t as u64, k);
+            match quant_sym {
+                Some(qs) => {
+                    let quant: libloading::Symbol<'_, QuantRow> = unsafe { lib().get(qs).unwrap() };
+                    // SAFETY: x has k f32; slot sized per ggml's activation block.
+                    unsafe {
+                        quant(
+                            x.as_ptr(),
+                            panel[t * act_bytes..(t + 1) * act_bytes]
+                                .as_mut_ptr()
+                                .cast(),
+                            k as i64,
+                        )
+                    };
+                }
+                None => {
+                    let bytes: Vec<u8> = x.iter().flat_map(|v| v.to_le_bytes()).collect();
+                    panel[t * act_bytes..(t + 1) * act_bytes].copy_from_slice(&bytes);
+                }
+            }
+        }
+        let mut y = vec![0f32; m * rows];
+        group.throughput(Throughput::Elements((m * rows * k) as u64));
+        group.bench_function(BenchmarkId::new("ggml", format!("{rows}x{k}/m{m}")), |b| {
+            b.iter(|| {
+                for t in 0..m {
+                    for r in 0..rows {
+                        // SAFETY: file holds rows*row_bytes; panel holds m
+                        // act_bytes-sized activation rows; one (row, token)
+                        // pair per call (nrc=1) — ggml's un-batched baseline.
+                        unsafe {
+                            dot(
+                                k as i32,
+                                y.as_mut_ptr().add(t * rows + r),
+                                0,
+                                file.as_ptr().add(r * row_bytes).cast(),
+                                0,
+                                panel.as_ptr().add(t * act_bytes).cast(),
+                                0,
+                                1,
+                            )
+                        };
+                    }
+                }
+            })
+        });
+    }
 }
 
 fn benches(c: &mut Criterion) {
@@ -206,5 +292,50 @@ fn benches(c: &mut Criterion) {
     bench_dtype(c, DType::Q4_K, SHAPES_Q4_K);
 }
 
+/// M-loop batched GEMM: same shapes as the GEMV group, but drives
+/// `KernelSet::gemm` for a representative `m` panel (1, 16, 64) so the
+/// weight-reuse win of the batched kernel is visible as `m` grows.
+/// Throughput is reported in MACs (`m * rows * k`), the compute-bound unit
+/// GEMM performance is conventionally judged by (as opposed to the GEMV
+/// group's weight-bytes-per-call basis).
+const GEMM_MS: &[usize] = &[1, 16, 64];
+
+fn bench_dtype_gemm(c: &mut Criterion, dtype: DType, shapes: &[(usize, usize)]) {
+    let mut group = c.benchmark_group(format!("gemm/{dtype:?}"));
+    group.sample_size(20);
+    for &(rows, k) in shapes {
+        let file = gen_weights(&dtype, rows, k);
+        for (name, set) in sets_for(&dtype) {
+            let w = set.pack(&file, rows, k).unwrap();
+            for &m in GEMM_MS {
+                // m-row activation panel: quantize_row per token, concatenated
+                // (matches the registry's documented GEMM panel layout).
+                let mut panel = Vec::new();
+                for t in 0..m {
+                    let x = pseudo_f32(42 + t as u64, k);
+                    panel.extend_from_slice(&set.quantize_row(&x).unwrap());
+                }
+                let mut y = vec![0f32; m * rows];
+                group.throughput(Throughput::Elements((m * rows * k) as u64));
+                group.bench_function(BenchmarkId::new(name, format!("{rows}x{k}/m{m}")), |b| {
+                    b.iter(|| set.gemm(&mut y, &panel, &w, m, rows, k, 0, rows).unwrap())
+                });
+            }
+        }
+        #[cfg(feature = "ggml-compare")]
+        for &m in GEMM_MS {
+            ggml::bench_gemm(&mut group, &dtype, &file, rows, k, m);
+        }
+    }
+    group.finish();
+}
+
+fn benches_gemm(c: &mut Criterion) {
+    bench_dtype_gemm(c, DType::F32, SHAPES_F32);
+    bench_dtype_gemm(c, DType::Q8_0, SHAPES_Q8_0);
+    bench_dtype_gemm(c, DType::Q4_K, SHAPES_Q4_K);
+}
+
 criterion_group!(gemv, benches);
-criterion_main!(gemv);
+criterion_group!(gemm, benches_gemm);
+criterion_main!(gemv, gemm);

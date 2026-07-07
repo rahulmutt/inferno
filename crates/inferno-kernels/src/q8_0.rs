@@ -197,3 +197,131 @@ pub unsafe extern "C" fn inferno_gemv_q8_0_rs8_avx2(
         r += 1;
     }
 }
+
+/// Batched Q8_0 GEMV (GEMM): `y[t*rows + r] = W[r] · dequant(xq_t)` for every
+/// token `t in 0..m` and row `r in row_start..row_end`. Each weight block is
+/// read once per batch (outer `b`, inner `t`); per (t,r) the block order is
+/// `0..nb`, identical to `inferno_gemv_q8_0_rs8_*`, so `gemm(m=1)` is
+/// bitwise-equal to `gemv`.
+///
+/// # Safety
+/// As the GEMV symbol, with: `xq` valid for `m` contiguous q8a rows of `k`
+/// (`m * q8a_len(k)` bytes); `y` valid for `m * rows` f32 writes; `m >= 1`.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_gemm_q8_0_rs8_scalar(
+    y: *mut f32,
+    xq: *const u8,
+    w: *const u8,
+    k: usize,
+    m: usize,
+    rows: usize,
+    row_start: usize,
+    row_end: usize,
+) {
+    let nb = k / WBLOCK;
+    let act = Q8A_BLOCK_BYTES * nb; // per-token activation stride
+    for r in row_start..row_end {
+        let (strip, lane) = (r / STRIP, r % STRIP);
+        // One accumulator per token; blocks visited in order → gemv order.
+        let mut acc = vec![0f32; m];
+        for b in 0..nb {
+            let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+            let dw = f32::from_le_bytes(unsafe { g.add(lane * 4).cast::<[u8; 4]>().read() });
+            let qw = unsafe { g.add(32 + lane * WBLOCK) };
+            for (t, at) in acc.iter_mut().enumerate() {
+                let xb = unsafe { xq.add(t * act + b * Q8A_BLOCK_BYTES) };
+                let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
+                let qx = unsafe { xb.add(4) };
+                let mut isum = 0i32;
+                for i in 0..WBLOCK {
+                    let a = i32::from(unsafe { qw.add(i).cast::<i8>().read() });
+                    let bb = i32::from(unsafe { qx.add(i).cast::<i8>().read() });
+                    isum += a * bb;
+                }
+                *at = (dw * dx).mul_add(isum as f32, *at);
+            }
+        }
+        for (t, at) in acc.iter().enumerate() {
+            unsafe { y.add(t * rows + r).write(*at) };
+        }
+    }
+}
+
+/// # Safety
+/// As [`inferno_gemm_q8_0_rs8_scalar`]; additionally requires AVX2+FMA.
+#[allow(clippy::too_many_arguments)]
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_gemm_q8_0_rs8_avx2(
+    y: *mut f32,
+    xq: *const u8,
+    w: *const u8,
+    k: usize,
+    m: usize,
+    rows: usize,
+    row_start: usize,
+    row_end: usize,
+) {
+    use std::arch::x86_64::*;
+    let nb = k / WBLOCK;
+    let act = Q8A_BLOCK_BYTES * nb;
+    let ones = _mm256_set1_epi16(1);
+    let mut r = row_start;
+    while r < row_end {
+        let strip = r / STRIP;
+        let lane0 = r - strip * STRIP;
+        // Full-strip fast path: 8 rows lane-parallel, one acc per token.
+        if lane0 == 0 && r + STRIP <= row_end {
+            let mut acc = vec![_mm256_setzero_ps(); m];
+            for b in 0..nb {
+                let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+                let qs = unsafe { g.add(32) };
+                // Weight group's 8 per-row scales (lane = row), loaded once.
+                let dw = unsafe { _mm256_load_ps(g.cast()) };
+                for (t, at) in acc.iter_mut().enumerate() {
+                    let xb = unsafe { xq.add(t * act + b * Q8A_BLOCK_BYTES) };
+                    let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
+                    let xv = unsafe { _mm256_loadu_si256(xb.add(4).cast()) };
+                    let mut p = [_mm256_setzero_si256(); STRIP];
+                    for (lane, pl) in p.iter_mut().enumerate() {
+                        let wv = unsafe { _mm256_load_si256(qs.add(lane * WBLOCK).cast()) };
+                        let aw = _mm256_sign_epi8(wv, wv);
+                        let sx = _mm256_sign_epi8(xv, wv);
+                        *pl = _mm256_madd_epi16(_mm256_maddubs_epi16(aw, sx), ones);
+                    }
+                    let isum = _mm256_cvtepi32_ps(hsum8_i32(p));
+                    let dwdx = _mm256_mul_ps(dw, _mm256_set1_ps(dx));
+                    *at = _mm256_fmadd_ps(dwdx, isum, *at);
+                }
+            }
+            for (t, at) in acc.iter().enumerate() {
+                unsafe { _mm256_storeu_ps(y.add(t * rows + r), *at) };
+            }
+            r += STRIP;
+            continue;
+        }
+        // Partial head/tail row: per-row path, one acc per token.
+        let lane = lane0;
+        let mut acc = vec![0f32; m];
+        for b in 0..nb {
+            let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+            let dw = f32::from_le_bytes(unsafe { g.add(lane * 4).cast::<[u8; 4]>().read() });
+            let wv = unsafe { _mm256_load_si256(g.add(32 + lane * WBLOCK).cast()) };
+            for (t, at) in acc.iter_mut().enumerate() {
+                let xb = unsafe { xq.add(t * act + b * Q8A_BLOCK_BYTES) };
+                let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
+                let xv = unsafe { _mm256_loadu_si256(xb.add(4).cast()) };
+                let aw = _mm256_sign_epi8(wv, wv);
+                let sx = _mm256_sign_epi8(xv, wv);
+                let isum = hsum_i32(_mm256_madd_epi16(_mm256_maddubs_epi16(aw, sx), ones));
+                *at = (dw * dx).mul_add(isum as f32, *at);
+            }
+        }
+        for (t, at) in acc.iter().enumerate() {
+            unsafe { y.add(t * rows + r).write(*at) };
+        }
+        r += 1;
+    }
+}

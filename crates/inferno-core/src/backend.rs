@@ -41,6 +41,24 @@ impl CompiledBackend {
             vocab,
         }
     }
+
+    /// Profiler slot labels (empty unless the artifact was compiled with
+    /// `profile`). Delegates to the underlying [`Artifact`].
+    pub fn profile_slots(&self) -> &[String] {
+        self.artifact.profile_slots()
+    }
+
+    /// Current per-slot cycle counters, or None if unprofiled. Delegates to
+    /// the underlying [`Artifact`].
+    pub fn profile_snapshot(&self) -> Option<Vec<u64>> {
+        self.artifact.profile_snapshot()
+    }
+
+    /// Zero the counters (separates prefill vs decode measurement).
+    /// Delegates to the underlying [`Artifact`].
+    pub fn profile_reset(&self) {
+        self.artifact.profile_reset();
+    }
 }
 
 impl Backend for CompiledBackend {

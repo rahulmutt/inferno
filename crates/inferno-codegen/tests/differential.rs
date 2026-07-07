@@ -17,7 +17,7 @@
 
 use std::path::Path;
 
-use inferno_codegen::compile;
+use inferno_codegen::{CompileOptions, compile};
 use inferno_formats::{DType, ModelDesc, load_desc};
 use inferno_graph::tolerance::logits_abs_tol;
 use inferno_graph::{Interpreter, KvCache, build_graph};
@@ -65,7 +65,14 @@ fn retain_kernel_symbols() {
     p(inferno_kernels::act::inferno_quantize_row_q8a_avx2 as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_scalar as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_avx2 as *const ());
+    p(inferno_kernels::inferno_gemm_f32_rs8_scalar as *const ());
+    p(inferno_kernels::inferno_gemm_f32_rs8_avx2 as *const ());
+    p(inferno_kernels::inferno_gemm_q8_0_rs8_scalar as *const ());
+    p(inferno_kernels::inferno_gemm_q8_0_rs8_avx2 as *const ());
+    p(inferno_kernels::inferno_gemm_q4_k_rs8_scalar as *const ());
+    p(inferno_kernels::inferno_gemm_q4_k_rs8_avx2 as *const ());
     p(inferno_pool::inferno_par_gemv as *const ());
+    p(inferno_pool::inferno_par_gemm as *const ());
 }
 
 /// dlopen `model.so`, run `prefill(tokens)`, and return the last-token logits.
@@ -134,7 +141,15 @@ fn differential_for(fixture: &str) {
     let graph = build_graph(&desc).unwrap();
     let target = TargetDesc::detect().unwrap();
     let tmp = tempfile::tempdir().unwrap();
-    let art = compile(&desc, &graph, &target, 64, tmp.path()).unwrap();
+    let art = compile(
+        &desc,
+        &graph,
+        &target,
+        64,
+        &CompileOptions::default(),
+        tmp.path(),
+    )
+    .unwrap();
 
     let tokens: Vec<u32> = vec![1, 5, 9, 3]; // any in-vocab prompt
     let meta: Meta =
@@ -158,6 +173,99 @@ fn differential_for(fixture: &str) {
         max_abs <= tol,
         "compiled vs interp max |Δlogit| = {max_abs} > tol {tol} (fixture {fixture})"
     );
+}
+
+/// The profiler must not perturb the math: a `--profile` build's last-token
+/// logits must be **bitwise** identical to the plain build's (not merely within
+/// tolerance). `readcyclecounter` only reads a clock; if any logit's bits
+/// differ, the instrumentation changed an SSA value or basic-block boundary and
+/// the codegen is wrong. This is a hard correctness gate.
+#[test]
+fn profiling_does_not_change_logits() {
+    let fixture = "../inferno-formats/tests/fixtures/tiny.gguf";
+    let desc = load_desc(Path::new(fixture)).unwrap();
+    let graph = build_graph(&desc).unwrap();
+    let target = TargetDesc::detect().unwrap();
+    let tokens: Vec<u32> = vec![1, 5, 9, 3];
+
+    let plain_dir = tempfile::tempdir().unwrap();
+    let a = compile(
+        &desc,
+        &graph,
+        &target,
+        64,
+        &CompileOptions::default(),
+        plain_dir.path(),
+    )
+    .unwrap();
+    let prof_dir = tempfile::tempdir().unwrap();
+    let b = compile(
+        &desc,
+        &graph,
+        &target,
+        64,
+        &CompileOptions {
+            profile: true,
+            prefill_tile: 64,
+        },
+        prof_dir.path(),
+    )
+    .unwrap();
+
+    let read_meta = |art: &inferno_codegen::Artifact| -> Meta {
+        serde_json::from_slice(&std::fs::read(art.dir.join("meta.json")).unwrap()).unwrap()
+    };
+    let la = unsafe { run_compiled(&a.dir, &tokens, &read_meta(&a)) };
+    let lb = unsafe { run_compiled(&b.dir, &tokens, &read_meta(&b)) };
+    for (i, (x, y)) in la.iter().zip(&lb).enumerate() {
+        assert_eq!(x.to_bits(), y.to_bits(), "logit {i} differs with --profile");
+    }
+}
+
+/// THE TILING GATE (Task 9): tiled prefill must be **bitwise** identical
+/// regardless of `prefill_tile`. Compile the same fixture at T=1 and T=4, run a
+/// 10-token prompt (spans >1 tile at T=4), and assert last-token logits match
+/// to the bit. A batched GEMM computes each output row independently, and the
+/// activation panel is packed at each matmul's own `act_len(k)` stride, so a
+/// larger tile can only change *how many rows share one kernel call*, never the
+/// bits. If this goes red, the tiling/stride is wrong — fix the codegen.
+#[test]
+fn prefill_tiling_is_bit_invariant_to_tile_size() {
+    let fixture = "../inferno-formats/tests/fixtures/tiny.gguf";
+    let desc = load_desc(Path::new(fixture)).unwrap();
+    let graph = build_graph(&desc).unwrap();
+    let target = TargetDesc::detect().unwrap();
+    let tokens: Vec<u32> = vec![1, 5, 9, 3, 2, 7, 4, 6, 0, 8]; // spans >1 tile at T=4
+
+    let compile_at = |t: usize, dir: &Path| {
+        let art = compile(
+            &desc,
+            &graph,
+            &target,
+            64,
+            &CompileOptions {
+                profile: false,
+                prefill_tile: t,
+            },
+            dir,
+        )
+        .unwrap();
+        let meta: Meta =
+            serde_json::from_slice(&std::fs::read(art.dir.join("meta.json")).unwrap()).unwrap();
+        unsafe { run_compiled(&art.dir, &tokens, &meta) }
+    };
+
+    let d1 = tempfile::tempdir().unwrap();
+    let d4 = tempfile::tempdir().unwrap();
+    let l1 = compile_at(1, d1.path());
+    let l4 = compile_at(4, d4.path());
+    for (i, (a, b)) in l1.iter().zip(&l4).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "logit {i} differs between T=1 and T=4 ({a} vs {b})"
+        );
+    }
 }
 
 #[test]

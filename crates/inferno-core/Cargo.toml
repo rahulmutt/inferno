@@ -8,6 +8,7 @@ license.workspace = true
 inferno-target.workspace = true
 inferno-formats.workspace = true
 inferno-graph.workspace = true
+inferno-plan.workspace = true
 inferno-codegen.workspace = true
 inferno-kernels.workspace = true
 inferno-runtime.workspace = true
