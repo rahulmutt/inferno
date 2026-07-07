@@ -213,3 +213,145 @@ handled structurally:
 
 *(Recorded protocol data points and scoped amendments land here; never
 edit a recorded data point.)*
+
+- **M4b.1 scaling data point (Task 10, dev machine, 2026-07-06; probes
+  2026-07-07):** Ran the protocol inside `devenv shell` (release build via
+  `mise run bench`) against the pinned nightly model
+  `qwen2.5-0.5b-instruct-q8_0.gguf` (qwen2 1B Q8_0,
+  `/home/dev/.cache/inferno-tests/qwen2.5-0.5b-instruct-q8_0.gguf`),
+  defaults pp=512, tg=128, reps=5, matched threads t=12. inferno commit
+  `c7533a1`, llama.cpp build `6f4f53f` (devenv-pinned, BLAS + CPU-haswell
+  backends). CPU reports as AMD Ryzen 9 3900 12-Core Processor (12
+  physical / 24 logical cores) — but see the environment finding below;
+  this run was NOT on quiet bare metal.
+
+  Load conditions, honestly: a first table-run attempt was killed at 300s
+  by the harness wrapper's own timeout (no numbers were taken from it);
+  the recorded table run started while the machine's load average was
+  still decaying from that kill (~20 falling), with no other compute
+  processes running. The `--json` run and the thread sweep ran later at
+  load ~13 (decaying) and ~3.5 respectively. Runs were serialized, never
+  concurrent.
+
+  Table run (`mise run bench -- <MODEL>`):
+
+  ```
+  model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+  cpu: BLAS, AMD Ryzen 9 3900 12-Core Processor (12 physical / 24 logical cores)
+  inferno 0.1.0 (c7533a1) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+  engine                 threads        pp512 tok/s        tg128 tok/s
+  inferno (compiled)          12       13.35 ± 2.84        10.50 ± 1.22
+  inferno (t=1 diag)           1       15.12 ± 1.32         9.81 ± 0.95
+  llama.cpp                   12       42.97 ± 0.76        23.62 ± 0.31
+  llama.cpp (t=1 diag)         1       54.60 ± 1.30        23.93 ± 0.03
+
+  ratio (inferno/llama.cpp): pp 0.31x | tg 0.44x
+  ```
+
+  `--json` run (independent invocation, same protocol):
+
+  ```json
+  {
+    "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+    "model_type": "qwen2 1B Q8_0",
+    "cpu_info": "BLAS, AMD Ryzen 9 3900 12-Core Processor",
+    "physical_cores": 12,
+    "logical_cores": 24,
+    "inferno_version": "0.1.0",
+    "inferno_git": "c7533a1",
+    "llama_build_commit": "6f4f53f",
+    "pp": 512,
+    "tg": 128,
+    "reps": 5,
+    "inferno_threads": 12,
+    "llama_threads": 12,
+    "inferno_pp_tok_s": 16.76005294016336,
+    "inferno_pp_stddev": 1.1772039645048684,
+    "inferno_tg_tok_s": 11.013822165886967,
+    "inferno_tg_stddev": 0.6783627100663344,
+    "llama_pp_tok_s": 43.379163,
+    "llama_pp_stddev": 1.553997,
+    "llama_tg_tok_s": 25.58065,
+    "llama_tg_stddev": 1.276047,
+    "llama_t1_pp_tok_s": 51.06514,
+    "llama_t1_pp_stddev": 2.673074,
+    "llama_t1_tg_tok_s": 23.42188,
+    "llama_t1_tg_stddev": 0.300833,
+    "inferno_t1_pp_tok_s": 14.453983947533555,
+    "inferno_t1_pp_stddev": 1.5966267328710673,
+    "inferno_t1_tg_tok_s": 10.014636769269071,
+    "inferno_t1_tg_stddev": 1.0616405783546694
+  }
+  ```
+
+  **Computed scaling factors (headline vs inferno t=1):** table run pp
+  **0.88x**, tg **1.07x**; `--json` run pp **1.16x**, tg **1.10x**. The
+  two runs disagree on whether t=12 prefill is slightly slower or
+  slightly faster than t=1; either way threading is a wash.
+  **The ≥6x prefill-scaling exit criterion is NOT met in this
+  environment** — but read the environment finding before drawing any
+  design conclusion from that.
+
+  **Attribution (perf unavailable: no `perf` binary in the container and
+  `perf_event_paranoid=3`; used a real thread sweep + cgroup accounting
+  instead).** Thread sweep via `inferno run --threads N` (648-token
+  prompt, 64 generated, 2 reps each, means):
+
+  ```
+  threads   pp tok/s   pp scale   tg tok/s   tg scale
+  1         14.70      1.00x      9.48       1.00x
+  2         17.72      1.21x      10.70      1.13x
+  4         19.17      1.30x      11.11      1.17x
+  8         18.24      1.24x      10.86      1.15x
+  12        15.32      1.04x      10.03      1.06x
+  ```
+
+  Prefill rises to a shallow peak at t=4 (~1.3x) then regresses.
+
+  **Environment finding (the headline of this data point): the "quiet
+  dev machine" is a devpod container whose root cgroup is CPU-quota'd to
+  8 CPUs** (`/sys/fs/cgroup/cpu.max` = `800000 100000`), with recorded
+  throttling (`nr_throttled` 13k+ periods, ~6400s cumulative
+  `throttled_usec`) and nonzero external CPU pressure
+  (`/proc/pressure/cpu` some avg10 ≈ 11–15 during the runs). Two direct
+  probes sampled `cpu.stat` around single `inferno run` invocations:
+
+  - t=12 prefill (45.7s): `nr_throttled` +164, `throttled_usec` +14.5s —
+    the quota actively throttles the 12-thread configuration, which
+    explains the t=8→12 regression (spin-synced fork-join degrades
+    badly when shard-holding workers are descheduled mid-dispatch).
+  - t=4 prefill (37.6s): **zero** additional throttling, yet scaling is
+    still only ~1.2–1.3x — so below the quota there is a second,
+    environment-or-engine ceiling this data cannot separate.
+
+  Corroboration that the ceiling is (at least partly) environmental:
+  **llama.cpp's own prefill scales NEGATIVELY here** — t=1 pp 54.60 vs
+  t=12 pp 42.97 (0.79x) in this run, reproducing the same signature in
+  the M4a amendment's recorded rows (t=1 pp 53.71/31.30 vs t=12 pp
+  45.56/43.37). A mature engine whose prefill scales near-linearly on
+  real hardware does not scale in this container; the environment cannot
+  demonstrate multicore scaling for ANY engine. Retroactive note for the
+  ledger: this means M4a's data point was taken under the same 8-CPU
+  quota; its inferno-vs-llama ratios compare both engines within the
+  same environment and remain internally meaningful, but its "llama.cpp
+  prefill scales well with threads" expectation is contradicted by its
+  own recorded numbers.
+
+  **Conclusion, plainly:** measured prefill scaling at t=12 is 0.88x
+  (table) / 1.16x (json) vs the ≥6x target — not met here. However, the
+  protocol machine assumption (quiet bare-metal 12-core) is violated:
+  the container's 8-CPU quota (throttling proven mid-run) plus host CPU
+  pressure confound the measurement, and llama.cpp's negative scaling in
+  the same runs shows the environment itself cannot exhibit scaling.
+  Whether inferno's threading meets the 6x criterion is **unknowable
+  from this environment**. The spec-mandated attribution fork (serial
+  attention → scoped amendment vs memory bandwidth → M4b.2 finding)
+  cannot be taken from confounded data. Per the spec's no-silent-scope
+  rule, no optimization was started. **Required follow-up: rerun this
+  protocol on genuinely quiet, unquota'd bare metal (or a container with
+  ≥12 dedicated CPUs) before evaluating the M4b.1 exit criterion or
+  scoping any parallel-attention amendment.** The headline vs llama.cpp
+  ratios (pp 0.31–0.39x, tg 0.43–0.44x) are essentially unchanged from
+  M4a, consistent with threading contributing nothing in this
+  environment.
