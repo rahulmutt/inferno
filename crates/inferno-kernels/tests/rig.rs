@@ -980,12 +980,13 @@ fn observed_error_q4_k() {
 /// Reference: the interpreter attention over a single query row at `pos`,
 /// with the KV cache pre-populated for positions 0..pos and this token's
 /// k/v appended. Returns the [n_heads*head_dim] output row.
+#[allow(clippy::too_many_arguments)]
 fn attn_oracle(
     q: &[f32],
     k: &[f32],
     v: &[f32],
-    kcache: &mut Vec<f32>,
-    vcache: &mut Vec<f32>,
+    kcache: &mut [f32],
+    vcache: &mut [f32],
     pos: usize,
     kv_dim: usize,
     n_heads: usize,
@@ -1015,6 +1016,7 @@ fn attn_oracle(
 /// Drive the scalar attention kernel for one token; returns [n_heads*head_dim].
 /// Appends this token's k/v into `kv` at `pos` first (the caller's job — the
 /// kernel is read-only), matching what codegen does before the call.
+#[allow(clippy::too_many_arguments)]
 fn attn_kernel_scalar(
     q: &[f32],
     k: &[f32],
