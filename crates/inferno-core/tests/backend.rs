@@ -4,6 +4,16 @@
 //! so the crate's `build.rs` `cargo:rustc-link-arg-tests=-rdynamic` applies to
 //! this binary, exporting the statically-linked kernel symbols the
 //! `dlopen`ed `model.so` resolves against — see `tests/artifact.rs`.
+//!
+//! These tests rely on nextest's process-per-test model: each test gets its
+//! own process, so the process-global `inferno-pool` pool each
+//! `compiled_backend()` initializes, and the `set_global_active_threads`
+//! calls the threading tests make, never collide across tests. Under plain
+//! `cargo test` (test threads sharing one process) the global pool inits
+//! would collide and concurrent `forward` calls could overlap the same pool
+//! dispatch (compare `inferno-pool`'s `tests/global.rs`, which folds its
+//! global-state steps into a single `#[test]` fn for the same reason). Run
+//! this file with nextest, not plain `cargo test`.
 
 use std::path::Path;
 
@@ -71,4 +81,29 @@ fn reset_allows_a_fresh_sequence() {
     backend.reset();
     let b = backend.forward(&[1u32, 4, 7]).unwrap();
     assert_eq!(a, b, "identical prompt after reset must reproduce logits");
+}
+
+/// Thread count must be invisible in the logits, bit for bit: forward the
+/// same tokens at active-threads=4 and =1 on the same backend (M4b.1
+/// bit-identity contract, end-to-end through the dlopen'd artifact).
+#[test]
+fn threaded_forward_is_bit_identical_to_serial() {
+    use_temp_cache();
+    let mut engine = Engine::load(Path::new(MODEL), 64).unwrap();
+    engine.set_threads(4);
+    let mut backend = engine.compiled_backend().unwrap();
+    let tokens = [1u32, 4, 7];
+
+    assert!(inferno_pool::set_global_active_threads(4));
+    let threaded = backend.forward(&tokens).unwrap();
+
+    backend.reset();
+    assert!(inferno_pool::set_global_active_threads(1));
+    let serial = backend.forward(&tokens).unwrap();
+    assert!(inferno_pool::set_global_active_threads(4));
+
+    assert_eq!(threaded.len(), serial.len());
+    for (i, (a, b)) in threaded.iter().zip(&serial).enumerate() {
+        assert_eq!(a.to_bits(), b.to_bits(), "logit {i}");
+    }
 }

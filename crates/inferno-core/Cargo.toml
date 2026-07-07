@@ -11,6 +11,7 @@ inferno-graph.workspace = true
 inferno-codegen.workspace = true
 inferno-kernels.workspace = true
 inferno-runtime.workspace = true
+inferno-pool.workspace = true
 libloading.workspace = true
 # rustix `mm` gives us a read-only, page-aligned mmap without a new
 # supply-chain dependency (rustix is already vendored for `param`). Page

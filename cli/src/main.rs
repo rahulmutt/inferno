@@ -46,6 +46,10 @@ enum Command {
         /// Use the M1 scalar interpreter instead of the compiled path.
         #[arg(long)]
         interp: bool,
+        /// Compiled-path thread count (0 = physical cores). The
+        /// interpreter path (--interp) is single-threaded and ignores this.
+        #[arg(long, default_value_t = 0)]
+        threads: u64,
         /// Sampling temperature; 0 = greedy (the default).
         #[arg(long, default_value_t = 0.0)]
         temperature: f32,
@@ -134,8 +138,8 @@ enum Command {
         /// Timed repetitions per engine (after one untimed warmup).
         #[arg(long, default_value_t = 5)]
         reps: u64,
-        /// llama.cpp thread count; 0 = physical cores. A t=1 diagnostic
-        /// row is recorded alongside unless this is 1.
+        /// Thread count for BOTH engines (0 = physical cores). t=1
+        /// diagnostic rows are recorded for each unless this is 1.
         #[arg(long, default_value_t = 0)]
         threads: u64,
         /// Path to llama-bench (default: found on PATH via devenv shell).
@@ -166,6 +170,7 @@ fn main() -> ExitCode {
             max_tokens,
             max_seq_len,
             interp,
+            threads,
             temperature,
             top_k,
             top_p,
@@ -179,6 +184,7 @@ fn main() -> ExitCode {
             max_tokens,
             max_seq_len,
             interp,
+            threads,
             inferno_runtime::SamplerConfig {
                 temperature,
                 top_k,

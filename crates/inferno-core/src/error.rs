@@ -23,6 +23,8 @@ pub enum CoreError {
     /// as "discard and recompile", never propagating it to the caller.
     #[error("cache verification failed: {0}")]
     Verification(String),
+    #[error("pool: {0}")]
+    Pool(#[from] inferno_pool::PoolError),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

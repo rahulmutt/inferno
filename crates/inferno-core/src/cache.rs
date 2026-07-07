@@ -1,9 +1,10 @@
 //! Content-addressed cache key + on-disk artifact cache directory.
 //!
 //! `cache_key` hashes the model bytes, the target description, the requested
-//! `max_seq_len`, and this crate's version into a single stable hex digest;
-//! `cache_dir` maps that key to `$XDG_CACHE_HOME/inferno/<key>` (falling back
-//! to `$HOME/.cache` or `./.cache`).
+//! `max_seq_len`, this crate's version, and the codegen host-ABI version into
+//! a single stable hex digest; `cache_dir` maps that key to
+//! `$XDG_CACHE_HOME/inferno/<key>` (falling back to `$HOME/.cache` or
+//! `./.cache`).
 
 use std::path::{Path, PathBuf};
 
@@ -62,9 +63,9 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 }
 
 /// Content-addressed key for a compiled artifact: a stable hex digest of the
-/// model bytes, the target description, `max_seq_len`, and this crate's
-/// version. Deterministic for identical inputs; changes whenever any input
-/// changes.
+/// model bytes, the target description, `max_seq_len`, this crate's version,
+/// and the codegen host-ABI version. Deterministic for identical inputs;
+/// changes whenever any input changes.
 pub fn cache_key(model_path: &Path, target: &TargetDesc, max_seq_len: usize) -> Result<String> {
     let model_bytes = read_model_bytes(model_path)?;
     let mut h = Sha256::new();
@@ -73,6 +74,7 @@ pub fn cache_key(model_path: &Path, target: &TargetDesc, max_seq_len: usize) -> 
     h.update(format!("{target:?}").as_bytes());
     h.update((max_seq_len as u64).to_le_bytes());
     h.update(env!("CARGO_PKG_VERSION").as_bytes());
+    h.update(inferno_codegen::HOST_ABI_VERSION.as_bytes());
     Ok(format!("{:x}", h.finalize()))
 }
 

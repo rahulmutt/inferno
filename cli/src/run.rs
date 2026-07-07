@@ -12,6 +12,7 @@ pub fn run(
     max_tokens: usize,
     max_seq_len: usize,
     interp: bool,
+    threads: u64,
     sampling: SamplerConfig,
 ) -> ExitCode {
     if let Err(e) = sampling.validate() {
@@ -22,7 +23,7 @@ pub fn run(
     let generator = if interp {
         Generator::load(model, max_seq_len).map_err(|e| e.to_string())
     } else {
-        load_compiled(model, max_seq_len).map_err(|e| e.to_string())
+        load_compiled(model, max_seq_len, threads).map_err(|e| e.to_string())
     };
     let mut generator = match generator {
         Ok(g) => g,
@@ -86,9 +87,13 @@ pub fn run(
 pub(crate) fn load_compiled(
     model: &Path,
     max_seq_len: usize,
+    threads: u64,
 ) -> Result<Generator, Box<dyn std::error::Error>> {
     let max_seq_len = clamp_max_seq_len(model, max_seq_len)?;
-    let engine = Engine::load(model, max_seq_len)?;
+    let mut engine = Engine::load(model, max_seq_len)?;
+    if threads != 0 {
+        engine.set_threads(threads as usize);
+    }
     let backend = engine.compiled_backend()?;
     let generator = Generator::load_with_backend(model, max_seq_len, Box::new(backend))?;
     Ok(generator)

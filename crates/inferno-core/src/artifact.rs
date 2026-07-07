@@ -165,10 +165,12 @@ impl Artifact {
     ///
     /// On a cache hit whose hashes and compiler version verify, the cached
     /// `model.so`/`weights.bin` are loaded directly. Otherwise the model is
-    /// (re)compiled into the cache directory, the real content hashes are
-    /// written into `meta.json`, and the fresh artifact is loaded. A cached
-    /// artifact whose `weights.bin`/model hash or `inferno_version` does not
-    /// match is discarded and recompiled — never `dlopen`ed.
+    /// (re)compiled and published into the cache directory (see
+    /// [`compile_and_publish`](Self::compile_and_publish) for the atomicity
+    /// contract), the real content hashes are written into `meta.json`, and
+    /// the fresh artifact is loaded. A cached artifact whose `weights.bin`/
+    /// model hash or `inferno_version` does not match is discarded and
+    /// recompiled — never `dlopen`ed.
     pub fn load_or_compile(
         model: &Path,
         target: &TargetDesc,
@@ -182,20 +184,92 @@ impl Artifact {
         if dir.join("meta.json").exists() {
             match verify_cache(&dir, model) {
                 Ok(meta) => return Self::load_from(&dir, meta),
-                Err(CoreError::Verification(_)) => { /* stale/tampered: recompile */ }
+                Err(CoreError::Verification(_)) => {
+                    // Stale/tampered: discard the old dir before recompiling
+                    // so the atomic publish below (`rename` in
+                    // `compile_and_publish`) never lands on a stale
+                    // non-empty directory it doesn't own. If a concurrent
+                    // process re-publishes a fresh `dir` in the window
+                    // between this remove and our later rename, that's the
+                    // ordinary lost-race case `compile_and_publish` already
+                    // handles.
+                    match std::fs::remove_dir_all(&dir) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e.into()),
+                    }
+                }
                 Err(e) => return Err(e),
             }
         }
 
-        // Compile fresh into the cache directory.
+        Self::compile_and_publish(model, target, max_seq_len, &key, &dir)
+    }
+
+    /// Compile a fresh artifact into a unique staging directory beside `dir`
+    /// (`<parent>/<key>.tmp-<pid>` — same parent, hence same filesystem, so
+    /// the publish below is a single atomic `rename`), then publish it as
+    /// `dir`.
+    ///
+    /// This is the race fix: two processes racing a cold cache each compile
+    /// into their OWN staging directory (no shared partially-written
+    /// `model.so`/`meta.json` for either to observe). Whichever calls
+    /// `rename` first wins — its staging dir atomically becomes `dir`, and
+    /// it loads straight from there. The loser's `rename` fails because
+    /// `dir` now exists (a `rename` onto a non-empty directory fails on
+    /// Linux); the loser discards its own staging dir and loads the
+    /// winner's freshly published artifact instead of recompiling. If the
+    /// winner's artifact somehow fails verification, that error is returned
+    /// directly rather than looping.
+    fn compile_and_publish(
+        model: &Path,
+        target: &TargetDesc,
+        max_seq_len: usize,
+        key: &str,
+        dir: &Path,
+    ) -> Result<Artifact> {
+        let parent = dir
+            .parent()
+            .expect("cache_dir(key) always nests under a parent directory");
+        std::fs::create_dir_all(parent)?;
+        // `<pid>` alone disambiguates the common case (separate racing
+        // processes, e.g. two CI jobs / two `inferno` invocations), but this
+        // engine can also be driven by multiple threads of one process, which
+        // all share a pid; append the thread id too so concurrent compiles
+        // within a single process never collide on the same staging dir.
+        // `ThreadId`s are never reused for the life of the process, so the
+        // pair is unique across both axes.
+        let staging = parent.join(format!(
+            "{key}.tmp-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        // Best-effort cleanup of a leftover staging dir (e.g. a prior crash
+        // under a reused pid): each attempt should start from a clean dir so
+        // `compile`'s `create_dir_all` doesn't merge with stale contents.
+        let _ = std::fs::remove_dir_all(&staging);
+
+        // Compile + finalize entirely into the staging dir; `dir` is never
+        // touched until the rename below.
         let desc = inferno_formats::load_desc(model)?;
         let graph = inferno_graph::build_graph(&desc)?;
-        inferno_codegen::compile(&desc, &graph, target, max_seq_len, &dir)?;
-
+        inferno_codegen::compile(&desc, &graph, target, max_seq_len, &staging)?;
         // codegen leaves the hash fields empty; fill them with the real content
         // hashes so subsequent loads can verify integrity.
-        let meta = finalize_meta(&dir, model, target)?;
-        Self::load_from(&dir, meta)
+        let meta = finalize_meta(&staging, model, target)?;
+
+        match std::fs::rename(&staging, dir) {
+            Ok(()) => Self::load_from(dir, meta),
+            Err(_) if dir.join("meta.json").exists() => {
+                // Lost the race: another process's rename beat ours. Discard
+                // our staging dir and load the winner's published artifact
+                // rather than recompiling again.
+                let _ = std::fs::remove_dir_all(&staging);
+                let winner_meta = verify_cache(dir, model)?;
+                Self::load_from(dir, winner_meta)
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// mmap `weights.bin`, `dlopen` `model.so`, and resolve the entry points.
@@ -394,13 +468,15 @@ fn finalize_meta(dir: &Path, model: &Path, target: &TargetDesc) -> Result<Meta> 
 }
 
 /// Force the linker to retain (and, in a `-rdynamic` binary, export) every
-/// kernel symbol a compiled `model.so` resolves against the host binary.
+/// kernel symbol *and the `inferno_par_gemv` dispatcher* a compiled
+/// `model.so` resolves against the host binary.
 ///
 /// Without at least one live reference the linker may drop `inferno-kernels`
-/// entirely, leaving nothing to export and `dlopen` failing on the first
-/// undefined `inferno_gemv_*` / `inferno_quantize_row_*` symbol. This is the
-/// reusable retention mechanism (Task 16's CLI calls it too); the CLI must
-/// additionally pass `-rdynamic` at link time (see build.rs note).
+/// (or `inferno-pool`) entirely, leaving nothing to export and `dlopen`
+/// failing on the first undefined `inferno_gemv_*` / `inferno_quantize_row_*`
+/// / `inferno_par_gemv` symbol. This is the reusable retention mechanism
+/// (Task 16's CLI calls it too); the CLI must additionally pass `-rdynamic`
+/// at link time (see build.rs note).
 pub fn ensure_kernels_linked() {
     use std::hint::black_box;
     let p = |f: *const ()| black_box(f as usize);
@@ -414,4 +490,5 @@ pub fn ensure_kernels_linked() {
     p(inferno_kernels::act::inferno_quantize_row_q8a_avx2 as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_scalar as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_avx2 as *const ());
+    p(inferno_pool::inferno_par_gemv as *const ());
 }

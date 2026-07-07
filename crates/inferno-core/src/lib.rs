@@ -31,6 +31,7 @@ pub struct Engine {
     model: PathBuf,
     target: TargetDesc,
     max_seq_len: usize,
+    threads: usize,
 }
 
 impl Engine {
@@ -39,17 +40,39 @@ impl Engine {
     /// [`compiled_backend`](Self::compiled_backend).
     pub fn load(model: &Path, max_seq_len: usize) -> Result<Engine> {
         let target = TargetDesc::detect()?;
+        let threads = target.topology.physical_cores.max(1) as usize;
         Ok(Engine {
             model: model.to_path_buf(),
             target,
             max_seq_len,
+            threads,
         })
+    }
+
+    /// Compiled-path thread count for backends built by this engine.
+    /// Defaults to the target's physical cores; clamped to
+    /// `1..=logical_cores` (the pool's spec bounds).
+    pub fn set_threads(&mut self, threads: usize) {
+        let max = self.target.topology.logical_cores.max(1) as usize;
+        self.threads = threads.clamp(1, max);
+    }
+
+    pub fn threads(&self) -> usize {
+        self.threads
     }
 
     /// Compile (or load a verified cached compile of) the model for this
     /// engine's target/`max_seq_len`, and build a ready-to-use
-    /// [`CompiledBackend`] over it.
+    /// [`CompiledBackend`] over it. Also sizes the process-global
+    /// `inferno-pool` thread pool to `self.threads` (initializing it on
+    /// first use, loud error on a mismatched re-init) and caps active
+    /// parallelism to that count before the backend runs any GEMVs.
     pub fn compiled_backend(&self) -> Result<CompiledBackend> {
+        // Size the process-global pool once (loud error on a mismatched
+        // re-init — spec), then cap active parallelism to this engine's
+        // count so bench's t=1 diagnostics can vary it per run.
+        inferno_pool::init_global(self.threads)?;
+        inferno_pool::set_global_active_threads(self.threads);
         let artifact = Artifact::load_or_compile(&self.model, &self.target, self.max_seq_len)?;
         Ok(CompiledBackend::new(artifact))
     }
