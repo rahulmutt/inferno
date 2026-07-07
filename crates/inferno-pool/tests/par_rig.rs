@@ -54,10 +54,17 @@ fn pooled(
     y
 }
 
+/// Thread counts exercised for bit-identity: 1/4/12 (baseline spread), 64
+/// (oversubscription — far more lanes than any plausible strip count), and
+/// the strip-count edges for rows=1003 (1003 rows = 126 8-row strips: 125
+/// undersplits by one strip, 126 is exact, 127 exceeds the strip count so
+/// `shard_table` collapses back to 126 shards).
+const THREAD_COUNTS: [usize; 7] = [1, 4, 12, 64, 125, 126, 127];
+
 fn assert_bit_identical(dtype: &DType, kernel: GemvFn, rows: usize, k: usize) {
     let (w, xq) = prep(dtype, rows, k, 0xfeed_beef);
     let want = serial(kernel, &w, &xq, rows, k);
-    for threads in [1usize, 4, 12] {
+    for threads in THREAD_COUNTS {
         let pool = Pool::new(threads);
         let got = pooled(&pool, kernel, &w, &xq, rows, k);
         for (i, (g, s)) in got.iter().zip(&want).enumerate() {

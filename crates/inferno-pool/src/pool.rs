@@ -125,8 +125,14 @@ impl Pool {
             })
             .collect();
         for slot in &shared.slots {
+            let mut spins = 0u32;
             while slot.thread.get().is_none() {
-                std::hint::spin_loop();
+                if spins < SPIN_ITERS {
+                    spins += 1;
+                    std::hint::spin_loop();
+                } else {
+                    std::thread::yield_now();
+                }
             }
         }
         Pool {

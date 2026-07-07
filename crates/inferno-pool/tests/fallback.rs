@@ -27,9 +27,11 @@ fn uninitialized_global_falls_back_to_serial() {
         inferno_pool::inferno_par_gemv(kernel, y.as_mut_ptr(), xq.as_ptr(), w.as_ptr(), 5, 100)
     };
     assert_eq!(y, (0..100).map(|r| (r + 5) as f32).collect::<Vec<_>>());
-    // rows == 0 is a no-op even uninitialized.
+    // rows == 0 is a no-op even uninitialized: y must come back unchanged.
+    let before = y.clone();
     // SAFETY: rows == 0 → no writes.
     unsafe {
         inferno_pool::inferno_par_gemv(kernel, y.as_mut_ptr(), xq.as_ptr(), w.as_ptr(), 5, 0)
     };
+    assert_eq!(y, before, "rows == 0 must not touch y");
 }
