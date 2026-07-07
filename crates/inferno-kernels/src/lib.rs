@@ -43,7 +43,9 @@ pub use q8_0::{
     inferno_gemm_q8_0_rs8_avx2, inferno_gemm_q8_0_rs8_scalar, inferno_gemv_q8_0_rs8_avx2,
     inferno_gemv_q8_0_rs8_scalar,
 };
-pub use registry::{KernelSet, kernels_for, reference_kernels};
+pub use registry::{
+    AttnFn, KernelSet, attention_kernel, attention_reference, kernels_for, reference_kernels,
+};
 
 /// Rows per packed strip: every rs8 layout interleaves 8 rows.
 pub const STRIP: usize = 8;

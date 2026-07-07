@@ -295,6 +295,40 @@ pub fn reference_kernels(dtype: &DType) -> Option<KernelSet> {
     set(dtype, KernelIsa::Scalar)
 }
 
+/// Attention is f32-only and has no dtype axis; a single fn-pointer type.
+pub type AttnFn = unsafe extern "C" fn(
+    *mut f32,
+    *const f32,
+    *mut f32,
+    *mut f32,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+);
+
+/// The portable scalar attention kernel — always runnable.
+pub fn attention_reference() -> AttnFn {
+    crate::inferno_attention_f32_scalar
+}
+
+/// The attention kernel for a target ISA, falling back to scalar when the
+/// running CPU can't execute the SIMD variant (mirrors `kernels_for`).
+pub fn attention_kernel(isa: Isa) -> AttnFn {
+    let kisa = match isa {
+        Isa::X86_64v3 | Isa::X86_64v4 => KernelIsa::Avx2,
+    };
+    #[cfg(target_arch = "x86_64")]
+    if kisa.available() {
+        return crate::inferno_attention_f32_avx2;
+    }
+    let _ = kisa;
+    crate::inferno_attention_f32_scalar
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,5 +471,30 @@ mod tests {
         );
         assert!(s.gemm(&mut yg, &panel, &w, m, rows, k, 3, 2).is_err());
         assert!(s.gemm(&mut yg, &panel, &w, 0, rows, k, 0, rows).is_err());
+    }
+
+    #[test]
+    fn attention_selector_picks_isa() {
+        use inferno_target::Isa;
+        // Scalar is always available.
+        let s = attention_reference();
+        assert!(std::ptr::fn_addr_eq(
+            s,
+            crate::inferno_attention_f32_scalar as AttnFn
+        ));
+        // v3 on an AVX2 host resolves to the avx2 symbol; on a non-AVX2 host it
+        // must fall back to scalar (never hand out an unrunnable symbol).
+        let k = attention_kernel(Isa::X86_64v3);
+        if KernelIsa::Avx2.available() {
+            assert!(std::ptr::fn_addr_eq(
+                k,
+                crate::inferno_attention_f32_avx2 as AttnFn
+            ));
+        } else {
+            assert!(std::ptr::fn_addr_eq(
+                k,
+                crate::inferno_attention_f32_scalar as AttnFn
+            ));
+        }
     }
 }
