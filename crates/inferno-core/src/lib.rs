@@ -32,6 +32,7 @@ pub struct Engine {
     target: TargetDesc,
     max_seq_len: usize,
     threads: usize,
+    opts: inferno_codegen::CompileOptions,
 }
 
 impl Engine {
@@ -46,6 +47,7 @@ impl Engine {
             target,
             max_seq_len,
             threads,
+            opts: inferno_codegen::CompileOptions::default(),
         })
     }
 
@@ -61,6 +63,17 @@ impl Engine {
         self.threads
     }
 
+    /// Enable per-op profiling for artifacts this engine builds (distinct
+    /// cache entry). Off by default.
+    pub fn set_profile(&mut self, on: bool) {
+        self.opts.profile = on;
+    }
+
+    /// Prefill tile length for artifacts this engine builds.
+    pub fn set_prefill_tile(&mut self, t: usize) {
+        self.opts.prefill_tile = t.max(1);
+    }
+
     /// Compile (or load a verified cached compile of) the model for this
     /// engine's target/`max_seq_len`, and build a ready-to-use
     /// [`CompiledBackend`] over it. Also sizes the process-global
@@ -73,7 +86,8 @@ impl Engine {
         // count so bench's t=1 diagnostics can vary it per run.
         inferno_pool::init_global(self.threads)?;
         inferno_pool::set_global_active_threads(self.threads);
-        let artifact = Artifact::load_or_compile(&self.model, &self.target, self.max_seq_len)?;
+        let artifact =
+            Artifact::load_or_compile(&self.model, &self.target, self.max_seq_len, &self.opts)?;
         Ok(CompiledBackend::new(artifact))
     }
 
@@ -82,7 +96,7 @@ impl Engine {
     /// compile has happened yet. Used by `inferno compile` to report where
     /// the artifact landed.
     pub fn cache_dir(&self) -> Result<PathBuf> {
-        let key = cache_key(&self.model, &self.target, self.max_seq_len)?;
+        let key = cache_key(&self.model, &self.target, self.max_seq_len, &self.opts)?;
         Ok(cache::cache_dir(&key))
     }
 }

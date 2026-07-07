@@ -194,7 +194,7 @@ mod tests {
         let desc = load_desc(Path::new("../inferno-formats/tests/fixtures/tiny.gguf")).unwrap();
         let graph = build_graph(&desc).unwrap();
         let target = TargetDesc::detect().unwrap();
-        let plan = inferno_plan::plan(&desc, &graph, &target, 64).unwrap();
+        let plan = inferno_plan::plan(&desc, &graph, &target, 64, 64).unwrap();
 
         let ctx = Context::create();
         let module = super::build_full_module(&ctx, &plan, &graph, &desc).unwrap();

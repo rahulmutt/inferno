@@ -91,7 +91,12 @@ pub fn plan_arena(
     graph: &Graph,
     weights: &WeightImageLayout,
     max_seq_len: usize,
+    prefill_tile: usize,
 ) -> Result<ArenaLayout> {
+    // The ×T multiply that sizes `act_scratch` for prefill tiling is Task 8;
+    // this task only threads the parameter through. Behavior must stay
+    // byte-identical (the plan snapshot depends on it).
+    let _ = prefill_tile;
     let n = graph.nodes.len();
     let mut slots: Vec<ValueSlot> = Vec::with_capacity(n);
     let mut total_f32 = 0usize;
@@ -165,7 +170,7 @@ mod tests {
     #[test]
     fn every_value_has_a_slot() {
         let (graph, weights) = setup();
-        let a = plan_arena(&graph, &weights, 128).unwrap();
+        let a = plan_arena(&graph, &weights, 128, 64).unwrap();
         assert_eq!(a.slots.len(), graph.nodes.len());
         for (i, s) in a.slots.iter().enumerate() {
             assert_eq!(s.value, i + 1);
@@ -175,7 +180,7 @@ mod tests {
     #[test]
     fn no_two_live_values_overlap() {
         let (graph, weights) = setup();
-        let a = plan_arena(&graph, &weights, 128).unwrap();
+        let a = plan_arena(&graph, &weights, 128, 64).unwrap();
         // For each pair with overlapping live ranges, byte ranges must be disjoint.
         for (i, si) in a.slots.iter().enumerate() {
             for sj in a.slots.iter().skip(i + 1) {
@@ -197,7 +202,7 @@ mod tests {
     fn reuse_shrinks_arena_below_bump() {
         // Liveness packing must be <= naive bump (sum of all value sizes).
         let (graph, weights) = setup();
-        let a = plan_arena(&graph, &weights, 128).unwrap();
+        let a = plan_arena(&graph, &weights, 128, 64).unwrap();
         let bump: usize = a.slots.iter().map(|s| s.len_elems).sum();
         assert!(a.total_f32 <= bump);
     }

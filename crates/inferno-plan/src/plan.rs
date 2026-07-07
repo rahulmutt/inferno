@@ -73,7 +73,7 @@ mod tests {
         let desc = load_desc(Path::new("../inferno-formats/tests/fixtures/tiny.gguf")).unwrap();
         let graph = build_graph(&desc).unwrap();
         let target = TargetDesc::detect().unwrap();
-        let plan = crate::plan(&desc, &graph, &target, 64).unwrap();
+        let plan = crate::plan(&desc, &graph, &target, 64, 64).unwrap();
         insta::assert_snapshot!(plan.dump());
     }
 }

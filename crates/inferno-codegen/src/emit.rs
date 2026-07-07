@@ -19,6 +19,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CodegenError, Result};
 
+/// Compile-time options that change the emitted artifact (and therefore its
+/// cache identity). Both fields are folded into `inferno-core`'s cache key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompileOptions {
+    /// Emit per-op `readcyclecounter` instrumentation + the
+    /// `inferno_prof_counters` global (Task 3). A profiled `model.so` is a
+    /// distinct artifact; logits are bit-identical to the unprofiled build.
+    pub profile: bool,
+    /// Prefill tile length (tokens per batched forward pass); sizes the
+    /// GEMM activation panel (`act_scratch`) and the codegen tile loop.
+    pub prefill_tile: usize,
+}
+
+impl Default for CompileOptions {
+    fn default() -> Self {
+        CompileOptions {
+            profile: false,
+            prefill_tile: crate::PREFILL_TILE,
+        }
+    }
+}
+
 /// A compiled model on disk: `dir` contains `model.so`, `weights.bin`, and
 /// `meta.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +67,12 @@ pub struct Meta {
     pub max_seq_len: usize,
     pub entry_prefill: String,
     pub entry_decode: String,
+    /// Prefill tile length this artifact was compiled for (Task 7).
+    pub prefill_tile: usize,
+    /// Per-op profiler slot labels, slot index = position (empty if this
+    /// artifact was compiled without `profile`). Task 3 populates it.
+    #[serde(default)]
+    pub profile_slots: Vec<String>,
 }
 
 /// Plan -> Loop IR -> LLVM IR -> object -> `model.so`, plus the `weights.bin`
@@ -54,9 +82,10 @@ pub fn compile(
     graph: &inferno_graph::Graph,
     target: &inferno_target::TargetDesc,
     max_seq_len: usize,
+    opts: &CompileOptions,
     out_dir: &Path,
 ) -> Result<Artifact> {
-    let plan = inferno_plan::plan(desc, graph, target, max_seq_len)?;
+    let plan = inferno_plan::plan(desc, graph, target, max_seq_len, opts.prefill_tile)?;
     let ctx = Context::create();
     let module = crate::llvm::build_full_module(&ctx, &plan, graph, desc)?;
     module.verify()?;
@@ -96,7 +125,7 @@ pub fn compile(
     }
 
     std::fs::write(out_dir.join("weights.bin"), &plan.weights.image)?;
-    let meta = build_meta(desc, &plan);
+    let meta = build_meta(desc, &plan, opts, Vec::new());
     std::fs::write(out_dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
 
     Ok(Artifact {
@@ -106,7 +135,12 @@ pub fn compile(
 
 /// Assemble the sidecar [`Meta`] from the model description and plan. Hash
 /// fields are intentionally left empty — see the module doc comment.
-fn build_meta(desc: &inferno_formats::ModelDesc, plan: &inferno_plan::Plan) -> Meta {
+fn build_meta(
+    desc: &inferno_formats::ModelDesc,
+    plan: &inferno_plan::Plan,
+    opts: &CompileOptions,
+    profile_slots: Vec<String>,
+) -> Meta {
     Meta {
         model_hash: String::new(),
         target_hash: String::new(),
@@ -124,6 +158,8 @@ fn build_meta(desc: &inferno_formats::ModelDesc, plan: &inferno_plan::Plan) -> M
         max_seq_len: plan.max_seq_len,
         entry_prefill: "prefill".to_string(),
         entry_decode: "decode_step".to_string(),
+        prefill_tile: opts.prefill_tile,
+        profile_slots,
     }
 }
 
@@ -141,7 +177,15 @@ mod tests {
         let graph = build_graph(&desc).unwrap();
         let target = TargetDesc::detect().unwrap();
         let tmp = tempfile::tempdir().unwrap();
-        let art = compile(&desc, &graph, &target, 64, tmp.path()).unwrap();
+        let art = compile(
+            &desc,
+            &graph,
+            &target,
+            64,
+            &CompileOptions::default(),
+            tmp.path(),
+        )
+        .unwrap();
         assert!(art.dir.join("model.so").exists());
         assert!(art.dir.join("weights.bin").exists());
         assert!(art.dir.join("meta.json").exists());
@@ -149,7 +193,14 @@ mod tests {
         let wb = std::fs::metadata(art.dir.join("weights.bin"))
             .unwrap()
             .len() as usize;
-        let plan = inferno_plan::plan(&desc, &graph, &target, 64).unwrap();
+        let plan = inferno_plan::plan(
+            &desc,
+            &graph,
+            &target,
+            64,
+            CompileOptions::default().prefill_tile,
+        )
+        .unwrap();
         assert_eq!(wb, plan.weights.image.len());
     }
 }

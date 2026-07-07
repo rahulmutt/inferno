@@ -66,7 +66,12 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 /// model bytes, the target description, `max_seq_len`, this crate's version,
 /// and the codegen host-ABI version. Deterministic for identical inputs;
 /// changes whenever any input changes.
-pub fn cache_key(model_path: &Path, target: &TargetDesc, max_seq_len: usize) -> Result<String> {
+pub fn cache_key(
+    model_path: &Path,
+    target: &TargetDesc,
+    max_seq_len: usize,
+    opts: &inferno_codegen::CompileOptions,
+) -> Result<String> {
     let model_bytes = read_model_bytes(model_path)?;
     let mut h = Sha256::new();
     h.update(content_hash(&model_bytes).as_bytes());
@@ -75,6 +80,9 @@ pub fn cache_key(model_path: &Path, target: &TargetDesc, max_seq_len: usize) -> 
     h.update((max_seq_len as u64).to_le_bytes());
     h.update(env!("CARGO_PKG_VERSION").as_bytes());
     h.update(inferno_codegen::HOST_ABI_VERSION.as_bytes());
+    // Profiling and tile size change the emitted artifact.
+    h.update([opts.profile as u8]);
+    h.update((opts.prefill_tile as u64).to_le_bytes());
     Ok(format!("{:x}", h.finalize()))
 }
 
@@ -99,11 +107,23 @@ mod tests {
     fn key_is_stable_and_input_sensitive() {
         let t = TargetDesc::detect().unwrap();
         let m = Path::new("../inferno-formats/tests/fixtures/tiny.gguf");
-        let k1 = cache_key(m, &t, 64).unwrap();
-        let k2 = cache_key(m, &t, 64).unwrap();
+        let k1 = cache_key(m, &t, 64, &inferno_codegen::CompileOptions::default()).unwrap();
+        let k2 = cache_key(m, &t, 64, &inferno_codegen::CompileOptions::default()).unwrap();
         assert_eq!(k1, k2); // deterministic
-        let k3 = cache_key(m, &t, 128).unwrap();
+        let k3 = cache_key(m, &t, 128, &inferno_codegen::CompileOptions::default()).unwrap();
         assert_ne!(k1, k3); // max_seq_len is part of the key
+
+        let k_prof = cache_key(
+            m,
+            &t,
+            64,
+            &inferno_codegen::CompileOptions {
+                profile: true,
+                prefill_tile: 64,
+            },
+        )
+        .unwrap();
+        assert_ne!(k1, k_prof); // profiling is part of the key
     }
 
     #[test]

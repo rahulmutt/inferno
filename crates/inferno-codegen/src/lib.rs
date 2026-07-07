@@ -5,16 +5,18 @@ pub mod emit;
 pub mod error;
 pub mod llvm;
 pub mod loopir;
-pub use emit::{Artifact, Meta, compile};
+pub use emit::{Artifact, CompileOptions, Meta, compile};
 pub use error::{CodegenError, Result};
 
 /// Version of the host-symbol surface generated code links against
-/// (kernel symbols + `inferno_par_gemv`). Folded into `inferno-core`'s
-/// artifact cache key: bump it whenever the emitted code's host-call shape
-/// changes, so stale cached `model.so`s are recompiled instead of silently
-/// running with the old call pattern. "2" = M4b.1's `inferno_par_gemv`
-/// dispatch (v1 was M3's direct kernel calls).
-pub const HOST_ABI_VERSION: &str = "2";
+/// (kernel symbols + `inferno_par_gemv` + `inferno_par_gemm` + the profiler
+/// global). Folded into `inferno-core`'s artifact cache key. "3" = M4b.2's
+/// GEMM dispatch + optional profiling (v2 was M4b.1's `inferno_par_gemv`).
+pub const HOST_ABI_VERSION: &str = "3";
+
+/// Default prefill tile length (tokens per batched forward pass). Part of
+/// `CompileOptions` and the artifact cache key.
+pub const PREFILL_TILE: usize = 64;
 
 #[cfg(test)]
 mod smoke {

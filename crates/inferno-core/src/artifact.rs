@@ -175,8 +175,9 @@ impl Artifact {
         model: &Path,
         target: &TargetDesc,
         max_seq_len: usize,
+        opts: &inferno_codegen::CompileOptions,
     ) -> Result<Artifact> {
-        let key = cache_key(model, target, max_seq_len)?;
+        let key = cache_key(model, target, max_seq_len, opts)?;
         let dir = cache_dir(&key);
 
         // Try the cache. Any verification failure (missing files, hash/version
@@ -203,7 +204,7 @@ impl Artifact {
             }
         }
 
-        Self::compile_and_publish(model, target, max_seq_len, &key, &dir)
+        Self::compile_and_publish(model, target, max_seq_len, opts, &key, &dir)
     }
 
     /// Compile a fresh artifact into a unique staging directory beside `dir`
@@ -225,6 +226,7 @@ impl Artifact {
         model: &Path,
         target: &TargetDesc,
         max_seq_len: usize,
+        opts: &inferno_codegen::CompileOptions,
         key: &str,
         dir: &Path,
     ) -> Result<Artifact> {
@@ -253,7 +255,7 @@ impl Artifact {
         // touched until the rename below.
         let desc = inferno_formats::load_desc(model)?;
         let graph = inferno_graph::build_graph(&desc)?;
-        inferno_codegen::compile(&desc, &graph, target, max_seq_len, &staging)?;
+        inferno_codegen::compile(&desc, &graph, target, max_seq_len, opts, &staging)?;
         // codegen leaves the hash fields empty; fill them with the real content
         // hashes so subsequent loads can verify integrity.
         let meta = finalize_meta(&staging, model, target)?;

@@ -17,7 +17,7 @@
 
 use std::path::Path;
 
-use inferno_codegen::compile;
+use inferno_codegen::{CompileOptions, compile};
 use inferno_formats::{DType, ModelDesc, load_desc};
 use inferno_graph::tolerance::logits_abs_tol;
 use inferno_graph::{Interpreter, KvCache, build_graph};
@@ -134,7 +134,15 @@ fn differential_for(fixture: &str) {
     let graph = build_graph(&desc).unwrap();
     let target = TargetDesc::detect().unwrap();
     let tmp = tempfile::tempdir().unwrap();
-    let art = compile(&desc, &graph, &target, 64, tmp.path()).unwrap();
+    let art = compile(
+        &desc,
+        &graph,
+        &target,
+        64,
+        &CompileOptions::default(),
+        tmp.path(),
+    )
+    .unwrap();
 
     let tokens: Vec<u32> = vec![1, 5, 9, 3]; // any in-vocab prompt
     let meta: Meta =
