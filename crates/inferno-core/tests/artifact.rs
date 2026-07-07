@@ -13,6 +13,8 @@
 //! statically-linked kernel symbols the `dlopen`ed `model.so` resolves against.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 use inferno_core::artifact::verify_cache;
 use inferno_core::{Artifact, CoreError, Meta, cache_dir, cache_key, content_hash};
@@ -87,6 +89,73 @@ fn prefill_past_max_seq_len_panics_not_oob() {
     // must fire (clean panic) rather than let the compiled kernel write OOB.
     let tokens = vec![1u32];
     art.prefill(&tokens, max_seq_len, &mut kv, &mut arena, &mut logits);
+}
+
+/// Regression test for the CI-observed race: two processes (here, two
+/// threads in one process — nextest already gives each `#[test]` its own
+/// process, so a second real process isn't needed to exercise the same
+/// cache-directory race) hitting a cold cache concurrently must never let
+/// either one `dlopen` a partially-written `model.so`.
+///
+/// Before the atomic-publish fix, both racers would see `meta.json` absent,
+/// compile straight into the shared cache dir, and one could `dlopen` the
+/// other's not-yet-complete `model.so` (`DlSym { "…: undefined symbol:
+/// prefill" }` in CI). After the fix, each racer compiles into its own
+/// staging dir and publishes via `rename`; the loser discards its staging
+/// dir and loads the winner's fully-published artifact instead. Both must
+/// succeed and both loaded artifacts must run `prefill` cleanly.
+///
+/// This test uses a cache root unique to this test *process* (nextest's
+/// per-test process isolation makes this genuinely cold — unlike
+/// `use_temp_cache`'s shared fixed dir, nothing else has ever written here),
+/// so it exercises real concurrent-compile-into-cold-cache behavior rather
+/// than a warm-cache hit.
+#[test]
+fn concurrent_compile_publishes_atomically() {
+    let model = model_path();
+    let target = TargetDesc::detect().unwrap();
+    let max_seq_len = 64usize;
+
+    let cold_dir =
+        std::env::temp_dir().join(format!("inferno-core-artifact-race-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cold_dir);
+    // SAFETY: set once here, before the racing threads below are spawned, and
+    // never mutated again in this test; no other thread observes a
+    // partial/torn write of this env var.
+    unsafe { std::env::set_var("XDG_CACHE_HOME", &cold_dir) };
+
+    let desc = load_desc(&model).unwrap();
+    let vocab = desc.hyperparams.vocab_size as usize;
+    let tokens = vec![1u32, 4, 7, 2];
+
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            let model = model.clone();
+            let target = target.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                Artifact::load_or_compile(&model, &target, max_seq_len)
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        let art = handle.join().expect("racer thread panicked").expect(
+            "concurrent load_or_compile into a cold cache must succeed for both racers, \
+             never tear a partially-written model.so",
+        );
+        let mut kv = vec![0f32; art.meta().kv_total_bytes / 4];
+        let mut arena = vec![0f32; art.meta().arena_f32];
+        let mut logits = vec![0f32; vocab];
+        // A torn/undefined-symbol model.so would already have failed to
+        // dlopen above; this additionally exercises the loaded artifact
+        // (winner's or the lost-race loader's) end to end.
+        art.prefill(&tokens, 0, &mut kv, &mut arena, &mut logits);
+    }
+
+    let _ = std::fs::remove_dir_all(&cold_dir);
 }
 
 #[test]
