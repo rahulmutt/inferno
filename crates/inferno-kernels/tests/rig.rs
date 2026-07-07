@@ -1055,6 +1055,47 @@ fn attn_kernel_scalar(
     out
 }
 
+/// Drive the AVX2 attention kernel for one token; returns [n_heads*head_dim].
+/// Appends this token's k/v into `kv` at `pos` first (the caller's job — the
+/// kernel is read-only), matching what codegen does before the call.
+#[allow(clippy::too_many_arguments)]
+fn attn_kernel_avx2(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    kv: &mut [f32],
+    seq_len: usize,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    // Append k/v at pos (caller's job; kernel is read-only) — same as scalar.
+    kv[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(k);
+    let vreg = seq_len * kv_dim;
+    kv[vreg + pos * kv_dim..vreg + (pos + 1) * kv_dim].copy_from_slice(v);
+    let mut out = vec![f32::NAN; n_heads * head_dim];
+    let mut scores = vec![0f32; seq_len];
+    // SAFETY: same contract as the scalar driver; avx2 checked by caller.
+    unsafe {
+        inferno_kernels::inferno_attention_f32_avx2(
+            out.as_mut_ptr(),
+            q.as_ptr(),
+            kv.as_mut_ptr(),
+            scores.as_mut_ptr(),
+            0,
+            seq_len * kv_dim,
+            pos,
+            kv_dim,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+        );
+    }
+    out
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
     #[test]
@@ -1081,5 +1122,31 @@ proptest! {
         for (i, (g, w)) in got.iter().zip(&want).enumerate() {
             prop_assert!((g - w).abs() <= 1e-4 * scale, "elem {i}: got {g} want {w}");
         }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+    #[test]
+    fn attention_isa_variants_bitwise_equal(
+        seed in any::<u64>(), pos in 0usize..12, hd in prop::sample::select(vec![8usize, 16, 64]),
+    ) {
+        if !std::is_x86_feature_detected!("avx2") { return Ok(()); }
+        let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+        let kv_dim = n_kv_heads * head_dim;
+        let seq_len = 16usize;
+        let base_kv = pseudo(seed, 2 * seq_len * kv_dim);
+        let q = pseudo(seed ^ 1, n_heads * head_dim);
+        let k = pseudo(seed ^ 2, kv_dim);
+        let v = pseudo(seed ^ 3, kv_dim);
+        let mut kv_s = base_kv.clone();
+        let mut kv_a = base_kv;
+        let a = attn_kernel_scalar(&q, &k, &v, &mut kv_s, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        let b = attn_kernel_avx2(&q, &k, &v, &mut kv_a, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+            prop_assert_eq!(x.to_bits(), y.to_bits(), "elem {}: scalar {} avx2 {}", i, x, y);
+        }
+        // KV appends must also be bit-identical.
+        prop_assert!(kv_s.iter().zip(&kv_a).all(|(x, y)| x.to_bits() == y.to_bits()));
     }
 }

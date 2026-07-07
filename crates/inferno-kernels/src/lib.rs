@@ -26,6 +26,8 @@ pub mod q4_k;
 pub mod q8_0;
 pub mod registry;
 
+#[cfg(target_arch = "x86_64")]
+pub use attention::inferno_attention_f32_avx2;
 pub use attention::inferno_attention_f32_scalar;
 pub use buf::AlignedBuf;
 pub use error::{KernelError, Result};
