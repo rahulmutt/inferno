@@ -56,13 +56,33 @@ impl<'c> LlvmModule<'c> {
             ],
             false,
         );
+        // void inferno_gemm_<d>_rs8_<isa>(ptr y, ptr xq, ptr w, i64 k, i64 m,
+        //                                 i64 rows, i64 row_start, i64 row_end)
+        // — the batched sibling (M4b.2): two extra leading dims (`m`, `rows`)
+        // over the gemv ABI so one call fills an `m`-token output panel.
+        let gemm_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
         for d in ["f32", "q8_0", "q4_k"] {
             for isa in ["scalar", "avx2"] {
-                self.module.add_function(
-                    &format!("inferno_gemv_{d}_rs8_{isa}"),
-                    gemv_ty,
-                    Some(Linkage::External),
-                );
+                for kind in ["gemv", "gemm"] {
+                    let ty = if kind == "gemv" { gemv_ty } else { gemm_ty };
+                    self.module.add_function(
+                        &format!("inferno_{kind}_{d}_rs8_{isa}"),
+                        ty,
+                        Some(Linkage::External),
+                    );
+                }
             }
         }
 
@@ -95,6 +115,25 @@ impl<'c> LlvmModule<'c> {
         );
         self.module
             .add_function("inferno_par_gemv", par_gemv_ty, Some(Linkage::External));
+
+        // void inferno_par_gemm(ptr kernel, ptr y, ptr xq, ptr w, i64 k, i64 m, i64 rows)
+        // — the M4b.2 batched-prefill dispatcher; the gemm kernel chosen by
+        // `gemm_symbol` is passed as a function pointer, so the per-(dtype,
+        // isa) selection logic is unchanged.
+        let par_gemm_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("inferno_par_gemm", par_gemm_ty, Some(Linkage::External));
     }
 
     /// Emit the profiler counter global `inferno_prof_counters : [n x i64]`
@@ -266,6 +305,8 @@ mod tests {
         let ir = m.print_to_string();
         assert!(ir.contains("define"));
         assert!(ir.contains("declare") && ir.contains("inferno_gemv_"));
+        assert!(ir.contains("inferno_gemm_"));
         assert!(ir.contains("inferno_par_gemv"));
+        assert!(ir.contains("inferno_par_gemm"));
     }
 }

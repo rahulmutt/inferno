@@ -222,6 +222,52 @@ fn profiling_does_not_change_logits() {
     }
 }
 
+/// THE TILING GATE (Task 9): tiled prefill must be **bitwise** identical
+/// regardless of `prefill_tile`. Compile the same fixture at T=1 and T=4, run a
+/// 10-token prompt (spans >1 tile at T=4), and assert last-token logits match
+/// to the bit. A batched GEMM computes each output row independently, and the
+/// activation panel is packed at each matmul's own `act_len(k)` stride, so a
+/// larger tile can only change *how many rows share one kernel call*, never the
+/// bits. If this goes red, the tiling/stride is wrong — fix the codegen.
+#[test]
+fn prefill_tiling_is_bit_invariant_to_tile_size() {
+    let fixture = "../inferno-formats/tests/fixtures/tiny.gguf";
+    let desc = load_desc(Path::new(fixture)).unwrap();
+    let graph = build_graph(&desc).unwrap();
+    let target = TargetDesc::detect().unwrap();
+    let tokens: Vec<u32> = vec![1, 5, 9, 3, 2, 7, 4, 6, 0, 8]; // spans >1 tile at T=4
+
+    let compile_at = |t: usize, dir: &Path| {
+        let art = compile(
+            &desc,
+            &graph,
+            &target,
+            64,
+            &CompileOptions {
+                profile: false,
+                prefill_tile: t,
+            },
+            dir,
+        )
+        .unwrap();
+        let meta: Meta =
+            serde_json::from_slice(&std::fs::read(art.dir.join("meta.json")).unwrap()).unwrap();
+        unsafe { run_compiled(&art.dir, &tokens, &meta) }
+    };
+
+    let d1 = tempfile::tempdir().unwrap();
+    let d4 = tempfile::tempdir().unwrap();
+    let l1 = compile_at(1, d1.path());
+    let l4 = compile_at(4, d4.path());
+    for (i, (a, b)) in l1.iter().zip(&l4).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "logit {i} differs between T=1 and T=4 ({a} vs {b})"
+        );
+    }
+}
+
 #[test]
 fn differential_tiny_gguf() {
     // tiny.gguf is already GQA: n_heads=2, n_kv_heads=1 (group=2), so this

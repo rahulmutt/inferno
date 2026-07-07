@@ -106,6 +106,14 @@ fn gemv_symbol(dtype: &DType, isa: inferno_kernels::KernelIsa) -> String {
     format!("inferno_gemv_{d}_rs8_{i}")
 }
 
+/// `inferno_gemm_{dtype}_rs8_{isa}`: the batched sibling of [`gemv_symbol`],
+/// selected identically (widened F16/BF16 → f32 kernel). Codegen derives this
+/// from the `Step::Gemv`'s stored dtype/isa at emit time, so `LoopIr` (which
+/// keeps carrying the gemv symbol) and its snapshot are unchanged.
+pub fn gemm_symbol(dtype: &DType, isa: inferno_kernels::KernelIsa) -> String {
+    gemv_symbol(dtype, isa).replace("_gemv_", "_gemm_")
+}
+
 /// Translate a [`Plan`]'s fusion islands into a [`LoopIr`]: one [`Step`] per
 /// graph node (a `MatMul` expands to `Quantize?` + `Gemv` + `Bias?`).
 pub fn build_loopir(plan: &Plan, graph: &Graph, _desc: &ModelDesc) -> LoopIr {

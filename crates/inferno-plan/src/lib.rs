@@ -33,5 +33,6 @@ pub fn plan(
         arena,
         kv,
         max_seq_len,
+        prefill_tile,
     })
 }

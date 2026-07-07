@@ -2,7 +2,7 @@
 source: crates/inferno-plan/src/plan.rs
 expression: plan.dump()
 ---
-plan (max_seq_len=64)
+plan (max_seq_len=64 prefill_tile=64)
 islands:
   Embed nodes[0..1] embed
   AttnProj nodes[1..7] attnproj
