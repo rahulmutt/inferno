@@ -974,3 +974,110 @@ fn observed_error_q4_k() {
         gemv_rel_tol(&DType::Q4_K)
     );
 }
+
+// ---------- Attention ----------
+
+/// Reference: the interpreter attention over a single query row at `pos`,
+/// with the KV cache pre-populated for positions 0..pos and this token's
+/// k/v appended. Returns the [n_heads*head_dim] output row.
+fn attn_oracle(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    kcache: &mut Vec<f32>,
+    vcache: &mut Vec<f32>,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    // Append this token's k/v at position `pos`.
+    kcache[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(k);
+    vcache[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(v);
+    let qt = inferno_graph::Tensor {
+        shape: vec![1, n_heads * head_dim],
+        data: q.to_vec(),
+    };
+    inferno_graph::ops::attention(
+        &qt,
+        kcache,
+        vcache,
+        pos + 1,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        pos,
+    )
+    .data
+}
+
+/// Drive the scalar attention kernel for one token; returns [n_heads*head_dim].
+/// Appends this token's k/v into `kv` at `pos` first (the caller's job — the
+/// kernel is read-only), matching what codegen does before the call.
+fn attn_kernel_scalar(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    kv: &mut [f32],
+    seq_len: usize,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    // Append k/v at pos: K region [0..seq*kv_dim), V region after it.
+    kv[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(k);
+    let vreg = seq_len * kv_dim;
+    kv[vreg + pos * kv_dim..vreg + (pos + 1) * kv_dim].copy_from_slice(v);
+    let mut out = vec![f32::NAN; n_heads * head_dim];
+    let mut scores = vec![0f32; seq_len];
+    // Single-layer cache: kv_base=0, v_off=seq_len*kv_dim.
+    // SAFETY: buffers sized to the documented contract; pos < seq_len.
+    unsafe {
+        inferno_kernels::inferno_attention_f32_scalar(
+            out.as_mut_ptr(),
+            q.as_ptr(),
+            kv.as_mut_ptr(),
+            scores.as_mut_ptr(),
+            0,
+            seq_len * kv_dim,
+            pos,
+            kv_dim,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+        );
+    }
+    out
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+    #[test]
+    fn attention_scalar_matches_interpreter(
+        seed in any::<u64>(), pos in 0usize..12, hd in prop::sample::select(vec![8usize, 16, 64]),
+    ) {
+        let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+        let kv_dim = n_kv_heads * head_dim;
+        let seq_len = 16usize;
+        // Random pre-populated cache for positions < pos, plus this token's k/v.
+        let mut kv = pseudo(seed, 2 * seq_len * kv_dim); // scalar-kernel KV (K then V regions)
+        let q = pseudo(seed ^ 1, n_heads * head_dim);
+        let k = pseudo(seed ^ 2, kv_dim);
+        let v = pseudo(seed ^ 3, kv_dim);
+        // Oracle uses separate k/v caches; seed them from the same bytes as
+        // the kernel's single kv buffer (K region = kv[..seq*kv_dim], V region after).
+        let mut kc = kv[..seq_len * kv_dim].to_vec();
+        let mut vc = kv[seq_len * kv_dim..].to_vec();
+        let want = attn_oracle(&q, &k, &v, &mut kc, &mut vc, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        let got = attn_kernel_scalar(&q, &k, &v, &mut kv, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        // Poly exp vs std exp: bounded, not bitwise. attn_rel_tol derived in Task 6;
+        // until then assert a loose 1e-4 to prove structural correctness.
+        let scale = want.iter().fold(1f32, |m, x| m.max(x.abs()));
+        for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+            prop_assert!((g - w).abs() <= 1e-4 * scale, "elem {i}: got {g} want {w}");
+        }
+    }
+}

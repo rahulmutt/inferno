@@ -17,6 +17,7 @@
 compile_error!("inferno-kernels is x86-64-only until the v2 NEON milestone");
 
 pub mod act;
+mod attention;
 mod buf;
 mod error;
 mod expf;
@@ -25,6 +26,7 @@ pub mod q4_k;
 pub mod q8_0;
 pub mod registry;
 
+pub use attention::inferno_attention_f32_scalar;
 pub use buf::AlignedBuf;
 pub use error::{KernelError, Result};
 pub use f32k::{
