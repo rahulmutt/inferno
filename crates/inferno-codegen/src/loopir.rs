@@ -114,6 +114,16 @@ pub fn gemm_symbol(dtype: &DType, isa: inferno_kernels::KernelIsa) -> String {
     gemv_symbol(dtype, isa).replace("_gemv_", "_gemm_")
 }
 
+/// `inferno_attention_f32_{isa}`: the single f32 attention kernel (no dtype
+/// axis). Selected by the same `KernelIsa` codegen uses for gemv/gemm.
+pub fn attention_symbol(isa: inferno_kernels::KernelIsa) -> String {
+    let isa = match isa {
+        inferno_kernels::KernelIsa::Scalar => "scalar",
+        inferno_kernels::KernelIsa::Avx2 => "avx2",
+    };
+    format!("inferno_attention_f32_{isa}")
+}
+
 /// Translate a [`Plan`]'s fusion islands into a [`LoopIr`]: one [`Step`] per
 /// graph node (a `MatMul` expands to `Quantize?` + `Gemv` + `Bias?`).
 pub fn build_loopir(plan: &Plan, graph: &Graph, _desc: &ModelDesc) -> LoopIr {
