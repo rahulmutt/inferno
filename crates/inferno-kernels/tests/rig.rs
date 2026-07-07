@@ -4,7 +4,7 @@
 
 use inferno_formats::{DType, quant};
 use inferno_graph::Tensor;
-use inferno_graph::tolerance::gemv_rel_tol;
+use inferno_graph::tolerance::{attn_rel_tol, gemv_rel_tol};
 use inferno_kernels::{KernelIsa, act, f32k, q8_0};
 use proptest::prelude::*;
 
@@ -1096,6 +1096,41 @@ fn attn_kernel_avx2(
     out
 }
 
+/// Throwaway diagnostic (run manually): print the max relative error of the
+/// attention kernel vs the std-exp interpreter across the shape distribution,
+/// so `attn_rel_tol` is armed from data, not guessed. Run:
+///   cargo test -p inferno-kernels --test rig observed_error_attention -- --ignored --nocapture
+#[test]
+#[ignore]
+fn observed_error_attention() {
+    let mut worst = 0f32;
+    for seed in 0..20_000u64 {
+        for &hd in &[8usize, 16, 64] {
+            let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+            let kv_dim = n_kv_heads * head_dim;
+            let seq_len = 16usize;
+            let pos = (seed as usize) % 12;
+            let mut kv = pseudo(seed, 2 * seq_len * kv_dim);
+            let q = pseudo(seed ^ 1, n_heads * head_dim);
+            let k = pseudo(seed ^ 2, kv_dim);
+            let v = pseudo(seed ^ 3, kv_dim);
+            let mut kc = kv[..seq_len * kv_dim].to_vec();
+            let mut vc = kv[seq_len * kv_dim..].to_vec();
+            let want = attn_oracle(
+                &q, &k, &v, &mut kc, &mut vc, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            );
+            let got = attn_kernel_scalar(
+                &q, &k, &v, &mut kv, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            );
+            let scale = want.iter().fold(1f32, |m, x| m.max(x.abs())).max(1.0);
+            for (g, w) in got.iter().zip(&want) {
+                worst = worst.max((g - w).abs() / scale);
+            }
+        }
+    }
+    println!("observed_error_attention: max rel {worst:e}");
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
     #[test]
@@ -1116,11 +1151,12 @@ proptest! {
         let mut vc = kv[seq_len * kv_dim..].to_vec();
         let want = attn_oracle(&q, &k, &v, &mut kc, &mut vc, pos, kv_dim, n_heads, n_kv_heads, head_dim);
         let got = attn_kernel_scalar(&q, &k, &v, &mut kv, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim);
-        // Poly exp vs std exp: bounded, not bitwise. attn_rel_tol derived in Task 6;
-        // until then assert a loose 1e-4 to prove structural correctness.
+        // Poly exp vs std exp: bounded, not bitwise. Tolerance derived from the
+        // observed_error_attention sweep (see tolerance.rs::attn_rel_tol).
         let scale = want.iter().fold(1f32, |m, x| m.max(x.abs()));
+        let tol = attn_rel_tol() * scale.max(1.0);
         for (i, (g, w)) in got.iter().zip(&want).enumerate() {
-            prop_assert!((g - w).abs() <= 1e-4 * scale, "elem {i}: got {g} want {w}");
+            prop_assert!((g - w).abs() <= tol, "elem {i}: got {g} want {w} (tol {tol})");
         }
     }
 }

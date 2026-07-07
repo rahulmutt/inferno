@@ -74,3 +74,17 @@ pub fn gemv_rel_tol(dtype: &DType) -> f32 {
         DType::F16 | DType::BF16 | DType::Unsupported(_) => 0.0,
     }
 }
+
+/// Attention kernel (poly-exp softmax) vs the std-exp interpreter oracle,
+/// relative to max(1, max|want|). The kernel's softmax uses a degree-6
+/// minimax `exp` (crate `inferno-kernels::expf`) while the interpreter uses
+/// `std::f32::exp`; this bounds that approximation plus lane-reduction
+/// rounding. Scalar and AVX2 attention kernels are bit-identical to *each
+/// other* (rig `attention_isa_variants_bitwise_equal`), so a single constant
+/// covers both. Derived from the `observed_error_attention` sweep (rig,
+/// #[ignore]); observed max 2.3841858e-7 over 20000 seeds × hd∈{8,16,64}
+/// on the dev Ryzen 9 3900 (2026-07-07, both debug and release builds agree
+/// on this value) — armed at ~4x -> 1e-6.
+pub const fn attn_rel_tol() -> f32 {
+    1e-6
+}
