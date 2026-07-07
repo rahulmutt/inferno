@@ -18,6 +18,8 @@ type PackedLenFn = fn(usize, usize) -> usize;
 type ActLenFn = fn(usize) -> usize;
 type QuantFn = unsafe extern "C" fn(*const f32, *mut u8, usize);
 type GemvFn = unsafe extern "C" fn(*mut f32, *const u8, *const u8, usize, usize, usize);
+type GemmFn =
+    unsafe extern "C" fn(*mut f32, *const u8, *const u8, usize, usize, usize, usize, usize);
 
 pub struct KernelSet {
     pub dtype: DType,
@@ -30,6 +32,7 @@ pub struct KernelSet {
     act_len: ActLenFn,
     quantize: Option<QuantFn>, // None: activations are raw f32 LE bytes
     gemv: GemvFn,
+    gemm: GemmFn,
 }
 
 impl KernelSet {
@@ -133,6 +136,77 @@ impl KernelSet {
         };
         Ok(())
     }
+
+    /// Batched GEMV (GEMM): `y[t*rows + r] = W[r]·act_t` for `t in 0..m`,
+    /// `r in row_start..row_end`. Validates the same contracts as
+    /// [`gemv`](Self::gemv) plus the `m`-row panel/output lengths.
+    #[allow(clippy::too_many_arguments)]
+    pub fn gemm(
+        &self,
+        y: &mut [f32],
+        xq: &[u8],
+        w: &AlignedBuf,
+        m: usize,
+        rows: usize,
+        k: usize,
+        row_start: usize,
+        row_end: usize,
+    ) -> Result<()> {
+        if m == 0 {
+            return Err(KernelError::ZeroRows);
+        }
+        if k == 0 || !k.is_multiple_of(self.wblock) {
+            return Err(KernelError::BadK {
+                k,
+                block: self.wblock,
+            });
+        }
+        if k > crate::MAX_K || rows > crate::MAX_K || m > crate::MAX_K {
+            return Err(KernelError::Overflow);
+        }
+        if y.len() != m * rows {
+            return Err(KernelError::SizeMismatch {
+                what: "gemm output (m*rows f32)",
+                got: y.len(),
+                expected: m * rows,
+            });
+        }
+        if row_start > row_end || row_end > rows {
+            return Err(KernelError::BadRowRange {
+                row_start,
+                row_end,
+                rows,
+            });
+        }
+        if xq.len() != m * (self.act_len)(k) {
+            return Err(KernelError::SizeMismatch {
+                what: "gemm activation panel bytes",
+                got: xq.len(),
+                expected: m * (self.act_len)(k),
+            });
+        }
+        if w.len() != (self.packed_len)(rows, k) {
+            return Err(KernelError::SizeMismatch {
+                what: "packed weight bytes",
+                got: w.len(),
+                expected: (self.packed_len)(rows, k),
+            });
+        }
+        // SAFETY: every pointer/length/alignment precondition validated above.
+        unsafe {
+            (self.gemm)(
+                y.as_mut_ptr(),
+                xq.as_ptr(),
+                w.as_ptr(),
+                k,
+                m,
+                rows,
+                row_start,
+                row_end,
+            )
+        };
+        Ok(())
+    }
 }
 
 fn set(dtype: &DType, isa: KernelIsa) -> Option<KernelSet> {
@@ -149,6 +223,10 @@ fn set(dtype: &DType, isa: KernelIsa) -> Option<KernelSet> {
             gemv: match isa {
                 KernelIsa::Scalar => f32k::inferno_gemv_f32_rs8_scalar,
                 KernelIsa::Avx2 => f32k::inferno_gemv_f32_rs8_avx2,
+            },
+            gemm: match isa {
+                KernelIsa::Scalar => f32k::inferno_gemm_f32_rs8_scalar,
+                KernelIsa::Avx2 => f32k::inferno_gemm_f32_rs8_avx2,
             },
         },
         DType::Q8_0 => KernelSet {
@@ -167,6 +245,10 @@ fn set(dtype: &DType, isa: KernelIsa) -> Option<KernelSet> {
                 KernelIsa::Scalar => q8_0::inferno_gemv_q8_0_rs8_scalar,
                 KernelIsa::Avx2 => q8_0::inferno_gemv_q8_0_rs8_avx2,
             },
+            gemm: match isa {
+                KernelIsa::Scalar => q8_0::inferno_gemm_q8_0_rs8_scalar,
+                KernelIsa::Avx2 => q8_0::inferno_gemm_q8_0_rs8_avx2,
+            },
         },
         DType::Q4_K => KernelSet {
             dtype: DType::Q4_K,
@@ -183,6 +265,10 @@ fn set(dtype: &DType, isa: KernelIsa) -> Option<KernelSet> {
             gemv: match isa {
                 KernelIsa::Scalar => q4_k::inferno_gemv_q4_k_rs8_scalar,
                 KernelIsa::Avx2 => q4_k::inferno_gemv_q4_k_rs8_avx2,
+            },
+            gemm: match isa {
+                KernelIsa::Scalar => q4_k::inferno_gemm_q4_k_rs8_scalar,
+                KernelIsa::Avx2 => q4_k::inferno_gemm_q4_k_rs8_avx2,
             },
         },
         DType::F16 | DType::BF16 | DType::Unsupported(_) => return None,
@@ -309,5 +395,47 @@ mod tests {
         assert!(s.gemv(&mut y, &xq, &w, rows, 33, 0, rows).is_err());
         // quantize_row validates too.
         assert!(s.quantize_row(&pseudo(5, 31)).is_err());
+    }
+
+    #[test]
+    fn gemm_wrapper_matches_gemv_and_validates() {
+        let (rows, k, m) = (10usize, 64usize, 3usize);
+        let s = reference_kernels(&DType::Q8_0).unwrap();
+        let vals = pseudo(1, rows * k);
+        let file = quant::pack(&DType::Q8_0, &vals).unwrap();
+        let w = s.pack(&file, rows, k).unwrap();
+        // Panel of m quantized rows.
+        let mut panel = Vec::new();
+        let mut per_token = Vec::new();
+        for t in 0..m {
+            let x = pseudo(2 + t as u64, k);
+            let xq = s.quantize_row(&x).unwrap();
+            panel.extend_from_slice(&xq);
+            let mut yv = vec![f32::NAN; rows];
+            s.gemv(&mut yv, &xq, &w, rows, k, 0, rows).unwrap();
+            per_token.push(yv);
+        }
+        let mut yg = vec![f32::NAN; m * rows];
+        s.gemm(&mut yg, &panel, &w, m, rows, k, 0, rows).unwrap();
+        for t in 0..m {
+            for r in 0..rows {
+                assert_eq!(
+                    yg[t * rows + r].to_bits(),
+                    per_token[t][r].to_bits(),
+                    "t{t} r{r}"
+                );
+            }
+        }
+        // Validation: wrong panel length / y length / range.
+        assert!(
+            s.gemm(&mut yg, &panel[..panel.len() - 1], &w, m, rows, k, 0, rows)
+                .is_err()
+        );
+        assert!(
+            s.gemm(&mut yg[..m * rows - 1], &panel, &w, m, rows, k, 0, rows)
+                .is_err()
+        );
+        assert!(s.gemm(&mut yg, &panel, &w, m, rows, k, 3, 2).is_err());
+        assert!(s.gemm(&mut yg, &panel, &w, 0, rows, k, 0, rows).is_err());
     }
 }
