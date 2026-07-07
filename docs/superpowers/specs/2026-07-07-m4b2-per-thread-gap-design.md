@@ -144,9 +144,15 @@ tile:
 **Decode path untouched.** Decode keeps GEMV exactly as-is; zero
 regression surface there.
 
-**Memory plan.** Prefill activation-arena slots are sized ×T
-(`inferno-plan/src/memory.rs`); decode arena unchanged. At hidden=896,
-T=64 this is tens of MB.
+**Memory plan.** The f32 intermediate arena already sizes every
+`[Seq, ..]` value to `max_seq_len` rows (liveness-packed), so a tile of
+T ≤ n ≤ max_seq_len tokens writes to already-allocated distinct rows —
+**no f32-arena change is needed**. The one region that must grow is the
+**quantized-activation scratch** (`act_scratch`, `inferno-plan/src/memory.rs`):
+today it holds one quantized row; the GEMM activation panel needs T
+contiguous quantized rows, so it is sized ×T. Decode is untouched. F32
+weights need no panel at all — their per-token source rows are already a
+contiguous `stride = k` panel in the arena, read straight by the GEMM.
 
 **Pool.** `inferno_par_gemm` partitions rows across threads exactly like
 `inferno_par_gemv`: each output row computed wholly by one thread with
