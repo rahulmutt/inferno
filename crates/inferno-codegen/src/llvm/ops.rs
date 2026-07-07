@@ -126,7 +126,6 @@ struct Codegen<'c, 'a> {
     cos_fn: FunctionValue<'c>,
     exp_fn: FunctionValue<'c>,
     sqrt_fn: FunctionValue<'c>,
-    maxnum_fn: FunctionValue<'c>,
 
     /// tensor_index -> private `[N x float]` global of dequantized weights.
     weight_globals: RefCell<HashMap<usize, PointerValue<'c>>>,
@@ -173,7 +172,6 @@ impl<'c, 'a> Codegen<'c, 'a> {
             cos_fn: decl("llvm.cos"),
             exp_fn: decl("llvm.exp"),
             sqrt_fn: decl("llvm.sqrt"),
-            maxnum_fn: decl("llvm.maxnum"),
             weight_globals: RefCell::new(HashMap::new()),
             rope_freqs: RefCell::new(HashMap::new()),
             readcyc_fn: Intrinsic::find("llvm.readcyclecounter")
@@ -307,21 +305,6 @@ impl<'c, 'a> Codegen<'c, 'a> {
     fn call_unary(&self, f: FunctionValue<'c>, x: FloatValue<'c>) -> FloatValue<'c> {
         self.builder
             .build_call(f, &[x.into()], "call")
-            .unwrap()
-            .try_as_basic_value()
-            .left()
-            .unwrap()
-            .into_float_value()
-    }
-
-    fn call_binary(
-        &self,
-        f: FunctionValue<'c>,
-        a: FloatValue<'c>,
-        b: FloatValue<'c>,
-    ) -> FloatValue<'c> {
-        self.builder
-            .build_call(f, &[a.into(), b.into()], "call2")
             .unwrap()
             .try_as_basic_value()
             .left()
@@ -1232,8 +1215,6 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let hd = head_dim as u64;
         let kv_dim = self.plan.kv.kv_dim as u64; // == n_kv_heads * head_dim
         let seq_len = self.plan.max_seq_len as u64;
-        let group = (n_heads / n_kv_heads) as u64;
-        let scale = self.const_f32(1.0 / (head_dim as f32).sqrt());
         // Per-layer KV region base (f32 elements); K then V, each [seq_len × kv_dim].
         let kv_base = layer as u64 * seq_len * kv_dim * 2;
         let k_region = kv_base;
@@ -1256,114 +1237,46 @@ impl<'c, 'a> Codegen<'c, 'a> {
             cg.store_f32(cg.elem_ptr(frame.kv, cg.add(v_dst, c)), vval);
         });
 
-        // --- Attention read for the single query row (this token). ---
-        let visible = self
-            .builder
-            .build_int_add(frame.pos, self.const_i64(1), "visible")
-            .unwrap();
+        // --- Single-token attention read via the kernel (M4b.3). q is this
+        // token's query row; k/v for this token were appended above, so the
+        // kernel only reads the KV cache. `scores` is per-call scratch. ---
         let scores = self.entry_alloca(self.f32_t.array_type(seq_len as u32), "scores");
-        let q_row = self.row_base(frame, q);
-        let out_row = self.row_base(frame, out);
-
-        for h in 0..n_heads as u64 {
-            let g = h / group;
-            let q_head = self.add(q_row, self.const_i64(h * hd));
-            let out_head = self.add(out_row, self.const_i64(h * hd));
-            // kcache[t*kv_dim + g*head_dim] / vcache[…] base offsets at t=0.
-            let kg = self.const_i64(k_region + g * hd);
-            let vg = self.const_i64(v_region + g * hd);
-
-            // scores[t] = dot(q_head, kcache[t,g]) * scale.
-            self.range_loop(visible, |cg, t| {
-                let t_kv = cg.builder.build_int_mul(t, kv_dim_c, "tkv").unwrap();
-                let k_base = cg.add(kg, t_kv);
-                let acc = cg.entry_alloca(cg.f32_t, "dot");
-                cg.builder.build_store(acc, cg.f32_t.const_zero()).unwrap();
-                cg.range_loop(cg.const_i64(hd), |cg2, d| {
-                    let qv = cg2.load_f32(cg2.arena_ptr(frame, q_head, d));
-                    let kv = cg2.load_f32(cg2.elem_ptr(frame.kv, cg2.add(k_base, d)));
-                    let prod = cg2.builder.build_float_mul(qv, kv, "qk").unwrap();
-                    let cur = cg2
-                        .builder
-                        .build_load(cg2.f32_t, acc, "acc")
-                        .unwrap()
-                        .into_float_value();
-                    let s = cg2.builder.build_float_add(cur, prod, "dotsum").unwrap();
-                    cg2.builder.build_store(acc, s).unwrap();
-                });
-                let dot = cg
-                    .builder
-                    .build_load(cg.f32_t, acc, "dot.v")
-                    .unwrap()
-                    .into_float_value();
-                let sc = cg.builder.build_float_mul(dot, scale, "sc").unwrap();
-                cg.store_f32(cg.elem_ptr(scores, t), sc);
-            });
-
-            // max = fold(NEG_INFINITY, f32::max) over scores[..visible].
-            let maxslot = self.entry_alloca(self.f32_t, "maxv");
-            self.builder
-                .build_store(maxslot, self.const_f32(f32::NEG_INFINITY))
-                .unwrap();
-            self.range_loop(visible, |cg, t| {
-                let sc = cg.load_f32(cg.elem_ptr(scores, t));
-                let cur = cg
-                    .builder
-                    .build_load(cg.f32_t, maxslot, "m")
-                    .unwrap()
-                    .into_float_value();
-                let m = cg.call_binary(cg.maxnum_fn, cur, sc);
-                cg.builder.build_store(maxslot, m).unwrap();
-            });
-            let maxv = self
-                .builder
-                .build_load(self.f32_t, maxslot, "max.v")
-                .unwrap()
-                .into_float_value();
-
-            // scores[t] = exp(scores[t] - max); denom = Σ scores[t].
-            let denomslot = self.entry_alloca(self.f32_t, "denom");
-            self.builder
-                .build_store(denomslot, self.f32_t.const_zero())
-                .unwrap();
-            self.range_loop(visible, |cg, t| {
-                let sptr = cg.elem_ptr(scores, t);
-                let sc = cg.load_f32(sptr);
-                let sub = cg.builder.build_float_sub(sc, maxv, "sub").unwrap();
-                let e = cg.call_unary(cg.exp_fn, sub);
-                cg.store_f32(sptr, e);
-                let cur = cg
-                    .builder
-                    .build_load(cg.f32_t, denomslot, "d")
-                    .unwrap()
-                    .into_float_value();
-                let nd = cg.builder.build_float_add(cur, e, "denomsum").unwrap();
-                cg.builder.build_store(denomslot, nd).unwrap();
-            });
-            let denom = self
-                .builder
-                .build_load(self.f32_t, denomslot, "denom.v")
-                .unwrap()
-                .into_float_value();
-
-            // out_head[d] = 0, then += (scores[t]/denom) * vcache[t,g,d].
-            self.range_loop(self.const_i64(hd), |cg, d| {
-                cg.store_f32(cg.arena_ptr(frame, out_head, d), cg.f32_t.const_zero());
-            });
-            self.range_loop(visible, |cg, t| {
-                let sc = cg.load_f32(cg.elem_ptr(scores, t));
-                let w = cg.builder.build_float_div(sc, denom, "w").unwrap();
-                let t_kv = cg.builder.build_int_mul(t, kv_dim_c, "tkv").unwrap();
-                let v_base = cg.add(vg, t_kv);
-                cg.range_loop(cg.const_i64(hd), |cg2, d| {
-                    let vv = cg2.load_f32(cg2.elem_ptr(frame.kv, cg2.add(v_base, d)));
-                    let contrib = cg2.builder.build_float_mul(w, vv, "wv").unwrap();
-                    let optr = cg2.arena_ptr(frame, out_head, d);
-                    let cur = cg2.load_f32(optr);
-                    let no = cg2.builder.build_float_add(cur, contrib, "outsum").unwrap();
-                    cg2.store_f32(optr, no);
-                });
-            });
-        }
+        let q_ptr = self.arena_row_ptr(frame, q);
+        let out_ptr = self.arena_row_ptr(frame, out);
+        // Every PackedWeight carries the same target-derived ISA; use it as the
+        // module ISA (attention has no PackedWeight of its own).
+        let isa = self
+            .plan
+            .weights
+            .weights
+            .first()
+            .map(|w| w.isa)
+            .unwrap_or(inferno_kernels::KernelIsa::Scalar);
+        let sym = crate::loopir::attention_symbol(isa);
+        let f = self
+            .module
+            .get_function(&sym)
+            .expect("attention kernel declared (Task 6)");
+        let v_off = self.const_i64(seq_len * kv_dim);
+        let kv_base_c = self.const_i64(kv_base);
+        self.builder
+            .build_call(
+                f,
+                &[
+                    out_ptr.into(),
+                    q_ptr.into(),
+                    frame.kv.into(),
+                    scores.into(),
+                    kv_base_c.into(),
+                    v_off.into(),
+                    frame.pos.into(),
+                    kv_dim_c.into(),
+                    self.const_i64(n_heads as u64).into(),
+                    self.const_i64(n_kv_heads as u64).into(),
+                    self.const_i64(hd).into(),
+                ],
+                "attention",
+            )
+            .unwrap();
     }
 }
