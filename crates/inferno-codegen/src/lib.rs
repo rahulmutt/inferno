@@ -5,6 +5,7 @@ pub mod emit;
 pub mod error;
 pub mod llvm;
 pub mod loopir;
+pub mod profile;
 pub use emit::{Artifact, CompileOptions, Meta, compile};
 pub use error::{CodegenError, Result};
 
