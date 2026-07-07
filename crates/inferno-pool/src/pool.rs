@@ -19,6 +19,55 @@ use crate::shard::shard_table;
 /// a compile error).
 pub type GemvFn = unsafe extern "C" fn(*mut f32, *const u8, *const u8, usize, usize, usize);
 
+/// The M4b.2 batched-GEMM kernel ABI:
+/// `(y, xq, w, k, m, rows, row_start, row_end)`. `xq` is a panel of `m`
+/// quantized activation rows; `y` is `m * rows` f32 laid out token-major
+/// (`y[t * rows + r]`). Must match `inferno-kernels`' `inferno_gemm_*`
+/// symbols exactly (the rig coerces the real symbol to this type).
+pub type GemmFn =
+    unsafe extern "C" fn(*mut f32, *const u8, *const u8, usize, usize, usize, usize, usize);
+
+/// The kind of kernel a published [`Job`] carries. A `Copy` enum of `Copy`
+/// fields so a worker reads it out of the shared job exactly like the old
+/// bare `GemvFn` payload — no change to the epoch/remaining SAFETY protocol.
+#[derive(Clone, Copy)]
+enum JobKind {
+    Gemv {
+        kernel: GemvFn,
+    },
+    Gemm {
+        kernel: GemmFn,
+        m: usize,
+        rows: usize,
+    },
+}
+
+/// Run one shard's slice `[start, end)` of the current job. For `Gemm` the
+/// kernel writes `y[t * rows + r]` for every token `t in 0..m`; those writes
+/// are disjoint across shards because shards partition the row range and
+/// every token reuses the same partition.
+///
+/// # Safety
+/// The dispatcher's caller contract must cover `[start, end)` (all `m`
+/// tokens for `Gemm`); `kind`'s pointers/fields are those the dispatcher
+/// published for this epoch.
+unsafe fn run_shard(
+    kind: &JobKind,
+    y: *mut f32,
+    xq: *const u8,
+    w: *const u8,
+    k: usize,
+    start: usize,
+    end: usize,
+) {
+    match *kind {
+        // SAFETY: forwarding the caller's contract for the disjoint range.
+        JobKind::Gemv { kernel } => unsafe { kernel(y, xq, w, k, start, end) },
+        // SAFETY: forwarding the caller's contract; all m tokens, disjoint rows.
+        JobKind::Gemm { kernel, m, rows } => unsafe { kernel(y, xq, w, k, m, rows, start, end) },
+    }
+}
+
 /// Spin iterations before a waiter parks (workers) or yields (dispatcher).
 /// ≈50µs of `spin_loop` on current x86 — covers the decode hot loop where
 /// GEMVs arrive every few hundred µs, without burning CPU in idle hosts.
@@ -34,7 +83,7 @@ const PACKED_SHARD_BITS: u32 = 16;
 const PACKED_SHARD_MASK: usize = (1 << PACKED_SHARD_BITS) - 1;
 
 struct Job {
-    kernel: Option<GemvFn>,
+    kind: Option<JobKind>,
     y: *mut f32,
     xq: *const u8,
     w: *const u8,
@@ -45,7 +94,7 @@ struct Job {
 impl Job {
     fn empty() -> Job {
         Job {
-            kernel: None,
+            kind: None,
             y: std::ptr::null_mut(),
             xq: std::ptr::null(),
             w: std::ptr::null(),
@@ -198,7 +247,7 @@ impl Pool {
         // (packed-epoch protocol) — no reader exists here.
         unsafe {
             *self.shared.job.get() = Job {
-                kernel: Some(kernel),
+                kind: Some(JobKind::Gemv { kernel }),
                 y,
                 xq,
                 w,
@@ -227,7 +276,85 @@ impl Pool {
             }
         }
         // SAFETY: caller contract; shard 0 is disjoint from worker shards.
-        unsafe { kernel(y, xq, w, k, s0, e0) };
+        unsafe { run_shard(&JobKind::Gemv { kernel }, y, xq, w, k, s0, e0) };
+        let mut spins = 0u32;
+        while self.shared.remaining.load(Ordering::Acquire) != 0 {
+            if spins < SPIN_ITERS {
+                spins += 1;
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    /// Batched GEMM across up to `active_threads()` lanes; splits `0..rows`
+    /// into the same shards as [`par_gemv`]. Each output row — all `m`
+    /// tokens — is computed by exactly one lane, so thread count never
+    /// changes output bits.
+    ///
+    /// # Safety
+    /// As [`par_gemv`], but for the GEMM ABI: `y` valid for `m * rows` f32
+    /// writes (token-major `y[t * rows + r]`), `xq` a panel of `m` quantized
+    /// activation rows for this `k`, `w` the packed weights for `(rows, k)`.
+    /// All buffers stay live and otherwise-untouched until this returns;
+    /// calls must not overlap (one job at a time).
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn par_gemm(
+        &self,
+        kernel: GemmFn,
+        y: *mut f32,
+        xq: *const u8,
+        w: *const u8,
+        k: usize,
+        m: usize,
+        rows: usize,
+    ) {
+        if rows == 0 || m == 0 {
+            return;
+        }
+        let active = self.active_threads();
+        let shards = shard_table(rows, active);
+        if shards.len() == 1 {
+            // SAFETY: caller contract covers the full range for all m tokens.
+            unsafe { kernel(y, xq, w, k, m, rows, 0, rows) };
+            return;
+        }
+        let n_worker = shards.len() - 1;
+        let (s0, e0) = shards[0];
+        let kind = JobKind::Gemm { kernel, m, rows };
+        // SAFETY (job write): the previous dispatch ended with
+        // `remaining == 0`, and shardless workers never read `job`
+        // (packed-epoch protocol) — no reader exists here.
+        unsafe {
+            *self.shared.job.get() = Job {
+                kind: Some(kind),
+                y,
+                xq,
+                w,
+                k,
+                shards,
+            };
+        }
+        self.shared.remaining.store(n_worker, Ordering::SeqCst);
+        let counter =
+            (self.shared.epoch.load(Ordering::SeqCst) >> PACKED_SHARD_BITS).wrapping_add(1);
+        self.shared.epoch.store(
+            (counter << PACKED_SHARD_BITS) | (n_worker + 1),
+            Ordering::SeqCst,
+        );
+        // Wake exactly the workers that hold a shard (same handshake as
+        // par_gemv; see there for the lost-wakeup argument).
+        for slot in &self.shared.slots[..n_worker] {
+            if slot.parked.load(Ordering::SeqCst) {
+                slot.thread
+                    .get()
+                    .expect("worker registered in Pool::new")
+                    .unpark();
+            }
+        }
+        // SAFETY: caller contract; shard 0 is disjoint from worker shards.
+        unsafe { run_shard(&kind, y, xq, w, k, s0, e0) };
         let mut spins = 0u32;
         while self.shared.remaining.load(Ordering::Acquire) != 0 {
             if spins < SPIN_ITERS {
@@ -298,12 +425,13 @@ fn worker_loop(shared: &Shared, idx: usize) {
         }
         // SAFETY: this worker holds shard `idx + 1` of the current epoch;
         // the dispatcher does not touch `job` until `remaining == 0`, and
-        // this worker has not yet decremented.
-        let (kernel, y, xq, w, k, start, end) = unsafe {
+        // this worker has not yet decremented. `kind` is a `Copy` enum of
+        // `Copy` fields, read out exactly like the old bare `GemvFn`.
+        let (kind, y, xq, w, k, start, end) = unsafe {
             let job = &*shared.job.get();
             let (start, end) = job.shards[idx + 1];
             (
-                job.kernel.expect("published job has a kernel"),
+                job.kind.expect("published job has a kind"),
                 job.y,
                 job.xq,
                 job.w,
@@ -313,7 +441,7 @@ fn worker_loop(shared: &Shared, idx: usize) {
             )
         };
         // SAFETY: dispatcher's caller contract covers this disjoint range.
-        unsafe { kernel(y, xq, w, k, start, end) };
+        unsafe { run_shard(&kind, y, xq, w, k, start, end) };
         shared.remaining.fetch_sub(1, Ordering::Release);
     }
 }

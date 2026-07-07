@@ -538,5 +538,12 @@ pub fn ensure_kernels_linked() {
     p(inferno_kernels::act::inferno_quantize_row_q8a_avx2 as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_scalar as *const ());
     p(inferno_kernels::act::inferno_quantize_row_q8k_avx2 as *const ());
+    p(inferno_kernels::inferno_gemm_f32_rs8_scalar as *const ());
+    p(inferno_kernels::inferno_gemm_f32_rs8_avx2 as *const ());
+    p(inferno_kernels::inferno_gemm_q8_0_rs8_scalar as *const ());
+    p(inferno_kernels::inferno_gemm_q8_0_rs8_avx2 as *const ());
+    p(inferno_kernels::inferno_gemm_q4_k_rs8_scalar as *const ());
+    p(inferno_kernels::inferno_gemm_q4_k_rs8_avx2 as *const ());
     p(inferno_pool::inferno_par_gemv as *const ());
+    p(inferno_pool::inferno_par_gemm as *const ());
 }

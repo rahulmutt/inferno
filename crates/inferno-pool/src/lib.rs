@@ -11,7 +11,7 @@ pub mod pool;
 pub mod shard;
 
 pub use error::PoolError;
-pub use pool::{GemvFn, Pool};
+pub use pool::{GemmFn, GemvFn, Pool};
 pub use shard::{SHARD_ALIGN, shard_table};
 
 use std::sync::OnceLock;
@@ -110,5 +110,55 @@ pub unsafe extern "C" fn inferno_par_gemv(
         }
         // SAFETY: forwarding the caller's contract for the full range.
         None => unsafe { kernel(y, xq, w, k, 0, rows) },
+    }
+}
+
+/// Host dispatcher for batched prefill GEMM (M4b.2). Same single-dispatcher
+/// guard + serial fallback as [`inferno_par_gemv`]; shares `DISPATCH_CLAIMED`
+/// deliberately — within one forward pass GEMV and GEMM are issued serially
+/// and never overlap, so one guard suffices. On the CAS-loss (or
+/// uninitialized-pool) path this runs one serial kernel call over the full
+/// row range for all `m` tokens, bit-identical to the pooled path since each
+/// row is computed by a single kernel invocation either way.
+///
+/// A panic inside the dispatcher or kernel aborts the process at this
+/// `extern "C"` boundary — there is no unwind across FFI.
+///
+/// # Safety
+/// Same contract as [`Pool::par_gemm`]; additionally `kernel` must be a
+/// valid non-null function pointer with the GEMM ABI. Generated code
+/// guarantees all of this by construction (M3 trust model).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_par_gemm(
+    kernel: GemmFn,
+    y: *mut f32,
+    xq: *const u8,
+    w: *const u8,
+    k: usize,
+    m: usize,
+    rows: usize,
+) {
+    if rows == 0 || m == 0 {
+        return;
+    }
+    match GLOBAL.get() {
+        Some(pool) => {
+            if DISPATCH_CLAIMED
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                // SAFETY: forwarding the caller's contract unchanged.
+                unsafe { pool.par_gemm(kernel, y, xq, w, k, m, rows) };
+                DISPATCH_CLAIMED.store(false, Ordering::Release);
+            } else {
+                // Lost the race for the pool's single dispatcher slot: run
+                // serially over the full range (all m tokens) instead of
+                // overlapping another thread's in-flight pool dispatch.
+                // SAFETY: forwarding the caller's contract for the full range.
+                unsafe { kernel(y, xq, w, k, m, rows, 0, rows) };
+            }
+        }
+        // SAFETY: forwarding the caller's contract for the full range.
+        None => unsafe { kernel(y, xq, w, k, m, rows, 0, rows) },
     }
 }
