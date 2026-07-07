@@ -18,7 +18,7 @@ use crate::Result;
 use inkwell::AddressSpace;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::values::FunctionValue;
+use inkwell::values::{FunctionValue, PointerValue};
 
 /// Context-borrowing wrapper around an inkwell [`Module`] that knows how to
 /// populate itself with the frozen kernel ABI and the (currently empty)
@@ -95,6 +95,23 @@ impl<'c> LlvmModule<'c> {
         );
         self.module
             .add_function("inferno_par_gemv", par_gemv_ty, Some(Linkage::External));
+    }
+
+    /// Emit the profiler counter global `inferno_prof_counters : [n x i64]`
+    /// (zero-initialized, external linkage so the host resolves it after
+    /// `dlopen`). No-op when `n == 0`. Returns the global's pointer.
+    pub(crate) fn declare_prof_counters(&self, n: usize) -> Option<PointerValue<'c>> {
+        if n == 0 {
+            return None;
+        }
+        let i64_t = self.ctx.i64_type();
+        let arr = i64_t.array_type(n as u32);
+        let g = self
+            .module
+            .add_global(arr, Some(AddressSpace::default()), "inferno_prof_counters");
+        g.set_linkage(Linkage::External);
+        g.set_initializer(&arr.const_zero());
+        Some(g.as_pointer_value())
     }
 
     /// Declare the two generated entry points (signatures only, *no* body).
@@ -197,7 +214,15 @@ mod tests {
         let plan = inferno_plan::plan(&desc, &graph, &target, 64, 64).unwrap();
 
         let ctx = Context::create();
-        let module = super::build_full_module(&ctx, &plan, &graph, &desc).unwrap();
+        let module = super::build_full_module(
+            &ctx,
+            &plan,
+            &graph,
+            &desc,
+            &crate::CompileOptions::default(),
+            &crate::profile::ProfileSlots::default(),
+        )
+        .unwrap();
         // Correctness (numeric) is Task 12; this catches malformed IR early:
         // bad pointer arithmetic, type mismatches, missing terminators.
         assert!(
@@ -205,6 +230,30 @@ mod tests {
             "module failed verification:\n{}",
             module.print_to_string()
         );
+    }
+
+    #[test]
+    fn profiled_module_verifies_and_exports_counters() {
+        use inferno_formats::load_desc;
+        use inferno_graph::build_graph;
+        use inferno_target::TargetDesc;
+        use std::path::Path;
+        let desc = load_desc(Path::new("../inferno-formats/tests/fixtures/tiny.gguf")).unwrap();
+        let graph = build_graph(&desc).unwrap();
+        let target = TargetDesc::detect().unwrap();
+        let plan = inferno_plan::plan(&desc, &graph, &target, 64, 64).unwrap();
+        let lir = crate::loopir::build_loopir(&plan, &graph, &desc);
+        let slots = crate::profile::assign_slots(&lir, &plan, &desc);
+        let opts = crate::CompileOptions {
+            profile: true,
+            prefill_tile: 64,
+        };
+        let ctx = Context::create();
+        let m = super::build_full_module(&ctx, &plan, &graph, &desc, &opts, &slots).unwrap();
+        assert!(m.verify().is_ok(), "{}", m.print_to_string());
+        let ir = m.print_to_string();
+        assert!(ir.contains("inferno_prof_counters"));
+        assert!(ir.contains("readcyclecounter"));
     }
 
     #[test]

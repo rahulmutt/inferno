@@ -14,12 +14,17 @@ use crate::loopir::{LoopIr, Step};
 #[derive(Debug, Clone, Default)]
 pub struct ProfileSlots {
     pub labels: Vec<String>,
-    index: HashMap<String, usize>,
+    pub(crate) index: HashMap<String, usize>,
 }
 
 impl ProfileSlots {
     pub fn slot(&self, label: &str) -> usize {
         self.index[label]
+    }
+    /// The full label -> slot-index map (used by codegen to look up each
+    /// step's counter slot from its `step_label`).
+    pub(crate) fn index_map(&self) -> HashMap<String, usize> {
+        self.index.clone()
     }
     pub fn len(&self) -> usize {
         self.labels.len()

@@ -86,8 +86,14 @@ pub fn compile(
     out_dir: &Path,
 ) -> Result<Artifact> {
     let plan = inferno_plan::plan(desc, graph, target, max_seq_len, opts.prefill_tile)?;
+    let loopir_slots = if opts.profile {
+        let graph_lir = crate::loopir::build_loopir(&plan, graph, desc);
+        crate::profile::assign_slots(&graph_lir, &plan, desc)
+    } else {
+        crate::profile::ProfileSlots::default()
+    };
     let ctx = Context::create();
-    let module = crate::llvm::build_full_module(&ctx, &plan, graph, desc)?;
+    let module = crate::llvm::build_full_module(&ctx, &plan, graph, desc, opts, &loopir_slots)?;
     module.verify()?;
 
     Target::initialize_x86(&InitializationConfig::default());
@@ -125,7 +131,7 @@ pub fn compile(
     }
 
     std::fs::write(out_dir.join("weights.bin"), &plan.weights.image)?;
-    let meta = build_meta(desc, &plan, opts, Vec::new());
+    let meta = build_meta(desc, &plan, opts, loopir_slots.labels.clone());
     std::fs::write(out_dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
 
     Ok(Artifact {

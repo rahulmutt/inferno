@@ -168,6 +168,53 @@ fn differential_for(fixture: &str) {
     );
 }
 
+/// The profiler must not perturb the math: a `--profile` build's last-token
+/// logits must be **bitwise** identical to the plain build's (not merely within
+/// tolerance). `readcyclecounter` only reads a clock; if any logit's bits
+/// differ, the instrumentation changed an SSA value or basic-block boundary and
+/// the codegen is wrong. This is a hard correctness gate.
+#[test]
+fn profiling_does_not_change_logits() {
+    let fixture = "../inferno-formats/tests/fixtures/tiny.gguf";
+    let desc = load_desc(Path::new(fixture)).unwrap();
+    let graph = build_graph(&desc).unwrap();
+    let target = TargetDesc::detect().unwrap();
+    let tokens: Vec<u32> = vec![1, 5, 9, 3];
+
+    let plain_dir = tempfile::tempdir().unwrap();
+    let a = compile(
+        &desc,
+        &graph,
+        &target,
+        64,
+        &CompileOptions::default(),
+        plain_dir.path(),
+    )
+    .unwrap();
+    let prof_dir = tempfile::tempdir().unwrap();
+    let b = compile(
+        &desc,
+        &graph,
+        &target,
+        64,
+        &CompileOptions {
+            profile: true,
+            prefill_tile: 64,
+        },
+        prof_dir.path(),
+    )
+    .unwrap();
+
+    let read_meta = |art: &inferno_codegen::Artifact| -> Meta {
+        serde_json::from_slice(&std::fs::read(art.dir.join("meta.json")).unwrap()).unwrap()
+    };
+    let la = unsafe { run_compiled(&a.dir, &tokens, &read_meta(&a)) };
+    let lb = unsafe { run_compiled(&b.dir, &tokens, &read_meta(&b)) };
+    for (i, (x, y)) in la.iter().zip(&lb).enumerate() {
+        assert_eq!(x.to_bits(), y.to_bits(), "logit {i} differs with --profile");
+    }
+}
+
 #[test]
 fn differential_tiny_gguf() {
     // tiny.gguf is already GQA: n_heads=2, n_kv_heads=1 (group=2), so this

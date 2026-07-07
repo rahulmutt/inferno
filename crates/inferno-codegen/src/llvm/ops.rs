@@ -50,12 +50,23 @@ pub fn build_full_module<'c>(
     plan: &Plan,
     graph: &Graph,
     desc: &ModelDesc,
+    opts: &crate::CompileOptions,
+    slots: &crate::profile::ProfileSlots,
 ) -> Result<LlvmModule<'c>> {
     let lm = LlvmModule::new(ctx, "model");
     lm.declare_kernels();
+    let prof = if opts.profile {
+        lm.declare_prof_counters(slots.len())
+    } else {
+        None
+    };
     let (prefill, decode) = lm.declare_entry_points();
 
-    let cg = Codegen::new(ctx, lm.module(), plan, graph, desc);
+    let mut cg = Codegen::new(ctx, lm.module(), plan, graph, desc);
+    cg.prof_counters = prof;
+    if opts.profile {
+        cg.prof_slots = slots.index_map();
+    }
     let loopir = build_loopir(plan, graph, desc);
     cg.lower_prefill(prefill, &loopir);
     cg.lower_decode(decode, &loopir);
@@ -105,6 +116,14 @@ struct Codegen<'c, 'a> {
     weight_globals: RefCell<HashMap<usize, PointerValue<'c>>>,
     /// (theta bits, head_dim) -> `[half x float]` rope frequency table.
     rope_freqs: RefCell<HashMap<(u32, u64), PointerValue<'c>>>,
+
+    /// Profiler counter array base (`[N x i64]`), or None when not profiling.
+    prof_counters: Option<PointerValue<'c>>,
+    /// step-label -> slot index (empty when not profiling).
+    prof_slots: HashMap<String, usize>,
+    /// `llvm.readcyclecounter` declaration (always declared; only *called*
+    /// when `prof_counters` is Some).
+    readcyc_fn: FunctionValue<'c>,
 }
 
 impl<'c, 'a> Codegen<'c, 'a> {
@@ -141,6 +160,12 @@ impl<'c, 'a> Codegen<'c, 'a> {
             maxnum_fn: decl("llvm.maxnum"),
             weight_globals: RefCell::new(HashMap::new()),
             rope_freqs: RefCell::new(HashMap::new()),
+            readcyc_fn: Intrinsic::find("llvm.readcyclecounter")
+                .expect("readcyclecounter intrinsic")
+                .get_declaration(module, &[])
+                .expect("readcyclecounter declaration"),
+            prof_counters: None,
+            prof_slots: HashMap::new(),
         }
     }
 
@@ -196,6 +221,49 @@ impl<'c, 'a> Codegen<'c, 'a> {
     }
     fn store_f32(&self, ptr: PointerValue<'c>, val: FloatValue<'c>) {
         self.builder.build_store(ptr, val).unwrap();
+    }
+
+    // ---- profiler helpers ---------------------------------------------------
+
+    fn load_i64(&self, ptr: PointerValue<'c>) -> IntValue<'c> {
+        self.builder
+            .build_load(self.i64_t, ptr, "ld64")
+            .unwrap()
+            .into_int_value()
+    }
+
+    /// Read the CPU cycle counter (`llvm.readcyclecounter`, an i64).
+    fn readcyc(&self) -> IntValue<'c> {
+        self.builder
+            .build_call(self.readcyc_fn, &[], "rdtsc")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value()
+    }
+
+    /// Run `emit` (one op's lowering) bracketed by cycle-counter reads that
+    /// accumulate `t1 - t0` into this op's profiler slot. When not profiling
+    /// (`prof_counters` is None) it just runs `emit` — zero overhead, and the
+    /// emitted math is byte-for-byte identical (readcyclecounter is pure and
+    /// only reads a clock). The accumulation runs on the entry-point thread
+    /// (GEMV/GEMM shards join before the wrapper returns), so the plain
+    /// load/add/store needs no atomics; profiled artifacts are driven by the
+    /// single-threaded CLI generate loop.
+    fn profiled(&self, label: &str, emit: impl FnOnce(&Self)) {
+        let Some(base) = self.prof_counters else {
+            return emit(self);
+        };
+        let slot = self.prof_slots[label];
+        let t0 = self.readcyc();
+        emit(self);
+        let t1 = self.readcyc();
+        let delta = self.builder.build_int_sub(t1, t0, "cyc").unwrap();
+        let p = self.byte_ptr(base, self.const_i64((slot * 8) as u64));
+        let cur = self.load_i64(p);
+        let next = self.builder.build_int_add(cur, delta, "acc64").unwrap();
+        self.builder.build_store(p, next).unwrap();
     }
 
     /// Build an `alloca` in the current function's **entry block** (before its
@@ -507,7 +575,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
     fn lower_body(&self, loopir: &LoopIr, frame: &Frame<'c>) {
         for island in &loopir.islands {
             for step in &island.steps {
-                self.lower_step(frame, step);
+                let label = crate::profile::step_label(step, self.plan, self.desc);
+                self.profiled(&label, |cg| cg.lower_step(frame, step));
             }
         }
     }
