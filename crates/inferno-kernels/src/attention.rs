@@ -131,7 +131,8 @@ fn reduce8(v: [f32; 8]) -> f32 {
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-/// # Safety: as `inferno_attention_f32_scalar`, plus the CPU has AVX2+FMA.
+/// # Safety
+/// As [`inferno_attention_f32_scalar`], plus the running CPU has AVX2+FMA.
 #[allow(clippy::too_many_arguments)]
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
