@@ -2,10 +2,14 @@ use std::io::Write;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use inferno_core::Engine;
-use inferno_runtime::{ChainSampler, Generator, SamplerConfig};
+use inferno_runtime::{
+    Backend, ChainSampler, Generator, Greedy, RuntimeError, Sampler, SamplerConfig,
+};
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     model: &Path,
     prompt: &str,
@@ -14,10 +18,24 @@ pub fn run(
     interp: bool,
     threads: u64,
     sampling: SamplerConfig,
+    profile: bool,
 ) -> ExitCode {
     if let Err(e) = sampling.validate() {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
+    }
+    if profile {
+        if interp {
+            eprintln!("error: --profile requires the compiled path (incompatible with --interp)");
+            return ExitCode::FAILURE;
+        }
+        return match run_profile(model, prompt, max_tokens, max_seq_len, threads) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        };
     }
     let mut sampler = ChainSampler::new(sampling);
     let generator = if interp {
@@ -71,6 +89,104 @@ pub fn run(
             ExitCode::FAILURE
         }
     }
+}
+
+/// The dedicated `--profile` measurement path (Task 4, per the M4b.2 plan's
+/// own recommendation): bypasses `Generator`/streaming entirely and drives
+/// a `CompiledBackend` directly, so the normal generation loop stays
+/// untouched by profiling concerns.
+///
+/// Measures exactly two phases: one prefill call over the whole prompt, then
+/// up to `max_tokens` greedy decode steps (stopping early on EOS or a full
+/// context, mirroring `Generator::generate`'s own stop conditions). The
+/// profiler counters are snapshotted and reset between the two phases so
+/// each table reflects only its own phase. Prints both tables to stdout via
+/// `cli::profile::render`; never streams generated text (this is a
+/// measurement run, not a user-facing generation).
+fn run_profile(
+    model: &Path,
+    prompt: &str,
+    max_tokens: usize,
+    max_seq_len: usize,
+    threads: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let max_seq_len = clamp_max_seq_len(model, max_seq_len)?;
+    let mut engine = Engine::load(model, max_seq_len)?;
+    if threads != 0 {
+        engine.set_threads(threads as usize);
+    }
+    // Distinct (profiled) cache entry — see `CompileOptions.profile`.
+    engine.set_profile(true);
+    let mut backend = engine.compiled_backend()?;
+
+    let desc = inferno_formats::load_desc(model)?;
+    let spec = desc.tokenizer.as_ref().ok_or(RuntimeError::NoTokenizer)?;
+    let tokenizer = inferno_runtime::tokenizer_for(spec)?;
+    let prompt_ids = tokenizer.encode(prompt, tokenizer.default_add_bos())?;
+    if prompt_ids.is_empty() || prompt_ids.len() >= max_seq_len {
+        return Err(Box::new(RuntimeError::PromptTooLong {
+            got: prompt_ids.len(),
+            max: max_seq_len,
+        }));
+    }
+    let eos = tokenizer.eos();
+
+    backend.reset();
+
+    let t0 = Instant::now();
+    let mut last = backend.forward(&prompt_ids)?;
+    let prefill_secs = t0.elapsed().as_secs_f64();
+
+    let slots = backend.profile_slots().to_vec();
+    let prefill_counts = backend.profile_snapshot().unwrap_or_default();
+    backend.profile_reset();
+
+    let mut sampler = Greedy;
+    let mut generated = 0usize;
+    let t1 = Instant::now();
+    for step in 0..max_tokens {
+        let next = sampler.sample(&last);
+        if Some(next) == eos {
+            break;
+        }
+        generated += 1;
+        let seq_len = prompt_ids.len() + step;
+        if seq_len + 1 > max_seq_len {
+            break; // context full
+        }
+        last = backend.forward(&[next])?;
+    }
+    let decode_secs = t1.elapsed().as_secs_f64();
+    let decode_counts = backend.profile_snapshot().unwrap_or_default();
+
+    // Per-slot weight bytes for ONE forward invocation, scaled by each
+    // phase's per-token invocation count (see `Engine::profile_matmul_bytes`
+    // doc comment for the approximation this makes).
+    let per_invocation_bytes = engine.profile_matmul_bytes(&slots)?;
+    let prefill_bytes: Vec<u64> = per_invocation_bytes
+        .iter()
+        .map(|b| b * prompt_ids.len() as u64)
+        .collect();
+    let decode_bytes: Vec<u64> = per_invocation_bytes
+        .iter()
+        .map(|b| b * generated as u64)
+        .collect();
+
+    print!(
+        "{}",
+        crate::profile::render(
+            "prefill",
+            &slots,
+            &prefill_counts,
+            &prefill_bytes,
+            prefill_secs
+        )
+    );
+    print!(
+        "{}",
+        crate::profile::render("decode", &slots, &decode_counts, &decode_bytes, decode_secs)
+    );
+    Ok(())
 }
 
 /// Build a `Generator` driven by a `CompiledBackend` (the default, non

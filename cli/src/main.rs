@@ -3,6 +3,7 @@ mod compile;
 mod diff;
 mod inspect;
 mod llama_bench;
+mod profile;
 mod run;
 
 use std::path::PathBuf;
@@ -71,6 +72,14 @@ enum Command {
         /// RNG seed for sampling.
         #[arg(long, default_value_t = 0)]
         seed: u64,
+        /// Measure and print per-op cycle / wall-share / GB/s tables for
+        /// prefill and decode instead of streaming output. Requires the
+        /// compiled path (incompatible with `--interp`); builds a distinct
+        /// (profiled) cache entry and runs prefill once + `max_tokens`
+        /// greedy decode steps as a dedicated measurement, separate from
+        /// normal generation.
+        #[arg(long)]
+        profile: bool,
     },
     /// Compile a model for the host target and print the cache directory
     /// (`model.so`/`weights.bin`/`meta.json`) the artifact lands in. Reuses a
@@ -178,6 +187,7 @@ fn main() -> ExitCode {
             repeat_penalty,
             repeat_last_n,
             seed,
+            profile,
         } => run::run(
             &model,
             &prompt,
@@ -194,6 +204,7 @@ fn main() -> ExitCode {
                 repeat_last_n,
                 seed,
             },
+            profile,
         ),
         Command::Compile { model, max_seq_len } => compile::compile(&model, max_seq_len),
         Command::Diff {

@@ -150,12 +150,20 @@ pub struct Artifact {
     weights: Mmap,
     meta: Meta,
     _lib: libloading::Library,
+    /// Base of the profiled `model.so`'s `[N x i64]` counter array, resolved
+    /// at load time when `meta.profile_slots` is non-empty; None otherwise.
+    prof_counters: Option<NonNull<u64>>,
 }
 
 // SAFETY: `Artifact` is immutable after construction. `prefill`/`decode` are
 // plain fn pointers; `Mmap` is `Send + Sync` (read-only); `libloading::Library`
 // is `Send + Sync`. The compiled entry points read weights and write only into
 // caller-provided buffers, so concurrent shared (`&self`) use is sound.
+// `prof_counters` is a raw pointer into the profiled artifact's global
+// counter array; it is only ever read/written by the single-threaded CLI
+// `--profile` measurement path (never concurrently with `prefill`/
+// `decode_step`, and never from more than one thread), so its presence does
+// not weaken the `Send`/`Sync` argument above.
 unsafe impl Send for Artifact {}
 unsafe impl Sync for Artifact {}
 
@@ -299,12 +307,25 @@ impl Artifact {
             (*p, *d)
         };
 
+        // SAFETY: a profiled artifact exports `inferno_prof_counters` as
+        // `[N x i64]` with N == meta.profile_slots.len(); we copy out the raw
+        // base pointer and keep `lib` alive in the returned Artifact.
+        let prof_counters = if meta.profile_slots.is_empty() {
+            None
+        } else {
+            let sym: libloading::Symbol<*mut u64> = unsafe { lib.get(b"inferno_prof_counters\0") }?;
+            // `*sym` just derefs the `Symbol` wrapper (safe `Deref`) to copy
+            // out the raw `*mut u64` it wraps; no unsafe needed here.
+            NonNull::new(*sym)
+        };
+
         Ok(Artifact {
             prefill,
             decode,
             weights,
             meta,
             _lib: lib,
+            prof_counters,
         })
     }
 
@@ -398,6 +419,31 @@ impl Artifact {
     /// The sidecar metadata (buffer sizes, entry-point names, hashes).
     pub fn meta(&self) -> &Meta {
         &self.meta
+    }
+
+    /// Profiler slot labels (empty unless compiled with `profile`).
+    pub fn profile_slots(&self) -> &[String] {
+        &self.meta.profile_slots
+    }
+
+    /// Current per-slot cycle counters, or None if unprofiled. Reads the raw
+    /// `[N x i64]` global the compiled code accumulates into.
+    pub fn profile_snapshot(&self) -> Option<Vec<u64>> {
+        let base = self.prof_counters?;
+        let n = self.meta.profile_slots.len();
+        // SAFETY: `base` points at the artifact's live `[n x i64]` global for
+        // as long as `self._lib` is alive; we only read it.
+        Some(unsafe { std::slice::from_raw_parts(base.as_ptr(), n).to_vec() })
+    }
+
+    /// Zero the counters (separates prefill vs decode measurement).
+    pub fn profile_reset(&self) {
+        if let Some(base) = self.prof_counters {
+            let n = self.meta.profile_slots.len();
+            // SAFETY: exclusive logical access — the CLI resets between phases
+            // while no forward pass is running.
+            unsafe { std::ptr::write_bytes(base.as_ptr(), 0, n) };
+        }
     }
 
     /// Validate caller buffers against `meta` before any raw call. A too-small

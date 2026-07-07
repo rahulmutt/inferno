@@ -249,3 +249,65 @@ validates shapes at plan time); `inferno_par_gemm` inherits
 
 *(Recorded protocol data points and scoped amendments land here; never
 edit a recorded data point.)*
+
+### 2026-07-07 — Pre-optimization baseline `--profile` capture (Phase 1)
+
+- **Commit:** recorded by the `feat(cli,core): inferno run --profile —
+  per-op cycle/GB-s tables; record baseline` commit on branch
+  `m4b2-per-thread-gap` (built on parent `2fa1cd1`).
+- **Model:** `qwen2.5-0.5b-instruct-q8_0.gguf`, `--threads 1`,
+  `--max-tokens 64`, random base64 prompt (`head -c 2048 /dev/urandom |
+  base64`, ~2.7 KB → ~1.3 K prompt tokens).
+- **Status:** **pre-optimization / pre-tiling baseline.** Prefill is NOT
+  tiled yet (that lands in Phase 3 / Task 9); this is the reference the
+  GEMM + tiling work and the decode attribution fork are scoped against.
+  Do not interpret it into an optimization lever here — that is the
+  Phase-5 amendment.
+- **Environment caveat:** 8-CPU cgroup-quota'd shared devpod. The run is
+  `--threads 1`, so the quota does not distort this single-threaded
+  profile. `rdtsc`-based self-measurement; shares are meaningful even
+  where absolute wall-times wobble. The GB/s column is the diagnostic
+  approximation described in `Engine::profile_matmul_bytes` (weight-image
+  bytes per slot × per-token invocations; exact for decode, an
+  over-count of calls for the batched prefill), not a contract.
+
+Both tables verbatim from the run:
+
+```
+profile [prefill] 294.463s wall, 912763978121 cyc total
+  op                                   cycles   share        GB/s
+  attention                      624796451647   68.5%           -
+  matmul:lm_head.weight           74244813963    8.1%        13.1
+  matmul:layers.*.ffn.gate_proj.weight    60287936474    6.6%        12.4
+  matmul:layers.*.ffn.up_proj.weight    59638351868    6.5%        12.6
+  matmul:layers.*.ffn.down_proj.weight    58792975129    6.4%        12.7
+  matmul:layers.*.attn.o_proj.weight    11677119697    1.3%        11.8
+  matmul:layers.*.attn.q_proj.weight    10884470923    1.2%        12.7
+  swiglu                           5081349250    0.6%           -
+  matmul:layers.*.attn.k_proj.weight     1623296036    0.2%        12.2
+  rope                             1596506924    0.2%           -
+  matmul:layers.*.attn.v_proj.weight     1584005840    0.2%        12.5
+  rmsnorm                          1409228632    0.2%           -
+  add                               714746984    0.1%           -
+  bias                              379261228    0.0%           -
+  embed                              42510790    0.0%           -
+  quantize                           10952736    0.0%           -
+profile [decode] 17.149s wall, 53065140653 cyc total
+  op                                   cycles   share        GB/s
+  attention                       43236236049   81.5%           -
+  matmul:lm_head.weight            2398434901    4.5%        12.6
+  matmul:layers.*.ffn.gate_proj.weight     2137158496    4.0%        10.9
+  matmul:layers.*.ffn.up_proj.weight     2079020006    3.9%        11.2
+  matmul:layers.*.ffn.down_proj.weight     2013504139    3.8%        11.6
+  matmul:layers.*.attn.o_proj.weight      432879623    0.8%         9.9
+  matmul:layers.*.attn.q_proj.weight      375441139    0.7%        11.4
+  swiglu                            157185878    0.3%           -
+  matmul:layers.*.attn.v_proj.weight       53564531    0.1%        11.4
+  matmul:layers.*.attn.k_proj.weight       52367101    0.1%        11.7
+  rope                               51067684    0.1%           -
+  rmsnorm                            43344252    0.1%           -
+  add                                22557163    0.0%           -
+  bias                               11541235    0.0%           -
+  embed                                458304    0.0%           -
+  quantize                             380152    0.0%           -
+```

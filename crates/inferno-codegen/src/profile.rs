@@ -43,7 +43,11 @@ impl ProfileSlots {
 /// Normalize a weight tensor name so all layers share one slot: any dotted
 /// segment that is a bare integer becomes `*` (e.g. `blk.7.attn_q.weight`
 /// -> `blk.*.attn_q.weight`).
-fn normalize_weight_name(name: &str) -> String {
+///
+/// `pub`: `inferno-core`'s `Engine::profile_matmul_bytes` (Task 4) reuses
+/// this exact normalization to map packed weights back onto profiler slot
+/// labels for the `--profile` GB/s column, rather than duplicating the rule.
+pub fn normalize_weight_name(name: &str) -> String {
     name.split('.')
         .map(|seg| if seg.parse::<u64>().is_ok() { "*" } else { seg })
         .collect::<Vec<_>>()

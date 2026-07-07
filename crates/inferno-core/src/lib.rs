@@ -99,4 +99,54 @@ impl Engine {
         let key = cache_key(&self.model, &self.target, self.max_seq_len, &self.opts)?;
         Ok(cache::cache_dir(&key))
     }
+
+    /// Per-slot weight bytes touched by ONE forward-pass invocation of each
+    /// profiler slot in `slots` (`0` for non-matmul slots).
+    ///
+    /// The profiler aggregates every layer sharing a `matmul:<normalized
+    /// name>` label into a single counter (see `inferno_codegen::profile`),
+    /// so this sums the packed byte length of every weight tensor whose
+    /// normalized name matches that label — i.e. the bytes read from weights
+    /// by one token's worth of work across all layers, exactly mirroring
+    /// what one accumulated cycle count already covers.
+    ///
+    /// This re-derives the (pure, LLVM-free) `inferno_plan::Plan` from the
+    /// model rather than caching one from compile time — `Engine` doesn't
+    /// keep it around, and building it is cheap relative to the model run
+    /// this is used alongside (`inferno run --profile`).
+    ///
+    /// The CLI multiplies the result by each phase's per-token invocation
+    /// count (prompt tokens for prefill, generated tokens for decode) to
+    /// approximate total phase bytes for the `--profile` GB/s column — this
+    /// assumes one full weight read per token, which is only exact for
+    /// decode (prefill batches tokens through fewer, larger calls); it is a
+    /// diagnostic approximation, not a contract.
+    pub fn profile_matmul_bytes(&self, slots: &[String]) -> Result<Vec<u64>> {
+        let desc = inferno_formats::load_desc(&self.model)?;
+        let graph = inferno_graph::build_graph(&desc)?;
+        let plan = inferno_plan::plan(
+            &desc,
+            &graph,
+            &self.target,
+            self.max_seq_len,
+            self.opts.prefill_tile,
+        )?;
+        let slot_index: std::collections::HashMap<&str, usize> = slots
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i))
+            .collect();
+        let mut bytes = vec![0u64; slots.len()];
+        for w in &plan.weights.weights {
+            let name = &desc.tensors[w.tensor_index].name;
+            let label = format!(
+                "matmul:{}",
+                inferno_codegen::profile::normalize_weight_name(name)
+            );
+            if let Some(&i) = slot_index.get(label.as_str()) {
+                bytes[i] += w.len as u64;
+            }
+        }
+        Ok(bytes)
+    }
 }

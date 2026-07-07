@@ -25,6 +25,10 @@ pub enum CoreError {
     Verification(String),
     #[error("pool: {0}")]
     Pool(#[from] inferno_pool::PoolError),
+    /// Surfaced by `Engine::profile_matmul_bytes` re-deriving the plan
+    /// (pure, no LLVM) to map weight bytes onto profiler slots.
+    #[error("plan: {0}")]
+    Plan(#[from] inferno_plan::PlanError),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
