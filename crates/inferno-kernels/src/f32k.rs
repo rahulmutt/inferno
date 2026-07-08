@@ -4,6 +4,13 @@
 
 use crate::{AlignedBuf, KernelError, Result, STRIP};
 
+/// Columns to software-prefetch ahead in the AVX2 GEMV (M4b.4). The f32 rs8
+/// layout stores one aligned 32-byte vector per column; `PF_DIST_F32` columns
+/// ahead ≈ one cache line beyond the current fetch. Plan default (16); the
+/// Task 2 sweep was deferred to quiet hardware — see the spec Amendment. Pure
+/// hint — never affects output bits.
+const PF_DIST_F32: usize = 16;
+
 pub fn packed_len_f32_rs8(rows: usize, k: usize) -> usize {
     rows.next_multiple_of(STRIP) * k * 4
 }
@@ -105,6 +112,12 @@ pub unsafe extern "C" fn inferno_gemv_f32_rs8_avx2(
         let base = unsafe { wf.add((r / STRIP) * k * STRIP) };
         let mut acc = _mm256_setzero_ps();
         for c in 0..k {
+            // Prefetch a future column vector; `wrapping_add` (not `add`) because
+            // the strip's tail columns point past the buffer end. `_mm_prefetch`
+            // never dereferences and never faults — pure hint, output unchanged.
+            // (See the q8_0 kernel.)
+            let pf_addr = base.wrapping_add((c + PF_DIST_F32) * STRIP).cast();
+            _mm_prefetch::<_MM_HINT_T0>(pf_addr);
             let wv = unsafe { _mm256_load_ps(base.add(c * STRIP)) };
             // x may have any alignment; broadcast from an unaligned scalar read.
             let xv = _mm256_set1_ps(unsafe { xf.add(c).read_unaligned() });
