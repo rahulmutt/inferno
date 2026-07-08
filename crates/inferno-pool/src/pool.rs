@@ -117,6 +117,10 @@ struct Shared {
     shutdown: AtomicBool,
     /// Per-dispatch parallelism cap (≤ capacity); `Pool::set_active_threads`.
     active: AtomicUsize,
+    /// Decode-phase parallelism cap (≤ capacity); `Pool::set_decode_threads`.
+    /// `par_gemv` shards over `min(active, decode_cap)` so decode stops past
+    /// its bandwidth knee while prefill (`par_gemm`) keeps full `active`.
+    decode_cap: AtomicUsize,
     job: UnsafeCell<Job>,
     /// One slot per worker (capacity - 1 of them).
     slots: Vec<Slot>,
@@ -156,6 +160,7 @@ impl Pool {
             remaining: AtomicUsize::new(0),
             shutdown: AtomicBool::new(false),
             active: AtomicUsize::new(capacity),
+            decode_cap: AtomicUsize::new(capacity),
             job: UnsafeCell::new(Job::empty()),
             slots: (0..capacity - 1)
                 .map(|_| Slot {
@@ -209,6 +214,19 @@ impl Pool {
         self.shared.active.load(Ordering::Relaxed)
     }
 
+    /// Cap decode-phase (`par_gemv`) parallelism to `n.clamp(1, capacity)`
+    /// lanes. Prefill (`par_gemm`) is unaffected. Defaults to `capacity`
+    /// (no cap); `inferno-core` lowers it to the bandwidth-knee heuristic.
+    pub fn set_decode_threads(&self, n: usize) {
+        self.shared
+            .decode_cap
+            .store(n.clamp(1, self.capacity), Ordering::Relaxed);
+    }
+
+    pub fn decode_threads(&self) -> usize {
+        self.shared.decode_cap.load(Ordering::Relaxed)
+    }
+
     /// Run `kernel` over `0..rows`, split across up to `active_threads()`
     /// lanes. Returns after every shard completes. Output is bit-identical
     /// for every thread count: each row is computed entirely by one lane.
@@ -233,7 +251,9 @@ impl Pool {
         if rows == 0 {
             return;
         }
-        let active = self.active_threads();
+        // Decode is bandwidth-bound: cap below prefill's full-core count so
+        // sharding stops at its bandwidth knee (M4b.5). `par_gemm` is not capped.
+        let active = self.active_threads().min(self.decode_threads());
         let shards = shard_table(rows, active);
         if shards.len() == 1 {
             // SAFETY: caller contract covers the full range.
@@ -494,6 +514,34 @@ mod tests {
     fn zero_rows_is_a_noop() {
         let pool = Pool::new(4);
         assert!(dispatch(&pool, 0, 3).is_empty());
+    }
+
+    #[test]
+    fn decode_cap_defaults_to_capacity() {
+        let pool = Pool::new(8);
+        assert_eq!(pool.decode_threads(), 8);
+    }
+
+    #[test]
+    fn set_decode_threads_clamps_to_1_capacity() {
+        let pool = Pool::new(8);
+        pool.set_decode_threads(0);
+        assert_eq!(pool.decode_threads(), 1);
+        pool.set_decode_threads(999);
+        assert_eq!(pool.decode_threads(), 8);
+        pool.set_decode_threads(4);
+        assert_eq!(pool.decode_threads(), 4);
+    }
+
+    #[test]
+    fn decode_cap_bounds_shard_count_but_not_result() {
+        // Cap below active must still produce the exact serial expectation:
+        // capping only regroups rows into fewer shards.
+        let pool = Pool::new(8);
+        pool.set_decode_threads(2);
+        for rows in [1, 7, 8, 9, 64, 1000, 1024] {
+            assert_eq!(dispatch(&pool, rows, 3), expected(rows, 3), "rows={rows}");
+        }
     }
 
     #[test]
