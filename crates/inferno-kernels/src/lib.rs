@@ -17,13 +17,18 @@
 compile_error!("inferno-kernels is x86-64-only until the v2 NEON milestone");
 
 pub mod act;
+mod attention;
 mod buf;
 mod error;
+mod expf;
 pub mod f32k;
 pub mod q4_k;
 pub mod q8_0;
 pub mod registry;
 
+#[cfg(target_arch = "x86_64")]
+pub use attention::inferno_attention_f32_avx2;
+pub use attention::inferno_attention_f32_scalar;
 pub use buf::AlignedBuf;
 pub use error::{KernelError, Result};
 pub use f32k::{
@@ -38,7 +43,9 @@ pub use q8_0::{
     inferno_gemm_q8_0_rs8_avx2, inferno_gemm_q8_0_rs8_scalar, inferno_gemv_q8_0_rs8_avx2,
     inferno_gemv_q8_0_rs8_scalar,
 };
-pub use registry::{KernelSet, kernels_for, reference_kernels};
+pub use registry::{
+    AttnFn, KernelSet, attention_kernel, attention_reference, kernels_for, reference_kernels,
+};
 
 /// Rows per packed strip: every rs8 layout interleaves 8 rows.
 pub const STRIP: usize = 8;

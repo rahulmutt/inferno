@@ -4,7 +4,7 @@
 
 use inferno_formats::{DType, quant};
 use inferno_graph::Tensor;
-use inferno_graph::tolerance::gemv_rel_tol;
+use inferno_graph::tolerance::{attn_rel_tol, gemv_rel_tol};
 use inferno_kernels::{KernelIsa, act, f32k, q8_0};
 use proptest::prelude::*;
 
@@ -973,4 +973,216 @@ fn observed_error_q4_k() {
         "q4_k observed OVERALL max rel error: {overall_max:e} over {total_cases} swept cases (+500 fixed-shape) (tol {:e})",
         gemv_rel_tol(&DType::Q4_K)
     );
+}
+
+// ---------- Attention ----------
+
+/// Reference: the interpreter attention over a single query row at `pos`,
+/// with the KV cache pre-populated for positions 0..pos and this token's
+/// k/v appended. Returns the [n_heads*head_dim] output row.
+#[allow(clippy::too_many_arguments)]
+fn attn_oracle(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    kcache: &mut [f32],
+    vcache: &mut [f32],
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    // Append this token's k/v at position `pos`.
+    kcache[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(k);
+    vcache[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(v);
+    let qt = inferno_graph::Tensor {
+        shape: vec![1, n_heads * head_dim],
+        data: q.to_vec(),
+    };
+    inferno_graph::ops::attention(
+        &qt,
+        kcache,
+        vcache,
+        pos + 1,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        pos,
+    )
+    .data
+}
+
+/// Drive the scalar attention kernel for one token; returns [n_heads*head_dim].
+/// Appends this token's k/v into `kv` at `pos` first (the caller's job — the
+/// kernel is read-only), matching what codegen does before the call.
+#[allow(clippy::too_many_arguments)]
+fn attn_kernel_scalar(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    kv: &mut [f32],
+    seq_len: usize,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    // Append k/v at pos: K region [0..seq*kv_dim), V region after it.
+    kv[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(k);
+    let vreg = seq_len * kv_dim;
+    kv[vreg + pos * kv_dim..vreg + (pos + 1) * kv_dim].copy_from_slice(v);
+    let mut out = vec![f32::NAN; n_heads * head_dim];
+    let mut scores = vec![0f32; seq_len];
+    // Single-layer cache: kv_base=0, v_off=seq_len*kv_dim.
+    // SAFETY: buffers sized to the documented contract; pos < seq_len.
+    unsafe {
+        inferno_kernels::inferno_attention_f32_scalar(
+            out.as_mut_ptr(),
+            q.as_ptr(),
+            kv.as_mut_ptr(),
+            scores.as_mut_ptr(),
+            0,
+            seq_len * kv_dim,
+            pos,
+            kv_dim,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+        );
+    }
+    out
+}
+
+/// Drive the AVX2 attention kernel for one token; returns [n_heads*head_dim].
+/// Appends this token's k/v into `kv` at `pos` first (the caller's job — the
+/// kernel is read-only), matching what codegen does before the call.
+#[allow(clippy::too_many_arguments)]
+fn attn_kernel_avx2(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    kv: &mut [f32],
+    seq_len: usize,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    // Append k/v at pos (caller's job; kernel is read-only) — same as scalar.
+    kv[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(k);
+    let vreg = seq_len * kv_dim;
+    kv[vreg + pos * kv_dim..vreg + (pos + 1) * kv_dim].copy_from_slice(v);
+    let mut out = vec![f32::NAN; n_heads * head_dim];
+    let mut scores = vec![0f32; seq_len];
+    // SAFETY: same contract as the scalar driver; avx2 checked by caller.
+    unsafe {
+        inferno_kernels::inferno_attention_f32_avx2(
+            out.as_mut_ptr(),
+            q.as_ptr(),
+            kv.as_mut_ptr(),
+            scores.as_mut_ptr(),
+            0,
+            seq_len * kv_dim,
+            pos,
+            kv_dim,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+        );
+    }
+    out
+}
+
+/// Throwaway diagnostic (run manually): print the max relative error of the
+/// attention kernel vs the std-exp interpreter across the shape distribution,
+/// so `attn_rel_tol` is armed from data, not guessed. Run:
+///   cargo test -p inferno-kernels --test rig observed_error_attention -- --ignored --nocapture
+#[test]
+#[ignore]
+fn observed_error_attention() {
+    let mut worst = 0f32;
+    for seed in 0..20_000u64 {
+        for &hd in &[8usize, 16, 64] {
+            let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+            let kv_dim = n_kv_heads * head_dim;
+            let seq_len = 16usize;
+            let pos = (seed as usize) % 12;
+            let mut kv = pseudo(seed, 2 * seq_len * kv_dim);
+            let q = pseudo(seed ^ 1, n_heads * head_dim);
+            let k = pseudo(seed ^ 2, kv_dim);
+            let v = pseudo(seed ^ 3, kv_dim);
+            let mut kc = kv[..seq_len * kv_dim].to_vec();
+            let mut vc = kv[seq_len * kv_dim..].to_vec();
+            let want = attn_oracle(
+                &q, &k, &v, &mut kc, &mut vc, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            );
+            let got = attn_kernel_scalar(
+                &q, &k, &v, &mut kv, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            );
+            let scale = want.iter().fold(1f32, |m, x| m.max(x.abs())).max(1.0);
+            for (g, w) in got.iter().zip(&want) {
+                worst = worst.max((g - w).abs() / scale);
+            }
+        }
+    }
+    println!("observed_error_attention: max rel {worst:e}");
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+    #[test]
+    fn attention_scalar_matches_interpreter(
+        seed in any::<u64>(), pos in 0usize..12, hd in prop::sample::select(vec![8usize, 16, 64]),
+    ) {
+        let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+        let kv_dim = n_kv_heads * head_dim;
+        let seq_len = 16usize;
+        // Random pre-populated cache for positions < pos, plus this token's k/v.
+        let mut kv = pseudo(seed, 2 * seq_len * kv_dim); // scalar-kernel KV (K then V regions)
+        let q = pseudo(seed ^ 1, n_heads * head_dim);
+        let k = pseudo(seed ^ 2, kv_dim);
+        let v = pseudo(seed ^ 3, kv_dim);
+        // Oracle uses separate k/v caches; seed them from the same bytes as
+        // the kernel's single kv buffer (K region = kv[..seq*kv_dim], V region after).
+        let mut kc = kv[..seq_len * kv_dim].to_vec();
+        let mut vc = kv[seq_len * kv_dim..].to_vec();
+        let want = attn_oracle(&q, &k, &v, &mut kc, &mut vc, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        let got = attn_kernel_scalar(&q, &k, &v, &mut kv, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        // Poly exp vs std exp: bounded, not bitwise. Tolerance derived from the
+        // observed_error_attention sweep (see tolerance.rs::attn_rel_tol).
+        let scale = want.iter().fold(1f32, |m, x| m.max(x.abs()));
+        let tol = attn_rel_tol() * scale.max(1.0);
+        for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+            prop_assert!((g - w).abs() <= tol, "elem {i}: got {g} want {w} (tol {tol})");
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+    #[test]
+    fn attention_isa_variants_bitwise_equal(
+        seed in any::<u64>(), pos in 0usize..12, hd in prop::sample::select(vec![8usize, 16, 64]),
+    ) {
+        if !std::is_x86_feature_detected!("avx2") { return Ok(()); }
+        let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+        let kv_dim = n_kv_heads * head_dim;
+        let seq_len = 16usize;
+        let base_kv = pseudo(seed, 2 * seq_len * kv_dim);
+        let q = pseudo(seed ^ 1, n_heads * head_dim);
+        let k = pseudo(seed ^ 2, kv_dim);
+        let v = pseudo(seed ^ 3, kv_dim);
+        let mut kv_s = base_kv.clone();
+        let mut kv_a = base_kv;
+        let a = attn_kernel_scalar(&q, &k, &v, &mut kv_s, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        let b = attn_kernel_avx2(&q, &k, &v, &mut kv_a, seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim);
+        for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+            prop_assert_eq!(x.to_bits(), y.to_bits(), "elem {}: scalar {} avx2 {}", i, x, y);
+        }
+        // KV appends must also be bit-identical.
+        prop_assert!(kv_s.iter().zip(&kv_a).all(|(x, y)| x.to_bits() == y.to_bits()));
+    }
 }

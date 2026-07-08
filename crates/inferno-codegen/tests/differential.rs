@@ -71,6 +71,8 @@ fn retain_kernel_symbols() {
     p(inferno_kernels::inferno_gemm_q8_0_rs8_avx2 as *const ());
     p(inferno_kernels::inferno_gemm_q4_k_rs8_scalar as *const ());
     p(inferno_kernels::inferno_gemm_q4_k_rs8_avx2 as *const ());
+    p(inferno_kernels::inferno_attention_f32_scalar as *const ());
+    p(inferno_kernels::inferno_attention_f32_avx2 as *const ());
     p(inferno_pool::inferno_par_gemv as *const ());
     p(inferno_pool::inferno_par_gemm as *const ());
 }

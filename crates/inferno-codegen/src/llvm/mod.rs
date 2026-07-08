@@ -98,6 +98,33 @@ impl<'c> LlvmModule<'c> {
             }
         }
 
+        // void inferno_attention_f32_<isa>(ptr out, ptr q, ptr kv, ptr scores,
+        //   i64 kv_base, i64 v_off, i64 pos, i64 kv_dim,
+        //   i64 n_heads, i64 n_kv_heads, i64 head_dim)
+        let attn_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
+        for isa in ["scalar", "avx2"] {
+            self.module.add_function(
+                &format!("inferno_attention_f32_{isa}"),
+                attn_ty,
+                Some(Linkage::External),
+            );
+        }
+
         // void inferno_par_gemv(ptr kernel, ptr y, ptr xq, ptr w, i64 k, i64 rows)
         // — the M4b.1 host dispatcher; the kernel chosen by `gemv_symbol` is
         // passed as a function pointer, so the per-(dtype, isa) selection
@@ -308,5 +335,7 @@ mod tests {
         assert!(ir.contains("inferno_gemm_"));
         assert!(ir.contains("inferno_par_gemv"));
         assert!(ir.contains("inferno_par_gemm"));
+        assert!(ir.contains("inferno_attention_f32_scalar"));
+        assert!(ir.contains("inferno_attention_f32_avx2"));
     }
 }
