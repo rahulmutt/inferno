@@ -54,6 +54,19 @@ pub fn set_global_active_threads(n: usize) -> bool {
     }
 }
 
+/// Cap the global pool's decode-phase (`inferno_par_gemv`) parallelism
+/// (clamped to `1..=capacity`). Prefill (`inferno_par_gemm`) is unaffected.
+/// Returns `false` (and does nothing) if [`init_global`] has not run.
+pub fn set_global_decode_threads(n: usize) -> bool {
+    match GLOBAL.get() {
+        Some(p) => {
+            p.set_decode_threads(n);
+            true
+        }
+        None => false,
+    }
+}
+
 /// The host symbol M4b.1 generated code calls for every GEMV (resolved at
 /// `dlopen` time via `inferno-core`'s symbol retention, like the kernels).
 /// Splits `0..rows` across the global pool; with no initialized pool it
