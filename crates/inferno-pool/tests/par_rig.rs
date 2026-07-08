@@ -115,6 +115,26 @@ fn q4_k_thread_count_is_bit_invisible() {
     );
 }
 
+/// M4b.5: decode_cap must be bit-invisible. Fix a 12-lane pool, sweep the
+/// decode cap 1..=12, and require every capped dispatch to match one direct
+/// serial kernel call exactly — capping only regroups rows into shards.
+#[test]
+fn q8_0_decode_cap_is_bit_invisible() {
+    let dtype = DType::Q8_0;
+    let kernel = inferno_kernels::inferno_gemv_q8_0_rs8_scalar;
+    let (rows, k) = (1003usize, 64usize);
+    let (w, xq) = prep(&dtype, rows, k, 0xfeed_beef);
+    let want = serial(kernel, &w, &xq, rows, k);
+    let pool = Pool::new(12);
+    for cap in 1..=12usize {
+        pool.set_decode_threads(cap);
+        let got = pooled(&pool, kernel, &w, &xq, rows, k);
+        for (i, (g, s)) in got.iter().zip(&want).enumerate() {
+            assert_eq!(g.to_bits(), s.to_bits(), "cap={cap} row {i}: {g} != {s}");
+        }
+    }
+}
+
 #[test]
 fn par_gemm_bit_identical_across_threads() {
     use inferno_kernels::{KernelIsa, act, q8_0};
