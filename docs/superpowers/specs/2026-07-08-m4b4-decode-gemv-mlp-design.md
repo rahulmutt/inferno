@@ -328,3 +328,68 @@ Nothing here overrides Task 1's compute-bound classification or
 authorizes Task 3 (interleave) — Task 3 stays deferred pending a quiet
 re-run of both the Task 1 ceiling diagnostic and this task's before/after
 comparison.
+
+### 2026-07-08 — Task 4: same prefetch mirrored into Q4_K AVX2 GEMV
+
+**Implementation:** `PF_DIST = 4` (module const, `q4_k.rs:15-20`) and a
+`_mm_prefetch::<_MM_HINT_T0>` of weight group `strip * nsb + sb +
+PF_DIST` inserted immediately after the block loop's `let g = ...` in
+the full-strip fast path of `inferno_gemv_q4_k_rs8_avx2` only
+(`q4_k.rs:156`) — not the partial/tail per-row path, not the scalar
+kernel, not the GEMM paths. Uses `w.wrapping_add(...)` (not `.add()`):
+a review of Task 2's original `.add()` snippet found it to be
+pointer-provenance UB — it computes an out-of-bounds pointer past the
+buffer on the last strip's tail iterations, even though the prefetch
+never dereferences — so Task 2 was corrected to `wrapping_add` first
+and this task mirrors the corrected form directly. `wrapping_add` is a
+safe method and `_mm_prefetch` is a safe intrinsic, so the insertion
+needs no `unsafe {}` block.
+
+**Gate (load-bearing):** `cargo nextest run -p inferno-kernels -E
+'test(q4_k)'` — 8/8 green before and after the change, including
+`q4_k_isa_variants_bitwise_equal`, `q4_k_gemm_m1_equals_gemv`,
+`q4_k_gemv_matches_oracle`, `q4_k_range_partition_bitwise`. Full
+`inferno-kernels` suite (43 tests) also green after the change. `mise
+run lint` clean (rustfmt + clippy `-D warnings`, no new `#[allow]`).
+Bit-identity holds.
+
+**Directional bench — NOT a tuning decision, shared noisy devpod, no
+trustworthy signal:** `devenv shell -- cargo bench -p inferno-kernels
+--bench gemv gemv/Q4_K` (inferno-avx2 arm only, no ggml), run once
+pre-edit (`git stash` of this task's diff, base commit `3dd155b`) and
+once post-edit, back-to-back on the same contended box so criterion's
+own change-detection compares the two runs directly. Full output in
+`/tmp/bench_before_q4k.out` (intermediate, not the controlled pair) and
+`/tmp/bench_after_q4k.out` (the controlled post-edit run, whose
+`change:` lines compare against the immediately-preceding pre-edit run).
+
+| Shape | pre-edit (GiB/s, median) | post-edit PF_DIST=4 (GiB/s, median) | criterion verdict |
+|---|---|---|---|
+| 4096×4096 | 14.357 | 13.916 | no change detected |
+| 14336×4096 | 9.5754 | 7.4275 | regressed (−22.4% thrpt) |
+| 4096×14336 | 9.9486 | 7.4309 | regressed (−23.9% thrpt) |
+| 128256×4096 | 9.3938 | 7.6780 | regressed (−18.8% thrpt) |
+
+Unlike Q8_0's Task 2 result (uniform "regression" on every shape,
+including small cache-resident ones — read there as a box-contention
+artifact), here the smallest, cache-resident shape (4096×4096) shows
+*no* change while the three shapes large enough to spill past a single
+CCX's L3 slice all show a consistent ~19–24% throughput drop in the
+same direction. That split pattern is not obviously pure contention
+noise, and is also consistent with Task 1's compute-bound finding for
+this kernel family: with little memory-latency headroom to hide, the
+added `_mm_prefetch` may simply cost issue/decode slots in the hot loop
+without recovering anything. Both readings — contention vs. genuine
+hint overhead — are plausible and **not distinguished by this run**;
+this is still a shared, noisy 24-core devpod and no bar/keep-revert
+decision is made here. **Directional only — not a tuning decision, not
+a keep/revert verdict, not a bar assessment.** Per the controller's
+standing instruction (Task 2), `PF_DIST` stays at 4 and both the bar
+assessment and any interleave go/no-go stay **deferred to quiet
+hardware**, alongside Task 1's and Task 2's own deferred re-runs.
+
+**Status:** prefetch is committed as a reversible, bit-neutral hedge,
+structurally parallel to the Q8_0 kernel. Nothing here overrides Task
+1's compute-bound classification or authorizes Task 3's interleave for
+either kernel — both stay deferred pending a quiet re-run of the Task 1
+ceiling diagnostic and the Task 2/Task 4 before/after comparisons.
