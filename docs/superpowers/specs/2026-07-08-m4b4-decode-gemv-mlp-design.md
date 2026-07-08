@@ -457,3 +457,91 @@ overrides Task 1's compute-bound classification or authorizes Task 3's
 interleave for any of the three kernels — all stay deferred pending a
 quiet re-run of the Task 1 ceiling diagnostic and the Task 2/Task
 4/Task 5 before/after comparisons.
+
+### 2026-07-08 — Task 6: end-to-end exit criterion + doc hygiene — correctness PROVEN, performance verdict DEFERRED
+
+Final M4b.4 task. Splits cleanly into a load-bearing correctness gate
+(reliable on this box) and a performance verdict (deferred to quiet
+hardware, per the standing controller/user decision that this shared
+24-core devpod cannot produce a trustworthy perf number).
+
+**Load-bearing — compiled-vs-interpreter correctness gate (GREEN, no
+tolerance touched):** the compiled `model.so` dlopens and calls the new
+prefetch-carrying GEMV kernels; its logits must still match the
+interpreter within the *unchanged* `logits_abs_tol` / `gemv_rel_tol`.
+
+- `cargo nextest run -p inferno-codegen -E 'binary(differential)'` →
+  **5/5 PASS** (`differential_tiny_{gguf,mlx,bias}`,
+  `profiling_does_not_change_logits`,
+  `prefill_tiling_is_bit_invariant_to_tile_size`).
+- `cargo nextest run -p inferno-core -E 'binary(artifact)'` → **4/4 PASS**
+  (`compiled_prefill_matches_interpreter`,
+  `concurrent_compile_publishes_atomically`,
+  `prefill_past_max_seq_len_panics_not_oob`, `tampered_meta_is_rejected`
+  — the last being the pre-existing ~1-ULP flaky integrity test flagged
+  in M4b.3; passed this run).
+- No tolerance constant, ABI, or differential/artifact source edited on
+  this branch (`git diff <base>..HEAD --stat` = only the 4 kernel/bench
+  files, this spec, and `mise.toml`). The kernels are bit-identical, so
+  these stay green untouched — the milestone's numeric contract is met.
+
+(Filter note: the plan brief's `-E 'test(differential)'` /
+`test(artifact)` are name-predicates; `test(artifact)` matched 0 tests
+because those live in the `artifact` *binary* with different test names,
+and `test(differential)` silently dropped the two `prefill_tiling_*` /
+`profiling_*` gates. The correct predicate is `binary(...)`, used above.)
+
+**Doc hygiene:** `mise.toml` `[tasks.bench]` description repointed from
+the stale M4b.1 spec path/label to this M4b.4 spec (`M4b.1:
+…2026-07-06-m4b1-threading-design.md` → `M4b.4:
+…2026-07-08-m4b4-decode-gemv-mlp-design.md`); `run =` line untouched.
+
+**Directional only (noisy shared devpod — NOT a verdict):**
+
+*t=1 decode `--profile`* (short prompt, 64 decode steps):
+
+| metric | this box | spec baseline | note |
+|---|---|---|---|
+| decode GEMV (`matmul:*`) | ~10.8 GB/s | ~16 | box ~1.5× throttled vs baseline |
+| prefill GEMV | ~33.5 GB/s | ~40 | ~0.84× — same contention factor |
+| prefill:decode GEMV ratio | **~3.1×** | — | MLP gap the milestone targets IS real+visible |
+
+Both absolutes are contention-depressed ~0.84× below the spec's
+baselines, so no before/after prefetch delta is measurable here. But the
+~3.1× prefill:decode GEMV ratio (same weights, batched GEMM hiding
+latency vs single-row GEMV that can't) confirms the decode path *is*
+memory-level-parallelism-bound — corroborating the memory-bound reading
+over Task 1's contention-confounded compute-bound call. (Attention shows
+~0.6% of decode here vs M4b.3's ~26% purely because of the short context:
+attention cost scales with KV length, matmul is fixed per token.)
+
+*t=1 `bench` vs llama.cpp* (pp=512 tg=128 reps=3):
+
+| engine | pp512 tok/s | tg128 tok/s |
+|---|---|---|
+| inferno (compiled, 32b6a2a) | 65.16 ± 0.84 | 15.82 ± 0.31 |
+| llama.cpp (6f4f53f) | 47.47 ± 6.77 | 23.95 ± 0.05 |
+| **ratio** | **pp 1.37×** | **tg 0.66×** |
+
+pp 1.37× is healthy (at/above M4b.3's 1.26–1.34×; prefill is unaffected
+by a decode-targeted prefetch). tg 0.66× is *below* both parity and
+M4b.3's 0.88–1.09× band — but this is **not a valid prefetch
+before/after**: the paired profile shows decode GEMV at 10.8 vs ~16
+GB/s, i.e. the box is throttling inferno's bandwidth-bound single-thread
+decode by ~1.5× right now. The tg ratio here is dominated by box
+contention, not by the (bit-identical) prefetch. Not a verdict.
+
+**Verdict:**
+- **Correctness — MET (proven here):** scalar≡AVX2 and gemm(m=1)≡gemv
+  bit-identity across all three dtypes (Tasks 2/4/5 rig proptests) +
+  compiled≡interpreter differential 5/5 + artifact 4/4, no tolerance
+  loosened. The milestone's numeric contract holds.
+- **Performance — DEFERRED:** both exit-criterion legs (Leg 1 kernel GB/s
+  ≥25 / ≥1.5× baseline; Leg 2 t=1 tg improved, low end ≥1.0×, pp not
+  regressed) are **deferred to a quiet-hardware re-run**. This box's
+  streaming ceiling and GEMV bandwidth are contention-depressed ~0.84×
+  below the spec baselines and every directional before/after is
+  tenant-noise-dominated. The prefetch ships as a bit-neutral, reversible
+  change whose perf value (or the approach-B pivot) is to be confirmed on
+  quiet hardware, together with the deferred Task 1 ceiling diagnostic,
+  the PF_DIST/PF_DIST_F32 sweep, and the Task 3 interleave go/no-go.

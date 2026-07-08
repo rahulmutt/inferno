@@ -63,5 +63,5 @@ description = "Kernel µbenches vs pinned ggml (run inside devenv shell, on quie
 run = "cargo bench -p inferno-kernels --features ggml-compare"
 
 [tasks.bench]
-description = "inferno vs llama.cpp comparison (M4a protocol: run inside devenv shell, quiet hardware; record data points in the current milestone spec's Amendments (M4b.1: docs/superpowers/specs/2026-07-06-m4b1-threading-design.md)): mise run bench -- <model.gguf>"
+description = "inferno vs llama.cpp comparison (M4a protocol: run inside devenv shell, quiet hardware; record data points in the current milestone spec's Amendments (M4b.4: docs/superpowers/specs/2026-07-08-m4b4-decode-gemv-mlp-design.md)): mise run bench -- <model.gguf>"
 run = "cargo run --release -p inferno -- bench"
