@@ -393,3 +393,67 @@ structurally parallel to the Q8_0 kernel. Nothing here overrides Task
 1's compute-bound classification or authorizes Task 3's interleave for
 either kernel — both stay deferred pending a quiet re-run of the Task 1
 ceiling diagnostic and the Task 2/Task 4 before/after comparisons.
+
+### 2026-07-08 — Task 5: same prefetch mirrored into F32 AVX2 GEMV
+
+**Implementation:** `PF_DIST_F32 = 16` (module const, `f32k.rs`, added
+near the top module items) and a `_mm_prefetch::<_MM_HINT_T0>` of column
+vector `c + PF_DIST_F32` inserted immediately before the block loop's
+`let wv = ...` load in the full-strip fast path of
+`inferno_gemv_f32_rs8_avx2` only — not the `gemv_rows` head/tail helper,
+not the scalar kernel, not the GEMM path. The f32 rs8 layout stores one
+aligned 32-byte vector per column (rather than a multi-column group like
+q8_0/q4_k), so the reach-ahead here is in COLUMNS, not groups; 16 columns
+ahead is the plan default. Uses `base.wrapping_add(...)` (not `.add()`):
+per Task 2/4's corrected pattern, `.add()` on the strip's tail columns
+computes an out-of-bounds pointer past the buffer end (pointer-provenance
+UB) even though the prefetch never dereferences, so this task uses the
+already-corrected `wrapping_add` form directly. `wrapping_add` is a safe
+method and `_mm_prefetch` is a safe intrinsic, so the insertion needs no
+`unsafe {}` block.
+
+**Gate (load-bearing):** `cargo nextest run -p inferno-kernels -E
+'test(f32)'` — 9/9 green before and after the change, including
+`f32_isa_variants_bitwise_equal`, `f32_gemm_m1_equals_gemv`,
+`f32_gemv_matches_oracle`, `f32_range_partition_bitwise`. Full
+`inferno-kernels` suite (43 tests, 3 skipped) also green after the
+change. `mise run lint` (inside `devenv shell`) clean — rustfmt and
+clippy `-D warnings`, no new `#[allow]`. Bit-identity holds.
+
+**Directional bench — NOT a tuning decision, shared noisy devpod, no
+trustworthy signal:** `devenv shell -- cargo bench -p inferno-kernels
+--bench gemv gemv/F32` (all three arms — inferno-scalar, inferno-avx2,
+stream-read — F32's only mandated shape, 4096×4096), run once pre-edit
+(`git stash` of this task's diff) and once immediately post-edit on the
+same contended box, so criterion's own change-detection compares the two
+runs directly. Full output in `/tmp/bench_before_f32.out` /
+`/tmp/bench_after_f32.out`.
+
+| Arm | pre-edit (GiB/s, median) | post-edit PF_DIST_F32=16 (GiB/s, median) | criterion verdict |
+|---|---|---|---|
+| inferno-scalar | 1.7064 | 1.7084 | no change detected |
+| inferno-avx2 | 18.862 | 18.982 | no change detected |
+| stream-read | 17.535 | 17.448 | no change detected |
+
+Unlike Task 2's (Q8_0) and Task 4's (Q4_K) results — both of which
+showed a consistent throughput drop on the larger/DRAM-relevant shapes —
+this run's only mandated shape (4096×4096, cache-resident, same class
+that showed no clear signal either way in Tasks 2/4) shows criterion's
+own statistical test reporting "No change in performance detected" on
+all three arms, both directions. That is consistent with this shape
+being too small/cache-resident to distinguish a software-prefetch effect
+from box-contention noise at all, one way or the other — it is not
+evidence the prefetch helps, only that it does not visibly hurt at this
+shape on this box. **Directional only — not a tuning decision, not a
+keep/revert verdict, not a bar assessment.** Per the controller's
+standing instruction (Task 2), `PF_DIST_F32` stays at 16 and both the
+bar assessment and any interleave go/no-go stay **deferred to quiet
+hardware**, alongside Task 1's, Task 2's, and Task 4's own deferred
+re-runs.
+
+**Status:** prefetch is committed as a reversible, bit-neutral hedge,
+structurally parallel to the Q8_0 and Q4_K kernels. Nothing here
+overrides Task 1's compute-bound classification or authorizes Task 3's
+interleave for any of the three kernels — all stay deferred pending a
+quiet re-run of the Task 1 ceiling diagnostic and the Task 2/Task
+4/Task 5 before/after comparisons.
