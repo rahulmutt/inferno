@@ -158,7 +158,6 @@ pub unsafe extern "C" fn inferno_attention_f32_avx2(
         let vreg = kv_base + v_off;
         // Read-only: caller already appended this token's k/v at `pos`.
         let visible = pos + 1;
-        let scale_v = _mm256_set1_ps(scale);
         for h in 0..n_heads {
             let g = h / group;
             let qh = q.add(h * head_dim);
@@ -212,7 +211,6 @@ pub unsafe extern "C" fn inferno_attention_f32_avx2(
                 }
             }
         }
-        let _ = (scale_v, scores);
     }
 }
 
