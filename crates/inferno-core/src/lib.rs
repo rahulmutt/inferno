@@ -35,6 +35,22 @@ pub struct Engine {
     opts: inferno_codegen::CompileOptions,
 }
 
+/// Resolve the decode-phase thread cap. An explicit `INFERNO_DECODE_THREADS`
+/// override wins when it parses to a positive integer (the pool re-clamps it
+/// to `[1, capacity]`); otherwise the bandwidth-knee heuristic
+/// `clamp(active/3, 2, active)` — written `.max(2).min(active)` so `active==1`
+/// yields `1` instead of panicking. `active` is the engine's resolved thread
+/// count (physical cores by default). Final default is deferred to the
+/// M4b.5 quiet-hardware sweep; this is the reversible starting hypothesis.
+fn decode_cap(active: usize, override_env: Option<&str>) -> usize {
+    if let Some(v) = override_env.and_then(|s| s.trim().parse::<usize>().ok()) {
+        if v >= 1 {
+            return v;
+        }
+    }
+    (active / 3).max(2).min(active)
+}
+
 impl Engine {
     /// Detect the host target and record `model`/`max_seq_len`. Does not
     /// compile anything yet — that happens lazily in
@@ -86,6 +102,11 @@ impl Engine {
         // count so bench's t=1 diagnostics can vary it per run.
         inferno_pool::init_global(self.threads)?;
         inferno_pool::set_global_active_threads(self.threads);
+        // M4b.5: decode is bandwidth-bound — cap its row-sharding below full
+        // cores so it stops at its knee; prefill keeps every core. Env
+        // `INFERNO_DECODE_THREADS` overrides the heuristic.
+        let env = std::env::var("INFERNO_DECODE_THREADS").ok();
+        inferno_pool::set_global_decode_threads(decode_cap(self.threads, env.as_deref()));
         let artifact =
             Artifact::load_or_compile(&self.model, &self.target, self.max_seq_len, &self.opts)?;
         Ok(CompiledBackend::new(artifact))
@@ -148,5 +169,32 @@ impl Engine {
             }
         }
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod decode_cap_tests {
+    use super::decode_cap;
+
+    #[test]
+    fn heuristic_is_third_clamped_to_2_and_active() {
+        assert_eq!(decode_cap(12, None), 4); // 12/3 = 4
+        assert_eq!(decode_cap(32, None), 10); // 32/3 = 10
+        assert_eq!(decode_cap(2, None), 2); // 2/3=0 -> max(2) -> min(2) = 2
+        assert_eq!(decode_cap(1, None), 1); // 1/3=0 -> max(2) -> min(1) = 1
+    }
+
+    #[test]
+    fn env_override_wins_when_a_positive_integer() {
+        assert_eq!(decode_cap(12, Some("1")), 1);
+        assert_eq!(decode_cap(12, Some("8")), 8);
+        assert_eq!(decode_cap(12, Some(" 6 ")), 6); // trimmed
+    }
+
+    #[test]
+    fn env_override_falls_back_to_heuristic_when_invalid() {
+        assert_eq!(decode_cap(12, Some("garbage")), 4);
+        assert_eq!(decode_cap(12, Some("0")), 4); // 0 rejected
+        assert_eq!(decode_cap(12, Some("")), 4);
     }
 }
