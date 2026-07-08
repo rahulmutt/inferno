@@ -258,3 +258,73 @@ reduction)**, which needs its own plan before implementation resumes.
 Task 1 is measurement-only per its brief and ships no kernel change; no
 further M4b.4 prefetch tasks should be started against this plan without
 a new design amendment reflecting the pivot.
+
+### 2026-07-08 — Task 2: prefetch implemented despite Task 1's STOP, pending quiet-HW reverification
+
+**Scoped decision, recorded per the "no silent scope change" rule.** Task
+1 (above) classified the kernel compute-bound on this shared devpod and
+called STOP on Tasks 2+. The controller judged that classification
+contention-confounded rather than settled — this box is a shared 24-core
+devpod, not the quiet bare metal the plan assumed, and Task 1's own
+ceiling numbers are themselves absolute GB/s on the same noisy box. The
+controller approved proceeding with Task 2 anyway **because it is
+bit-neutral and independently gated by the existing bit-identity
+proptests** — implementing it costs nothing numerically and the
+keep/revert and bar/Task-3 decisions are explicitly **deferred to a
+quiet-hardware remeasurement**, not made here. This amendment does not
+retract Task 1's compute-bound finding; it records that the finding is
+being treated as unconfirmed pending quiet HW, and that the prefetch
+landed as a reversible, bit-neutral hedge in the meantime.
+
+**Implementation:** `PF_DIST = 4` (module const, `q8_0.rs:14-19`) and a
+`_mm_prefetch::<_MM_HINT_T0>` of weight group `b + PF_DIST` inserted
+immediately after the block loop's `let g = ...` in the full-strip fast
+path of `inferno_gemv_q8_0_rs8_avx2` only (`q8_0.rs:154`) — not the
+partial head/tail path, not the scalar kernel, not the GEMM paths. Per
+the brief exactly; `PF_DIST` is kept at the plan default of 4 regardless
+of any directional sweep result (see below) — the controller instructed
+that no noisy-box sweep may override the default.
+
+**Gate (load-bearing):** `cargo nextest run -p inferno-kernels -E
+'test(q8_0)'` — 10/10 green before and after the change, including
+`q8_0_isa_variants_bitwise_equal`, `q8_0_gemm_m1_equals_gemv`,
+`q8_0_gemv_matches_oracle`, `q8_0_range_partition_bitwise`. Full
+`inferno-kernels` suite (43 tests) also green after the change. `mise
+run lint` clean (rustfmt + clippy `-D warnings`, no new `#[allow]`).
+Bit-identity holds.
+
+**Directional bench — NOT a tuning decision, shared noisy devpod, no
+trustworthy signal:** `devenv shell -- cargo bench -p inferno-kernels
+--bench gemv gemv/Q8_0` (inferno-avx2 arm only, no ggml), run once before
+the change (base commit `dfccaa9`) and once after (`PF_DIST = 4`),
+back-to-back on the same contended box. Full output in
+`/tmp/bench_before.out` / `/tmp/bench_after_pf4.out`.
+
+| Shape | before (GiB/s, median) | after PF_DIST=4 (GiB/s, median) |
+|---|---|---|
+| 896×896 | 42.369 | 40.433 |
+| 4864×896 | 42.508 | 39.712 |
+| 896×4864 | 41.996 | 39.971 |
+| **151936×896** | **14.726** | **10.065** |
+| 4096×4096 (non-Qwen) | 16.616 | 11.253 |
+| 14336×4096 (non-Qwen) | 14.967 | 8.6435 |
+
+Every shape reads as a regression, including the cache-resident small
+shapes where the prefetch instruction can only add overhead — that
+pattern (uniform "regression" even on shapes too small to be
+DRAM-bound) is itself a symptom of box contention rather than a real
+software-prefetch cost, consistent with Task 1's own observation that
+absolute GB/s wobbles heavily here. **No PF_DIST sweep ({2,4,8}) was
+run**: the single before/after pair already shows swings large enough
+(down to ~68% of baseline on the largest shape) that a 3-point sweep on
+this box would not add a trustworthy signal, only more noisy samples.
+**Directional only — not a tuning decision, not a keep/revert verdict,
+not a bar assessment.** Per the controller's instruction, `PF_DIST`
+stays at 4 and both the Leg-1 bar assessment (≥25 GB/s / ≥1.5× baseline)
+and the Task 3 (interleave) go/no-go are **deferred to quiet hardware**.
+
+**Status:** prefetch is committed as a reversible, bit-neutral hedge.
+Nothing here overrides Task 1's compute-bound classification or
+authorizes Task 3 (interleave) — Task 3 stays deferred pending a quiet
+re-run of both the Task 1 ceiling diagnostic and this task's before/after
+comparison.
