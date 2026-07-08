@@ -184,3 +184,77 @@ never edit a recorded data point.
 
 *(Recorded protocol data points and scoped amendments land here; never
 edit a recorded data point.)*
+
+### 2026-07-08 — Task 1 diagnostic: streaming ceiling + baseline classification — **COMPUTE-BOUND, prefetch path STOPPED**
+
+- **Commit:** `b12264d` (`bench(kernels): weight-streaming ceiling arm for
+  decode GEMV diagnostic`), branch `m4b4-decode-gemv-mlp`.
+- **Command:** `devenv shell -- cargo bench -p inferno-kernels --features
+  ggml-compare`, full output in `/tmp/bench.out`. `rustc 1.96.1`, `INFERNO_GGML_CPU_LIB`
+  unchanged from M4b.3's pin.
+- **Environment caveat (read before the numbers):** measured on a shared
+  24-core devpod (AMD Ryzen 9 3900, 12C/24T, 64 MiB L3 split across **4
+  CCX instances of 16 MiB each**), *not* the quiet bare metal the plan
+  text assumed. Per AGENTS.md/M4a protocol, absolute GB/s is noisy —
+  **the same-box baseline-vs-ceiling ratio is the trustworthy signal**,
+  not the raw numbers. Criterion reports GiB/s; converted to decimal
+  GB/s below (×1.073741824) to match this spec's existing GB/s
+  convention (§ profile table).
+
+#### Per-shape baseline (inferno-avx2) vs ceiling (stream-read)
+
+| Shape | Packed size | avx2 GB/s | stream GB/s | ratio | cache fit (16 MiB/CCX L3) |
+|---|---|---|---|---|---|
+| 896×896 | 0.81 MiB | 45.60 | 74.87 | 0.609 | resident |
+| 4864×896 | 4.42 MiB | 45.42 | 71.57 | 0.635 | resident |
+| 896×4864 | 4.42 MiB | 45.61 | 69.91 | 0.652 | resident |
+| **151936×896** | **137.94 MiB** | **13.08** | **14.52** | **0.901** | **exceeds L3** |
+
+(GiB/s as printed by criterion, before conversion: avx2/stream =
+42.468/69.731, 42.302/66.641, 42.483/65.113, 12.181/13.519
+respectively — see `/tmp/bench.out` lines 172–318.)
+
+Two more Q8_0 shapes present in the same run (not in the mandated Qwen
+set, but sharing the same weight image/kernel and useful as
+corroboration) show the identical pattern:
+
+| Shape | Packed size | avx2 GB/s | stream GB/s | ratio |
+|---|---|---|---|---|
+| 4096×4096 | 17.00 MiB | 14.10 | 15.72 | 0.897 |
+| 14336×4096 | 59.50 MiB | 13.19 | 14.66 | 0.900 |
+
+#### Reading the mixed signal
+
+Three of the four mandated Qwen shapes (896×896, 4864×896, 896×4864)
+pack to ≤4.42 MiB — well inside a single 16 MiB CCX-local L3 slice — so
+criterion's repeated-iteration harness keeps **both** arms cache-resident
+for the whole sample window. Their ratio (0.61–0.65) is a cache-bandwidth
+ratio, not a DRAM-latency ratio, and is not by itself dispositive under
+either threshold (it sits strictly between 0.6 and 0.85). Only
+**151936×896** (the lm_head/vocab projection, 137.94 MiB) exceeds even
+the *full* 64 MiB L3 and is genuinely DRAM-bound for this benchmark. Its
+ratio, 0.901, is corroborated independently by the two large non-Qwen
+Q8_0 shapes in the same run (0.897, 0.900) — three DRAM-bound
+measurements, in the same run, clustering within 0.4 percentage points
+of each other. That tightness, on an otherwise-noisy shared devpod, is
+itself evidence the ratio is real rather than a fluke.
+
+#### Classification
+
+Applying the plan's threshold (baseline ≳0.85× ceiling → compute-bound)
+to the only trustworthy (non-cache-resident) data point among the
+mandated shapes: **compute-bound** — the AVX2 GEMV kernel already
+achieves ~90% of this machine's pure sequential-read bandwidth on the
+one shape large enough to force real DRAM traffic. There is very little
+headroom left for prefetch/MLP-interleave to recover; the residual gap
+between baseline and ceiling is dominated by the per-block `hsum8_i32` /
+sign-trick reduction compute, not by unhidden memory latency.
+
+**Decision (per the spec's Risks section):** STOP the prefetch/interleave
+path (Tasks 2+ of this plan as written). This is the compute-bound branch
+anticipated in `## Risks`; the milestone pivots to the gated follow-up
+**approach B (op-reduction of the per-block `hsum8_i32` cross-lane
+reduction)**, which needs its own plan before implementation resumes.
+Task 1 is measurement-only per its brief and ships no kernel change; no
+further M4b.4 prefetch tasks should be started against this plan without
+a new design amendment reflecting the pivot.
