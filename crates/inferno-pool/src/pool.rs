@@ -227,9 +227,11 @@ impl Pool {
         self.shared.decode_cap.load(Ordering::Relaxed)
     }
 
-    /// Run `kernel` over `0..rows`, split across up to `active_threads()`
-    /// lanes. Returns after every shard completes. Output is bit-identical
-    /// for every thread count: each row is computed entirely by one lane.
+    /// Run `kernel` over `0..rows`, split across up to
+    /// `min(active_threads(), decode_threads())` lanes (decode is capped at
+    /// its bandwidth knee; `par_gemm`/prefill is not). Returns after every
+    /// shard completes. Output is bit-identical for every thread/cap count:
+    /// each row is computed entirely by one lane.
     ///
     /// # Safety
     /// `kernel`'s documented contract must hold for `(y, xq, w, k)` over

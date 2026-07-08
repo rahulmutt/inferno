@@ -1,6 +1,10 @@
 //! Global init semantics + the extern entry over an initialized pool.
-//! ONE #[test] fn: these steps share the process-global OnceLock, so their
-//! order must be fixed regardless of test-runner parallelism.
+//! `init_dispatch_and_mismatch_semantics` chains steps that share the
+//! process-global OnceLock, so their order within that fn must stay fixed
+//! regardless of test-runner parallelism. Other tests here init the global
+//! pool with the SAME count (4) so they compose under `cargo nextest`'s
+//! process-per-test isolation (and remain idempotent under plain
+//! `cargo test`).
 
 use inferno_pool::{GemvFn, PoolError};
 

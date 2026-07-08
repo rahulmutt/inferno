@@ -94,8 +94,10 @@ impl Engine {
     /// engine's target/`max_seq_len`, and build a ready-to-use
     /// [`CompiledBackend`] over it. Also sizes the process-global
     /// `inferno-pool` thread pool to `self.threads` (initializing it on
-    /// first use, loud error on a mismatched re-init) and caps active
-    /// parallelism to that count before the backend runs any GEMVs.
+    /// first use, loud error on a mismatched re-init), caps active
+    /// parallelism to that count, and caps decode-phase (`par_gemv`)
+    /// parallelism to the `INFERNO_DECODE_THREADS` override or the
+    /// bandwidth-knee heuristic, before the backend runs any GEMVs.
     pub fn compiled_backend(&self) -> Result<CompiledBackend> {
         // Size the process-global pool once (loud error on a mismatched
         // re-init — spec), then cap active parallelism to this engine's
