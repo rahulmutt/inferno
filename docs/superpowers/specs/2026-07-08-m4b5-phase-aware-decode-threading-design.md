@@ -215,3 +215,93 @@ directional-only — not a verdict — as in M4b.1–M4b.4.
 
 *(Recorded protocol data points and scoped amendments land here; never
 edit a recorded data point.)*
+
+### 2026-07-08 — Task 6: exit criterion — correctness PROVEN, performance verdict DEFERRED (directional knee reproduces)
+
+Final M4b.5 task. Splits into a load-bearing correctness gate (reliable on
+this box) and a performance verdict (deferred to quiet hardware per the
+standing controller/user decision that this shared, CPU-quota'd 24-core
+devpod cannot produce a trustworthy absolute perf number). The directional
+sweep this time is unusually clean because varying `INFERNO_DECODE_THREADS`
+at a fixed `--threads` is a *controlled same-box manipulation* (only the
+decode cap moves), which the standing discipline treats as the trustworthy
+signal — but the final default constant and the formal Leg 2 verdict still
+defer to quiet bare metal.
+
+**Leg 1 — Correctness (LOAD-BEARING, PROVEN here, no tolerance touched):**
+the cap only regroups output rows into shards; `shard_table` keeps each row
+on one lane, so decode output is bit-identical for every cap.
+
+- `cargo nextest run -p inferno-codegen -E 'binary(differential)'` →
+  **5/5 PASS** (`differential_tiny_{gguf,mlx,bias}`,
+  `profiling_does_not_change_logits`,
+  `prefill_tiling_is_bit_invariant_to_tile_size`).
+- `cargo nextest run -p inferno-core -E 'binary(artifact)'` → **4/4 PASS**
+  (`compiled_prefill_matches_interpreter`,
+  `concurrent_compile_publishes_atomically`,
+  `prefill_past_max_seq_len_panics_not_oob`, `tampered_meta_is_rejected`
+  — the last being the pre-existing ~1-ULP flaky integrity test carried
+  since M4b.3; passed this run).
+- `cargo nextest run -p inferno-pool -E 'test(decode_cap) + test(bit_invisible) + test(bit_invariant)'`
+  → **6/6 PASS**, including the new `q8_0_decode_cap_is_bit_invisible`
+  (sweeps `decode_cap` 1..=12 on a 12-lane pool, asserts every capped
+  dispatch is `.to_bits()`-identical to one serial kernel call) plus the
+  three existing dtype `*_thread_count_is_bit_invisible` locks.
+- No tolerance constant, ABI, or `HOST_ABI_VERSION` touched on the branch:
+  `git diff main..HEAD -- crates/inferno-graph/src/tolerance.rs crates/inferno-codegen/src/lib.rs`
+  = empty. Whole-workspace `mise run test` = 265/265 (3 skipped) at Task 4.
+  The milestone's numeric contract holds.
+
+**Leg 2 — Performance (DIRECTIONAL only — NOT a verdict):** decode-cap
+sweep on the pinned qwen2.5-0.5b Q8_0, short prompt, 64 decode steps,
+`--threads 12` fixed, `--profile`, single run per cap (no repetition; noisy
+shared devpod):
+
+| `INFERNO_DECODE_THREADS` | decode wall (s) | decode GEMV `lm_head` GB/s | decode scale vs cap=1 | prefill wall (s) |
+|---|---|---|---|---|
+| 1 | 3.542 | 10.3 | 1.00× | 0.035 |
+| 2 | 2.052 | 18.3 | 1.73× | 0.033 |
+| **4** | **1.556** | **25.3** | **2.28× (knee)** | 0.032 |
+| 8 | 1.822 | 23.2 | 1.94× | 0.030 |
+| 12 | 2.723 | 16.5 | 1.30× (regresses) | 0.038 |
+
+Directional reading (same-box relative, single-shot — no error bars):
+
+- **The predicted knee reproduces at cap = 4.** Decode is fastest at cap=4
+  (1.556 s, ~25.3 GB/s single-row GEMV), matching the spec's `active/3`
+  hypothesis for a 12-core box exactly. The shipped heuristic
+  `(12/3).max(2).min(12) = 4` lands on the measured optimum.
+- **The high-thread regression the milestone removes is visible.** cap=12
+  (the pre-M4b.5 default = physical cores) is 2.723 s / 16.5 GB/s — **1.75×
+  slower decode than cap=4** — i.e. the old default ran decode at its worst
+  point on this box, as M4b.1 predicted. cap=8 already regresses off the
+  cap=4 peak (1.822 s), so the knee is genuinely near 4, not a plateau.
+- **Prefill is unaffected by the decode knob (structural, reliable here).**
+  Prefill wall stays flat (~0.030–0.038 s, noise) across every cap value —
+  `par_gemm` is uncapped and always uses full `--threads 12`, exactly as
+  designed. Varying a decode-only cap leaves prefill flat: this is a
+  same-box structural observation, not a throttled absolute, so it holds
+  independent of box contention.
+- **t=1 decode is unchanged by construction.** cap=1 forces single-thread
+  decode (`min(active, 1) = 1`); the bench t=1 diagnostic composes as
+  before (`min(1, decode_cap) = 1`).
+
+**Why still DEFERRED despite the clean knee:** absolutes are
+contention-depressed (peak ~25 GB/s here vs the box's known throttling; a
+quiet Ryzen would read higher) and this is a single unrepeated run per cap.
+The *shape* (knee at ~⅓ cores, high-thread regression, prefill-flat) is
+trustworthy same-box; the *exact optimal constant* and the formal Leg 2
+sign-off (meets-or-beats best fixed count with error bars, t=1 explicitly
+held, prefill throughput unchanged under load) are finalized on a quiet,
+unquota'd bare-metal re-run — the reversible `active/3` default and the
+`INFERNO_DECODE_THREADS` escape hatch ship meanwhile.
+
+**Verdict:**
+- **Correctness — MET (proven here):** `decode_cap` bit-invisible (new
+  `par_gemv` cap sweep 1..=12) + compiled≡interpreter differential 5/5 +
+  artifact 4/4, no tolerance loosened.
+- **Performance — DEFERRED (directional knee reproduces at 4):** the shipped
+  `active/3` default is a reversible hypothesis that lands on this box's
+  measured optimum and removes the proven high-thread regression; the final
+  constant/formula and formal Leg 2 verdict are deferred to a quiet-hardware
+  re-run, together with the `memory_bw_class`-keyed refinement if built.
