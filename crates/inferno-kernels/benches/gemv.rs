@@ -103,6 +103,31 @@ fn bench_dtype(c: &mut Criterion, dtype: DType, shapes: &[(usize, usize)]) {
                 b.iter(|| set.gemv(&mut y, &xq, &w, rows, k, 0, rows).unwrap())
             });
         }
+        // Pure weight-streaming ceiling: the max read bandwidth this machine
+        // sustains over the packed weight image, with no dot-product compute.
+        // GEMV GB/s far below this ⇒ memory-latency/MLP-bound (prefetch helps);
+        // GEMV GB/s near this ⇒ compute-bound (pivot to op-reduction). Uses the
+        // AVX2 pack so the byte count matches the inferno-avx2 GEMV arm.
+        if let Some(set) = kernels_for(&dtype, Isa::X86_64v3) {
+            let w = set.pack(&file, rows, k).unwrap();
+            group.throughput(Throughput::Bytes(w.len() as u64));
+            group.bench_function(
+                BenchmarkId::new("stream-read", format!("{rows}x{k}")),
+                |b| {
+                    b.iter(|| {
+                        let mut acc = 0u64;
+                        // 8-wide u64 reduction: enough ILP to expose read bandwidth,
+                        // no cross-lane dependency that would serialize on latency.
+                        for chunk in w.as_slice().chunks_exact(64) {
+                            for w8 in chunk.chunks_exact(8) {
+                                acc = acc.wrapping_add(u64::from_le_bytes(w8.try_into().unwrap()));
+                            }
+                        }
+                        std::hint::black_box(acc)
+                    })
+                },
+            );
+        }
         #[cfg(feature = "ggml-compare")]
         ggml::bench(&mut group, &dtype, &file, &x, rows, k);
     }
