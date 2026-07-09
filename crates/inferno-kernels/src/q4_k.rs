@@ -16,9 +16,14 @@ const GROUP_BYTES: usize = 1216; // 32 d + 32 dmin + 64 sc + 64 m + 1024 qs
 
 /// Weight groups to software-prefetch ahead in the AVX2 GEMV (M4b.4). See the
 /// q8_0 kernel for the rationale; q4_k's `nsb` super-block groups are likewise
-/// contiguous per strip. Plan default (4); the Task 2 sweep was deferred to
-/// quiet hardware — see the spec Amendment. Pure hint — never affects output bits.
-const PF_DIST: usize = 4;
+/// contiguous per strip. Pure hint, so it never affects output bits at any value.
+/// Compile-time override via `INFERNO_PF_DIST` for the M4b.7 quiet-hardware
+/// sweep (`0` = no prefetch emitted); default 4 pending the deferred M4b.4
+/// sweep — see that spec's Amendment.
+const PF_DIST: usize = match option_env!("INFERNO_PF_DIST") {
+    Some(s) => crate::pf::parse_pf_dist(s),
+    None => 4,
+};
 
 const OFF_DMIN: usize = 32;
 const OFF_SC: usize = 64;
@@ -161,14 +166,16 @@ pub unsafe extern "C" fn inferno_gemv_q4_k_rs8_avx2(
             let mut acc = _mm256_setzero_ps();
             for sb in 0..nsb {
                 let g = unsafe { w.add((strip * nsb + sb) * GROUP_BYTES) };
-                // Prefetch a future super-block group; `wrapping_add` (not `add`)
-                // because the last strip's tail offsets point past the buffer end.
-                // `_mm_prefetch` never dereferences and never faults — pure hint,
-                // output unchanged. (See the q8_0 kernel.)
-                let pf_addr = w
-                    .wrapping_add((strip * nsb + sb + PF_DIST) * GROUP_BYTES)
-                    .cast();
-                _mm_prefetch::<_MM_HINT_T0>(pf_addr);
+                if PF_DIST != 0 {
+                    // Prefetch a future super-block group; `wrapping_add` (not `add`)
+                    // because the last strip's tail offsets point past the buffer end.
+                    // `_mm_prefetch` never dereferences and never faults — pure hint,
+                    // output unchanged. (See the q8_0 kernel.)
+                    let pf_addr = w
+                        .wrapping_add((strip * nsb + sb + PF_DIST) * GROUP_BYTES)
+                        .cast();
+                    _mm_prefetch::<_MM_HINT_T0>(pf_addr);
+                }
                 let xb = unsafe { x.add(sb * Q8K_BLOCK_BYTES) };
                 let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
                 let xqs = unsafe { xb.add(4) };
