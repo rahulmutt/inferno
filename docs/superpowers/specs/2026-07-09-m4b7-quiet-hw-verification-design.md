@@ -98,9 +98,10 @@ where the verdict is a comparison, medians of per-rep values, ratios
 computed per-rep then aggregated — never ratios of aggregates.
 
 1. **`gate-prefill-scaling.sh` (M4b.1).** `inferno bench --threads t
-   --json` (llama-bench comparison omitted — this gate is inferno-only
-   scaling) at t ∈ {1, 2, 4, 8, 12}; pp/tg tok/s per thread count;
-   scale factors vs t=1. Evaluation: prefill scaling **≥6× at t=12**. Data lands in
+   --json` at t ∈ {1, 2, 4, 8, 12} (`inferno bench` always emits
+   llama-bench rows; they are kept as environment corroboration,
+   M4b.1-amendment style — the evaluation uses the inferno rows only);
+   pp/tg tok/s per thread count; scale factors vs t=1. Evaluation: prefill scaling **≥6× at t=12**. Data lands in
    M4b.1 §Amendments; a miss on fit hardware finally takes the spec's
    attribution fork (serial attention vs memory bandwidth) that
    confounded data could not.
