@@ -61,7 +61,7 @@ Environment-variable protocol between orchestrator and gates (every gate honors 
 **Files:**
 - Create: `crates/inferno-kernels/src/pf.rs`
 - Modify: `crates/inferno-kernels/src/lib.rs` (add `mod pf;` beside the other private mods, line ~20)
-- Modify: `crates/inferno-kernels/src/q8_0.rs:14-19` (const), `:156-163` (guard)
+- Modify: `crates/inferno-kernels/src/q8_0.rs:14-19` (const), `:155-163` (guard)
 - Modify: `crates/inferno-kernels/src/q4_k.rs:16-21` (const), `:164-171` (guard)
 
 **Interfaces:**
@@ -157,11 +157,11 @@ const PF_DIST: usize = match option_env!("INFERNO_PF_DIST") {
 };
 ```
 
-Then wrap the prefetch call site (lines 156-163: the comment, `pf_addr` binding, and `_mm_prefetch` call) in a const-folded guard, keeping the existing comment text inside:
+Then wrap the prefetch call site (lines 155-163: the comment, `pf_addr` binding, and `_mm_prefetch` call) in a const-folded guard, keeping the existing comment text inside:
 
 ```rust
                 if PF_DIST != 0 {
-                    // Prefetch a future group from this strip's weights to overlap
+                    // Prefetch a future weight group into L1 to overlap DRAM latency
                     // with this block's int8 dot. `wrapping_add` (not `add`) because
                     // the last strip's tail offsets point past the buffer end;
                     // `_mm_prefetch` never dereferences and never faults, so it stays
