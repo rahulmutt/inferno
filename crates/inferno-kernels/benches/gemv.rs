@@ -128,6 +128,60 @@ fn bench_dtype(c: &mut Criterion, dtype: DType, shapes: &[(usize, usize)]) {
                 },
             );
         }
+        // M4b.6 Task 1: reduce/combine ceiling arms (cost models, wrong
+        // numbers by design — see the reduce_ceiling module docs). Q8_0 only;
+        // every SHAPES_Q8_0 rows value is a multiple of STRIP, asserted here
+        // so a future shape can't silently hit the arms' whole-strip limit.
+        #[cfg(target_arch = "x86_64")]
+        if matches!(dtype, DType::Q8_0) && std::arch::is_x86_feature_detected!("avx2") {
+            assert_eq!(
+                rows % inferno_kernels::STRIP,
+                0,
+                "ceiling arms need whole strips"
+            );
+            let set = kernels_for(&dtype, Isa::X86_64v3).unwrap();
+            let w = set.pack(&file, rows, k).unwrap();
+            let xq = set.quantize_row(&x).unwrap();
+            let mut y = vec![0f32; rows];
+            group.throughput(Throughput::Bytes(w.len() as u64));
+            group.bench_function(
+                BenchmarkId::new("reduce-ceiling", format!("{rows}x{k}")),
+                |b| {
+                    b.iter(|| {
+                        // SAFETY: y/xq/w built above for exactly this rows/k;
+                        // rows % STRIP == 0 asserted; AVX2 runtime-detected.
+                        unsafe {
+                            reduce_ceiling::gemv_no_reduce_no_combine(
+                                y.as_mut_ptr(),
+                                xq.as_slice().as_ptr(),
+                                w.as_slice().as_ptr(),
+                                k,
+                                rows,
+                            );
+                        }
+                        std::hint::black_box(y[0]);
+                    })
+                },
+            );
+            group.bench_function(
+                BenchmarkId::new("combine-stub", format!("{rows}x{k}")),
+                |b| {
+                    b.iter(|| {
+                        // SAFETY: as the reduce-ceiling arm above.
+                        unsafe {
+                            reduce_ceiling::gemv_no_combine(
+                                y.as_mut_ptr(),
+                                xq.as_slice().as_ptr(),
+                                w.as_slice().as_ptr(),
+                                k,
+                                rows,
+                            );
+                        }
+                        std::hint::black_box(y[0]);
+                    })
+                },
+            );
+        }
         #[cfg(feature = "ggml-compare")]
         ggml::bench(&mut group, &dtype, &file, &x, rows, k);
     }
@@ -308,6 +362,131 @@ mod ggml {
                 }
             })
         });
+    }
+}
+
+/// M4b.6 Task 1 diagnostic arms (spec 2026-07-09-m4b6): copies of the AVX2
+/// full-strip GEMV body with the per-block reduce/combine progressively
+/// stubbed. Wrong results by design — these are cost models, not kernels,
+/// and must never ship in the library. Layout consts mirror `q8_0.rs`.
+///
+/// Conservative by construction: keeping each lane's dot product live costs
+/// one `vpaddd` per lane per block (arm A) or one per block (arm B), so the
+/// measured baseline-vs-arm delta *understates* the true reduce/combine cost
+/// slightly — the gate can under-claim headroom, never over-claim it.
+#[cfg(target_arch = "x86_64")]
+mod reduce_ceiling {
+    use std::arch::x86_64::__m256i;
+
+    use inferno_kernels::STRIP;
+
+    const WBLOCK: usize = 32; // weight elements per block (q8_0.rs:10)
+    const GROUP_BYTES: usize = 288; // 8 f32 d + 8×32 qs (q8_0.rs:12)
+    const Q8A_BLOCK_BYTES: usize = 36; // f32 d + 32 i8 (act.rs:15)
+    const PF_DIST: usize = 4; // mirrors q8_0.rs:19 so arms model the shipped kernel
+
+    /// Copied verbatim from `q8_0.rs::hsum8_i32` (pub(crate) there, so the
+    /// bench keeps its own copy): transpose-reduce 8 lane-parallel i32
+    /// accumulators into one vector whose lane `i` holds v[i]'s horizontal sum.
+    #[target_feature(enable = "avx2")]
+    fn hsum8_i32(v: [__m256i; 8]) -> __m256i {
+        use std::arch::x86_64::*;
+        let s01 = _mm256_hadd_epi32(v[0], v[1]);
+        let s23 = _mm256_hadd_epi32(v[2], v[3]);
+        let s45 = _mm256_hadd_epi32(v[4], v[5]);
+        let s67 = _mm256_hadd_epi32(v[6], v[7]);
+        let s0123 = _mm256_hadd_epi32(s01, s23);
+        let s4567 = _mm256_hadd_epi32(s45, s67);
+        let lo = _mm256_permute2x128_si256::<0x20>(s0123, s4567);
+        let hi = _mm256_permute2x128_si256::<0x31>(s0123, s4567);
+        _mm256_add_epi32(lo, hi)
+    }
+
+    /// Arm A — "reduce+combine → 0". Full weight/activation streaming, the
+    /// prefetch hint, and the complete int8 dot (sign×2/maddubs/madd per lane)
+    /// are intact; `hsum8_i32` and the f32 combine (dx load, cvt, dw load,
+    /// mul, fmadd) are replaced by one `vpaddd` per lane into a sink that is
+    /// stored once per strip. Lower bound on kernel time if the per-block
+    /// reduce/combine were free.
+    ///
+    /// # Safety
+    /// As `inferno_gemv_q8_0_rs8_avx2` (`y` writable for `rows` f32; `x` a
+    /// q8a buffer for this `k`; `w` an rs8 pack for exactly this `k`/`rows`,
+    /// 32-byte aligned; `k` a positive multiple of 32), plus: whole strips
+    /// only (`rows % STRIP == 0`) and AVX2+FMA present.
+    #[target_feature(enable = "avx2,fma")]
+    pub unsafe fn gemv_no_reduce_no_combine(
+        y: *mut f32,
+        x: *const u8,
+        w: *const u8,
+        k: usize,
+        rows: usize,
+    ) {
+        use std::arch::x86_64::*;
+        let nb = k / WBLOCK;
+        let ones = _mm256_set1_epi16(1);
+        for strip in 0..rows / STRIP {
+            let mut sink = _mm256_setzero_si256();
+            for b in 0..nb {
+                let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+                // Same pure-hint prefetch as the shipped kernel (q8_0.rs:160-163).
+                let pf_addr = w
+                    .wrapping_add((strip * nb + b + PF_DIST) * GROUP_BYTES)
+                    .cast();
+                _mm_prefetch::<_MM_HINT_T0>(pf_addr);
+                let xb = unsafe { x.add(b * Q8A_BLOCK_BYTES) };
+                let xv = unsafe { _mm256_loadu_si256(xb.add(4).cast()) };
+                let qs = unsafe { g.add(32) };
+                for lane in 0..STRIP {
+                    let wv = unsafe { _mm256_load_si256(qs.add(lane * WBLOCK).cast()) };
+                    let aw = _mm256_sign_epi8(wv, wv);
+                    let sx = _mm256_sign_epi8(xv, wv);
+                    let p = _mm256_madd_epi16(_mm256_maddubs_epi16(aw, sx), ones);
+                    // Cheapest possible liveness: without this add the whole
+                    // lane's dot chain is dead and the optimizer deletes it.
+                    sink = _mm256_add_epi32(sink, p);
+                }
+            }
+            // One garbage store per strip keeps `sink` observable.
+            unsafe { _mm256_storeu_ps(y.add(strip * STRIP), _mm256_castsi256_ps(sink)) };
+        }
+    }
+
+    /// Arm B — "combine → 0, reduce kept". Identical to arm A except the
+    /// per-block `hsum8_i32` transpose-reduce still runs; only the f32
+    /// combine is stubbed (one `vpaddd` of the reduced vector into the sink).
+    /// Attribution: (baseline − B) ≈ combine cost, (B − A) ≈ reduce cost.
+    ///
+    /// # Safety
+    /// As [`gemv_no_reduce_no_combine`].
+    #[target_feature(enable = "avx2,fma")]
+    pub unsafe fn gemv_no_combine(y: *mut f32, x: *const u8, w: *const u8, k: usize, rows: usize) {
+        use std::arch::x86_64::*;
+        let nb = k / WBLOCK;
+        let ones = _mm256_set1_epi16(1);
+        for strip in 0..rows / STRIP {
+            let mut sink = _mm256_setzero_si256();
+            for b in 0..nb {
+                let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+                let pf_addr = w
+                    .wrapping_add((strip * nb + b + PF_DIST) * GROUP_BYTES)
+                    .cast();
+                _mm_prefetch::<_MM_HINT_T0>(pf_addr);
+                let xb = unsafe { x.add(b * Q8A_BLOCK_BYTES) };
+                let xv = unsafe { _mm256_loadu_si256(xb.add(4).cast()) };
+                let qs = unsafe { g.add(32) };
+                let mut p = [_mm256_setzero_si256(); STRIP];
+                for (lane, pl) in p.iter_mut().enumerate() {
+                    let wv = unsafe { _mm256_load_si256(qs.add(lane * WBLOCK).cast()) };
+                    let aw = _mm256_sign_epi8(wv, wv);
+                    let sx = _mm256_sign_epi8(xv, wv);
+                    *pl = _mm256_madd_epi16(_mm256_maddubs_epi16(aw, sx), ones);
+                }
+                // Reduce kept, combine stubbed: cvt/dw/dx/mul/fmadd → one add.
+                sink = _mm256_add_epi32(sink, hsum8_i32(p));
+            }
+            unsafe { _mm256_storeu_ps(y.add(strip * STRIP), _mm256_castsi256_ps(sink)) };
+        }
     }
 }
 
