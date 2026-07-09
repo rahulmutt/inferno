@@ -280,6 +280,18 @@ expect "override stamp" \
   "### UNFIT-OVERRIDE (preflight failed; operator forced the run — record the override alongside any data) ###"
 QHW_OVERRIDE=0
 
+# median with no args must fail loudly, not return 0.
+if out=$(median 2>/dev/null); then fail "median with no args should return nonzero (got '$out')"; fi
+
+# phys_cores must survive an lscpu that emits only comments (pipefail trap)
+# and fall back to nproc. Stub lscpu via PATH.
+stub=$(mktemp -d)
+printf '#!/usr/bin/env bash\necho "# comment only"\n' > "$stub/lscpu"
+chmod +x "$stub/lscpu"
+n=$(PATH="$stub:$PATH" bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_cores")
+[ "${n:-0}" -ge 1 ] || fail "phys_cores with data-less lscpu should fall back to nproc (got '$n')"
+rm -rf "$stub"
+
 echo "lib-selftest: OK"
 ```
 
@@ -301,6 +313,7 @@ Create `scripts/quiet-hw/lib.sh`:
 
 # median <v1> [v2 ...] — median; even count = mean of the middle two.
 median() {
+  [ $# -ge 1 ] || { echo "nan"; return 1; }
   printf '%s\n' "$@" | sort -g | awk '
     { v[NR] = $1 }
     END {
@@ -366,12 +379,15 @@ smoke_header() {
 }
 
 # phys_cores — physical core count (sweep upper bound for gate-decode-cap).
+# Never fails under `set -euo pipefail`: an lscpu that exists but emits no
+# data rows (sandboxes, odd VMs) falls back to nproc.
 phys_cores() {
+  local n=0
   if command -v lscpu >/dev/null; then
-    lscpu -p=CORE,SOCKET 2>/dev/null | grep -v '^#' | sort -u | wc -l
-  else
-    nproc
+    n=$( (lscpu -p=CORE,SOCKET 2>/dev/null || true) \
+         | awk '!/^#/ && NF && !seen[$0]++ { n++ } END { print n + 0 }')
   fi
+  if [ "${n:-0}" -ge 1 ]; then echo "$n"; else nproc; fi
 }
 ```
 

@@ -6,6 +6,7 @@
 
 # median <v1> [v2 ...] — median; even count = mean of the middle two.
 median() {
+  [ $# -ge 1 ] || { echo "nan"; return 1; }
   printf '%s\n' "$@" | sort -g | awk '
     { v[NR] = $1 }
     END {
@@ -71,10 +72,13 @@ smoke_header() {
 }
 
 # phys_cores — physical core count (sweep upper bound for gate-decode-cap).
+# Never fails under `set -euo pipefail`: an lscpu that exists but emits no
+# data rows (sandboxes, odd VMs) falls back to nproc.
 phys_cores() {
+  local n=0
   if command -v lscpu >/dev/null; then
-    lscpu -p=CORE,SOCKET 2>/dev/null | grep -v '^#' | sort -u | wc -l
-  else
-    nproc
+    n=$( (lscpu -p=CORE,SOCKET 2>/dev/null || true) \
+         | awk '!/^#/ && NF && !seen[$0]++ { n++ } END { print n + 0 }')
   fi
+  if [ "${n:-0}" -ge 1 ]; then echo "$n"; else nproc; fi
 }

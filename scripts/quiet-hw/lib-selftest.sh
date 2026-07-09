@@ -54,4 +54,16 @@ expect "override stamp" \
   "### UNFIT-OVERRIDE (preflight failed; operator forced the run — record the override alongside any data) ###"
 QHW_OVERRIDE=0
 
+# median with no args must fail loudly, not return 0.
+if out=$(median 2>/dev/null); then fail "median with no args should return nonzero (got '$out')"; fi
+
+# phys_cores must survive an lscpu that emits only comments (pipefail trap)
+# and fall back to nproc. Stub lscpu via PATH.
+stub=$(mktemp -d)
+printf '#!/usr/bin/env bash\necho "# comment only"\n' > "$stub/lscpu"
+chmod +x "$stub/lscpu"
+n=$(PATH="$stub:$PATH" bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_cores")
+[ "${n:-0}" -ge 1 ] || fail "phys_cores with data-less lscpu should fall back to nproc (got '$n')"
+rm -rf "$stub"
+
 echo "lib-selftest: OK"
