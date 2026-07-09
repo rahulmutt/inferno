@@ -660,6 +660,9 @@ done
 
 ipp1=$(jq -r .inferno_pp_tok_s "$OUT/prefill-t1.json")
 itg1=$(jq -r .inferno_tg_tok_s "$OUT/prefill-t1.json")
+case "$ipp1$itg1" in *null*|"") ipp1=0 ;; esac
+awk -v a="$ipp1" -v b="$itg1" 'BEGIN { exit !(a + 0 > 0 && b + 0 > 0) }' \
+  || { echo "FATAL: t=1 baseline missing/zero in $OUT/prefill-t1.json" >&2; exit 1; }
 echo "| t | pp tok/s | pp scale | tg tok/s | tg scale | llama pp (corrob.) | llama tg (corrob.) |"
 echo "|---|---|---|---|---|---|---|"
 scale12=""
@@ -752,8 +755,15 @@ echo
 if [ "${QHW_SMOKE:-0}" = 1 ]; then
   echo "SMOKE: evaluation skipped"
 else
-  echo "knee (best fixed cap): $best_cap ($best tok/s)"
-  echo "default clamp(active/3,2,active): $def_med tok/s -> $(pct "$def_med" "$best")% vs best fixed"
+  echo "knee (best fixed cap): $best_cap ($best tok/s median)"
+  # Discipline: per-rep default/best ratios (same interleaved round), THEN median.
+  read -ra def_arr <<< "${samples[default]}"
+  read -ra best_arr <<< "${samples[$best_cap]}"
+  ratios=""
+  for i in $(seq 0 $((REPS - 1))); do
+    ratios="$ratios $(pct "${def_arr[$i]}" "${best_arr[$i]}")"
+  done
+  echo "default clamp(active/3,2,active): $def_med tok/s median -> $(median $ratios)% vs best fixed (median of per-rep ratios)"
   echo "gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats"
   echo "best-fixed? high-thread regression gone (compare cap=$PHYS row vs knee)?"
   echo "t=1 decode unchanged (t1 row vs prior recorded t=1)?"

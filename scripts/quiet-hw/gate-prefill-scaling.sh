@@ -30,6 +30,9 @@ done
 
 ipp1=$(jq -r .inferno_pp_tok_s "$OUT/prefill-t1.json")
 itg1=$(jq -r .inferno_tg_tok_s "$OUT/prefill-t1.json")
+case "$ipp1$itg1" in *null*|"") ipp1=0 ;; esac
+awk -v a="$ipp1" -v b="$itg1" 'BEGIN { exit !(a + 0 > 0 && b + 0 > 0) }' \
+  || { echo "FATAL: t=1 baseline missing/zero in $OUT/prefill-t1.json" >&2; exit 1; }
 echo "| t | pp tok/s | pp scale | tg tok/s | tg scale | llama pp (corrob.) | llama tg (corrob.) |"
 echo "|---|---|---|---|---|---|---|"
 scale12=""
