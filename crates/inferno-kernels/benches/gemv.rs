@@ -181,6 +181,49 @@ fn bench_dtype(c: &mut Criterion, dtype: DType, shapes: &[(usize, usize)]) {
                     })
                 },
             );
+            // M4b.6 restructure candidate 1: the same kernel with the
+            // unpack/add reduce tree. Correct numbers — prove bitwise equality
+            // against the library kernel once per process, then time it.
+            {
+                let mut y_ref = vec![f32::NAN; rows];
+                set.gemv(&mut y_ref, &xq, &w, rows, k, 0, rows).unwrap();
+                // SAFETY: buffers built above for exactly this rows/k;
+                // rows % STRIP == 0 asserted; AVX2 runtime-detected.
+                unsafe {
+                    reduce_unpack::gemv(
+                        y.as_mut_ptr(),
+                        xq.as_slice().as_ptr(),
+                        w.as_slice().as_ptr(),
+                        k,
+                        rows,
+                    );
+                }
+                for (i, (a, b)) in y_ref.iter().zip(&y).enumerate() {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "reduce-unpack arm diverges from library kernel at row {i} ({rows}x{k})"
+                    );
+                }
+            }
+            group.bench_function(
+                BenchmarkId::new("reduce-unpack", format!("{rows}x{k}")),
+                |b| {
+                    b.iter(|| {
+                        // SAFETY: as the bitwise pre-check above.
+                        unsafe {
+                            reduce_unpack::gemv(
+                                y.as_mut_ptr(),
+                                xq.as_slice().as_ptr(),
+                                w.as_slice().as_ptr(),
+                                k,
+                                rows,
+                            );
+                        }
+                        std::hint::black_box(y[0]);
+                    })
+                },
+            );
         }
         #[cfg(feature = "ggml-compare")]
         ggml::bench(&mut group, &dtype, &file, &x, rows, k);
@@ -486,6 +529,113 @@ mod reduce_ceiling {
                 sink = _mm256_add_epi32(sink, hsum8_i32(p));
             }
             unsafe { _mm256_storeu_ps(y.add(strip * STRIP), _mm256_castsi256_ps(sink)) };
+        }
+    }
+}
+
+/// M4b.6 restructure candidate 1 (spec §Task 2+): the shipped AVX2 full-strip
+/// GEMV with exactly one delta — `hsum8_i32` swapped for an unpack/add
+/// transpose-reduce. Unlike the `reduce_ceiling` cost models this arm computes
+/// CORRECT numbers; the bench setup asserts bitwise equality against the
+/// library kernel before timing it. Whole strips only (`rows % STRIP == 0`).
+/// Deleted once the A/B is decided — the winning tree ships in `q8_0.rs`, and
+/// a losing tree is recorded in the spec Amendments and removed.
+#[cfg(target_arch = "x86_64")]
+mod reduce_unpack {
+    use std::arch::x86_64::__m256i;
+
+    use inferno_kernels::STRIP;
+
+    const WBLOCK: usize = 32; // weight elements per block (q8_0.rs:10)
+    const GROUP_BYTES: usize = 288; // 8 f32 d + 8×32 qs (q8_0.rs:12)
+    const Q8A_BLOCK_BYTES: usize = 36; // f32 d + 32 i8 (act.rs:15)
+    const PF_DIST: usize = 4; // mirrors q8_0.rs:19 so the A/B isolates the tree
+
+    /// Candidate-1 transpose-reduce: same contract as `q8_0.rs::hsum8_i32`
+    /// (lane `i` of the result = horizontal sum of `v[i]`), built from
+    /// `vpunpck`/`vpaddd` instead of `vphaddd`. Wrapping i32 adds are
+    /// associative, so this is bit-identical to the hadd tree by construction.
+    #[target_feature(enable = "avx2")]
+    fn hsum8_i32_unpack(v: [__m256i; 8]) -> __m256i {
+        use std::arch::x86_64::*;
+        // Round 1 — 32-bit interleave + add. Per 128-bit half, lo/hi unpack of
+        // (a, b) give [a0 b0 a1 b1] and [a2 b2 a3 b3]; their sum holds each
+        // input's even/odd 2-element partials interleaved: [a02 b02 a13 b13].
+        let s01 = _mm256_add_epi32(
+            _mm256_unpacklo_epi32(v[0], v[1]),
+            _mm256_unpackhi_epi32(v[0], v[1]),
+        );
+        let s23 = _mm256_add_epi32(
+            _mm256_unpacklo_epi32(v[2], v[3]),
+            _mm256_unpackhi_epi32(v[2], v[3]),
+        );
+        let s45 = _mm256_add_epi32(
+            _mm256_unpacklo_epi32(v[4], v[5]),
+            _mm256_unpackhi_epi32(v[4], v[5]),
+        );
+        let s67 = _mm256_add_epi32(
+            _mm256_unpacklo_epi32(v[6], v[7]),
+            _mm256_unpackhi_epi32(v[6], v[7]),
+        );
+        // Round 2 — 64-bit interleave + add: per half [x02 y02] + [x13 y13]
+        // leaves [v0half v1half v2half v3half], i.e. the same
+        // [v0lo v1lo v2lo v3lo | v0hi v1hi v2hi v3hi] layout the hadd tree's
+        // second round produces.
+        let s0123 = _mm256_add_epi32(
+            _mm256_unpacklo_epi64(s01, s23),
+            _mm256_unpackhi_epi64(s01, s23),
+        );
+        let s4567 = _mm256_add_epi32(
+            _mm256_unpacklo_epi64(s45, s67),
+            _mm256_unpackhi_epi64(s45, s67),
+        );
+        // Round 3 — unchanged cross-128 recombine: lane i = full sum of v[i].
+        let lo = _mm256_permute2x128_si256::<0x20>(s0123, s4567);
+        let hi = _mm256_permute2x128_si256::<0x31>(s0123, s4567);
+        _mm256_add_epi32(lo, hi)
+    }
+
+    /// The shipped full-strip fast path (`q8_0.rs::inferno_gemv_q8_0_rs8_avx2`,
+    /// whole-strip branch) verbatim — prefetch, sign-trick dot, and the f32
+    /// combine included — with only the reduce tree swapped.
+    ///
+    /// # Safety
+    /// As `inferno_gemv_q8_0_rs8_avx2` (`y` writable for `rows` f32; `x` a q8a
+    /// buffer for this `k`; `w` an rs8 pack for exactly this `k`/`rows`,
+    /// 32-byte aligned; `k` a positive multiple of 32), plus: whole strips
+    /// only (`rows % STRIP == 0`) and AVX2+FMA present.
+    #[target_feature(enable = "avx2,fma")]
+    pub unsafe fn gemv(y: *mut f32, x: *const u8, w: *const u8, k: usize, rows: usize) {
+        use std::arch::x86_64::*;
+        let nb = k / WBLOCK;
+        let ones = _mm256_set1_epi16(1);
+        for strip in 0..rows / STRIP {
+            let mut acc = _mm256_setzero_ps();
+            for b in 0..nb {
+                let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+                // Same pure-hint prefetch as the shipped kernel (q8_0.rs:160-163).
+                let pf_addr = w
+                    .wrapping_add((strip * nb + b + PF_DIST) * GROUP_BYTES)
+                    .cast();
+                _mm_prefetch::<_MM_HINT_T0>(pf_addr);
+                let xb = unsafe { x.add(b * Q8A_BLOCK_BYTES) };
+                let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
+                let xv = unsafe { _mm256_loadu_si256(xb.add(4).cast()) };
+                let qs = unsafe { g.add(32) };
+                let mut p = [_mm256_setzero_si256(); STRIP];
+                for (lane, pl) in p.iter_mut().enumerate() {
+                    let wv = unsafe { _mm256_load_si256(qs.add(lane * WBLOCK).cast()) };
+                    let aw = _mm256_sign_epi8(wv, wv);
+                    let sx = _mm256_sign_epi8(xv, wv);
+                    *pl = _mm256_madd_epi16(_mm256_maddubs_epi16(aw, sx), ones);
+                }
+                // The one delta vs the shipped kernel: unpack tree, not hadd.
+                let isum = _mm256_cvtepi32_ps(hsum8_i32_unpack(p));
+                let dw = unsafe { _mm256_load_ps(g.cast()) };
+                let dwdx = _mm256_mul_ps(dw, _mm256_set1_ps(dx));
+                acc = _mm256_fmadd_ps(dwdx, isum, acc);
+            }
+            unsafe { _mm256_storeu_ps(y.add(strip * STRIP), acc) };
         }
     }
 }
