@@ -73,3 +73,10 @@ for the v1 design.
   compiled-vs-interpreter correctness gate) and
   `cargo test -p inferno-core --test artifact` (the artifact-level
   differential); never loosen `logits_abs_tol` to make either green.
+- **Decode threading is phase-capped (M4b.5):** the compiled decode path
+  (`inferno_par_gemv`) shards over `min(active_threads, decode_cap)`, not
+  full cores — decode is bandwidth-bound and regresses past its knee.
+  Prefill (`inferno_par_gemm`) is uncapped. Default `clamp(active/3, 2,
+  active)`, override with `INFERNO_DECODE_THREADS=N`. The cap is
+  bit-neutral (`shard_table` keeps each row on one lane); never treat a
+  cap change as a numeric change.

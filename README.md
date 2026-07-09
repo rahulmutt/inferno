@@ -40,6 +40,14 @@ design; a cross-check against the compiled path, not for everyday use):
 
     cargo run -p inferno -- run crates/inferno-formats/tests/fixtures/tiny.gguf --prompt "the" --max-tokens 4 --interp
 
+## Run options
+
+`INFERNO_DECODE_THREADS=N` caps the number of threads the *decode* phase
+shards across (prefill still uses all `--threads`). Decode is
+memory-bandwidth-bound, so more threads than saturate DRAM bandwidth only
+add overhead; the default is a fraction of cores. Output is identical for
+any value.
+
 ## Common tasks
 
 Run `mise tasks` for the authoritative list — `test`, `test-full`, `lint`,
