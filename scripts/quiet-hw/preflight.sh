@@ -28,6 +28,7 @@ fi
 # Probe 2 — cgroup-v2 CPU quota anywhere up the hierarchy (the check that
 # catches the devpod's 800000 100000).
 rel=$(awk -F: '/^0::/ { print $3; exit }' "$CGFILE")
+rel="${rel%/}"   # "/" → "" so the flat/root topology is walked exactly once
 quota_summary="unquota'd"
 path="$rel"
 while :; do
@@ -44,10 +45,15 @@ while :; do
 done
 
 # Probe 3 — external CPU pressure (PSI).
-psi=$(awk '/^some/ { sub(/.*avg10=/, ""); sub(/ .*/, ""); print; exit }' \
-      "$PROC/pressure/cpu")
-if ! awk -v p="$psi" -v m="$PSI_MAX" 'BEGIN { exit !(p + 0 <= m + 0) }'; then
-  fails+=("cpu pressure: some avg10 = $psi > $PSI_MAX")
+psi=""
+if [ -f "$PROC/pressure/cpu" ]; then
+  psi=$(awk '/^some/ { sub(/.*avg10=/, ""); sub(/ .*/, ""); print; exit }' \
+        "$PROC/pressure/cpu")
+  if ! awk -v p="$psi" -v m="$PSI_MAX" 'BEGIN { exit !(p + 0 <= m + 0) }'; then
+    fails+=("cpu pressure: some avg10 = $psi > $PSI_MAX")
+  fi
+else
+  fails+=("cpu pressure: $PROC/pressure/cpu missing (cannot verify quiet)")
 fi
 
 # Probe 4 — throttling delta across an all-core calibration load (the
