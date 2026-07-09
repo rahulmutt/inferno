@@ -313,7 +313,7 @@ Criterion.
   medians of per-rep ratios, never ratios of medians). Outputs in scratch
   (`m4b6r-rep{1..3}.out`, `m4b6r-table.md`).
 
-| shape | t_base | t_unpack | median w | w range | all-reps w>0? |
+| shape | t_base med | t_unpack med | median w | w range | all-reps w>0? |
 |---|---|---|---|---|---|
 | 896x896 | 21.39 µs | 21.44 µs | −0.26% | −8.26…+0.84% | no |
 | 4864x896 | 116.80 µs | 116.45 µs | +1.22% | +0.14…+1.41% | YES |
@@ -326,7 +326,11 @@ Criterion.
   projected decode-wall LOSS).
 - **Ship gate:** NOT met. Condition 1 held (4864x896 and 896x4864 kept
   `w_r > 0` in 3/3 reps — the port model called the L2-resident mid shapes
-  right, though at +1.2%/+2.5%, far under the ~15% reduce-share ceiling).
+  right, though at +1.2%/+2.5%, far under the ~15% reduce-share ceiling;
+  note the arm carries a small favorable outer-loop/dispatch delta vs the
+  registry-dispatched baseline — direct call, bare whole-strip loop — so
+  treat those mid-shape figures as upper bounds if re-reading them for a
+  future ship decision).
   Condition 2 failed decisively: median regressions of −16.47% on
   151936x896 (range −18.06…−15.74%, no 0-straddle → no rep extension per
   the gate's own rule), −6.05% on 14336x4096, −5.93% on 4096x4096 —
@@ -341,8 +345,9 @@ Criterion.
   candidates 2–3 already µop-negative on Zen 2 (plan §Decision Record), the
   decode GEMV inner loop is exhausted as an op-reduction lever on this
   hardware. The tg win effort moves to the quiet-hardware verification pass
-  (M4b.7), which should re-run this A/B once on an Intel box before
-  declaring the lever dead cross-vendor (SKL model says wash, not loss) —
+  (M4b.7), which should re-run this A/B (restore the arm by cherry-picking
+  092b191) once on an Intel box before declaring the lever dead
+  cross-vendor (SKL model says wash, not loss) —
   and should weight any future candidate by code size on streaming shapes,
   not just port placement.
 - No library change shipped; tolerances/ABI untouched by construction
