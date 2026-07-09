@@ -52,7 +52,8 @@ Environment-variable protocol between orchestrator and gates (every gate honors 
 
 - `QHW_OUT` — output dir for the gate's files (default: a `mktemp -d`).
 - `QHW_SMOKE=1` — smoke mode: tiny reps/sizes, `SMOKE — NON-RECORDABLE` header, gate evaluation lines replaced by `SMOKE: evaluation skipped`.
-- `QHW_CGROUP_ROOT`, `QHW_PROC_ROOT`, `QHW_NPROC`, `QHW_MIN_CPUS`, `QHW_PSI_MAX`, `QHW_CALIB_SECS` — preflight-only test/tuning seams.
+- `QHW_CGROUP_ROOT`, `QHW_PROC_ROOT`, `QHW_CGROUP_FILE`, `QHW_NPROC`, `QHW_MIN_CPUS`, `QHW_PSI_MAX`, `QHW_CALIB_SECS` — preflight-only test/tuning seams.
+- `QHW_OVERRIDE=1` — set by `verify.sh --i-know-what-im-doing`; makes `smoke_header` emit the `UNFIT-OVERRIDE` stamp.
 
 ---
 

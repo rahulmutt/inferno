@@ -46,7 +46,8 @@ Never edit a recorded data point. If a deciding shape straddles 0 in gate
 ## Per-gate manual fallbacks
 
 Each gate runs standalone (same env vars the orchestrator sets —
-`QHW_OUT` for the output dir):
+`QHW_OUT` for the output dir; `QHW_SMOKE=1` for a stamped plumbing
+check — there is no per-gate `--smoke` flag):
 
     bash scripts/quiet-hw/preflight.sh
     bash scripts/quiet-hw/gate-prefill-scaling.sh "$MODEL"
@@ -62,9 +63,10 @@ Each gate runs standalone (same env vars the orchestrator sets —
   fails loudly; re-transcribe the arm from the M4b.6 plan's Task 1
   (`docs/superpowers/plans/2026-07-09-m4b6-reduce-unpack-restructure.md`),
   whose plan text contains the full module source.
-- **Preflight thresholds** (12 CPUs, PSI 1.0, throttle delta 0) are
-  tunables in the script header with M4b.1's observations as calibration
-  points. On a false UNFIT you have judged wrong, `verify.sh
+- **Preflight thresholds**: min CPUs and PSI are tunables (`QHW_MIN_CPUS`,
+  `QHW_PSI_MAX`; defaults 12 and 1.0, M4b.1's observations as calibration
+  points); the throttle-delta-must-be-0 check is deliberately hardcoded.
+  On a false UNFIT you have judged wrong, `verify.sh
   --i-know-what-im-doing` forces the run — every output is then stamped
   `UNFIT-OVERRIDE` so provenance survives; record the override and your
   reasoning alongside any data you paste into an amendment.
