@@ -43,10 +43,11 @@ pub struct Engine {
 /// count (physical cores by default). Final default is deferred to the
 /// M4b.5 quiet-hardware sweep; this is the reversible starting hypothesis.
 fn decode_cap(active: usize, override_env: Option<&str>) -> usize {
-    if let Some(v) = override_env.and_then(|s| s.trim().parse::<usize>().ok()) {
-        if v >= 1 {
-            return v;
-        }
+    if let Some(v) = override_env
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&v| v >= 1)
+    {
+        return v;
     }
     (active / 3).max(2).min(active)
 }
