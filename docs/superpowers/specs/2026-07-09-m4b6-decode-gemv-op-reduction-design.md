@@ -295,3 +295,57 @@ L2/L3-resident mid shapes; lm_head (27% of decode cycles) is memory-bound with �
 op-reduction headroom, so 14.9% is a same-box projection ceiling, not a promised win —
 the formal perf verdict stays deferred to quiet hardware per §Measurement & Exit
 Criterion.
+
+### 2026-07-09 — Task 2+ restructure: candidate 1 measured, not shipped
+
+- **Commits:** 092b191 (candidate arm, bitwise-checked), 4311ac0 (removal).
+- **Candidate selection:** the restructure plan's µop table
+  (docs/superpowers/plans/2026-07-09-m4b6-reduce-unpack-restructure.md
+  §Decision Record, uops.info Zen 2 data) resolved the recorded Zen 2
+  shuffle-port caveat FOR candidate 1: µop count is the anticipated wash
+  (21 vs 21) but `vphaddd` is 3 µops at rt 2.0 vs the dword unpacks' 1 µop
+  at rt 0.5, and the hadd tree's third µop class contends with the FP0-bound
+  int8 dot. Candidates 2–3 rejected by the same table (combine share caps C2
+  under the 3% bar; C3 is µop- and port-negative on Zen 2), not deferred.
+- **Command:** 3 reps of `cargo bench -p inferno-kernels --bench gemv
+  -- 'gemv/Q8_0/(inferno-avx2|reduce-unpack)/'` (devenv shell, shared devpod,
+  ratio-only; criterion mid estimates; `w_r = 1 − t_unpack,r/t_base,r`,
+  medians of per-rep ratios, never ratios of medians). Outputs in scratch
+  (`m4b6r-rep{1..3}.out`, `m4b6r-table.md`).
+
+| shape | t_base | t_unpack | median w | w range | all-reps w>0? |
+|---|---|---|---|---|---|
+| 896x896 | 21.39 µs | 21.44 µs | −0.26% | −8.26…+0.84% | no |
+| 4864x896 | 116.80 µs | 116.45 µs | +1.22% | +0.14…+1.41% | YES |
+| 896x4864 | 118.71 µs | 114.67 µs | +2.50% | +2.24…+3.40% | YES |
+| 151936x896 | 15.228 ms | 17.625 ms | −16.47% | −18.06…−15.74% | no (all <0) |
+| 4096x4096 | 1.7013 ms | 1.7507 ms | −5.93% | −6.01…−1.11% | no (all <0) |
+| 14336x4096 | 6.3235 ms | 6.7529 ms | −6.05% | −6.79…−3.69% | no (all <0) |
+
+- **projected_decode_win = −3.45%** (Task 1 amendment's decode shares — a
+  projected decode-wall LOSS).
+- **Ship gate:** NOT met. Condition 1 held (4864x896 and 896x4864 kept
+  `w_r > 0` in 3/3 reps — the port model called the L2-resident mid shapes
+  right, though at +1.2%/+2.5%, far under the ~15% reduce-share ceiling).
+  Condition 2 failed decisively: median regressions of −16.47% on
+  151936x896 (range −18.06…−15.74%, no 0-straddle → no rep extension per
+  the gate's own rule), −6.05% on 14336x4096, −5.93% on 4096x4096 —
+  consistent across all reps, far beyond the noise band. lm_head's 27%
+  decode share alone swamps the mid-shape wins. Attribution (hypothesis,
+  not measured): the µop table modeled issue-port pressure but not code
+  footprint — the unpack tree is 21 instructions where the hadd tree is 9,
+  and the fatter loop consistently loses exactly on the DRAM-/latency-bound
+  streaming shapes, where issue ports were never the constraint. So the
+  bottleneck candidate 1 attacks is real but small on this part, and the
+  candidate carries a streaming-shape cost the model missed. With
+  candidates 2–3 already µop-negative on Zen 2 (plan §Decision Record), the
+  decode GEMV inner loop is exhausted as an op-reduction lever on this
+  hardware. The tg win effort moves to the quiet-hardware verification pass
+  (M4b.7), which should re-run this A/B once on an Intel box before
+  declaring the lever dead cross-vendor (SKL model says wash, not loss) —
+  and should weight any future candidate by code size on streaming shapes,
+  not just port placement.
+- No library change shipped; tolerances/ABI untouched by construction
+  (`git diff -- crates/inferno-graph/src/tolerance.rs` empty at every
+  commit; the branch touches only `benches/gemv.rs`, net-zero, and this
+  spec).
