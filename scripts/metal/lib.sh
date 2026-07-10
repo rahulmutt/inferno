@@ -108,6 +108,16 @@ check_features_table() {
   ' "$(features_table)" >/dev/null
 }
 
+# gc_candidates <servers.json> — TSV (id, type, hostname, provisionedOn)
+# for servers whose description EQUALS the tag. Equality, never contains:
+# a substring match against someone's "not-inferno-metal-related" box would
+# delete production hardware.
+gc_candidates() {
+  jq -r --arg tag "$METAL_TAG" \
+    '.[] | select(.description == $tag)
+         | [.id, .type, .hostname, (.provisionedOn // "-")] | @tsv' "$1"
+}
+
 # catalog_join <products.json> <availability.json> <features.json> — TSV:
 # type, cpu_model, vendor, cores, flags(csv), $/hr, in-stock locations.
 # Types missing from the features table print UNMAPPED — visible on

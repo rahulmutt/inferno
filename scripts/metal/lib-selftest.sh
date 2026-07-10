@@ -94,4 +94,12 @@ catalog_join "$HERE/fixtures/products.json" "$HERE/fixtures/availability.json" "
   | awk -F'\t' '$2 != "UNMAPPED" && $5 == "" { exit 1 }' \
   || fail "mapped catalog row with empty flags column"
 
+# --- gc_candidates: exact-tag match only ------------------------------------
+gc_out=$(gc_candidates "$HERE/fixtures/servers.json")
+expect "gc finds the tagged server" "$(echo "$gc_out" | wc -l)" "1"
+expect "gc picks the right id" "$(echo "$gc_out" | cut -f1)" "aaa-111"
+case "$gc_out" in
+  *bbb-222*|*ccc-333*) fail "gc must never match untagged/substring-tagged servers" ;;
+esac
+
 echo "metal lib-selftest: OK"
