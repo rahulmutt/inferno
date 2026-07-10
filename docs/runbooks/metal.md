@@ -56,6 +56,14 @@ metadata.json, plus anything under the box's `target/quiet-hw/` and
 `target/criterion/`). The server is deleted on every exit path — including
 Ctrl-C — unless `--keep`.
 
+**The box clones the repo from its git `origin` at your committed `HEAD`**
+(pinned by commit SHA), not your local working tree — the working tree
+includes a tens-of-GB `target/` that devpod would otherwise upload wholesale.
+So **commit and push before you run**: preflight aborts (before the meter
+starts) if `HEAD` isn't reachable on a remote, and uncommitted changes never
+reach the box. `metadata.json` records the `git_sha` that was benchmarked and
+a `git_dirty` flag if your tree had uncommitted changes at launch.
+
 Iterating: `--keep` holds the box (prints the id; THE METER RUNS), then
 `--reuse <id>` skips provisioning on the next run. `--reuse` never deletes
 the box; delete it with `mise run metal-gc` when done.

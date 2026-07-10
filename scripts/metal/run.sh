@@ -47,12 +47,35 @@ fi
 bash "$HERE/lib-selftest.sh" >/dev/null
 
 # --- preflight (local, free) -------------------------------------------
-require_tools curl jq ssh tar devpod git
+require_tools curl jq ssh ssh-keygen tar devpod git
 require_env
 [ -f "$SSH_KEY" ] || metal_die "ssh public key not found: $SSH_KEY (--ssh-key)"
+
+# devpod forwards the operator's ssh-agent when SSH_AUTH_SOCK is set; a stale
+# socket (common when the operator is itself a devpod workspace and inherited a
+# now-dead agent-forwarding socket) makes `devpod up` fatal with
+# "forward agent: dial unix ...: no such file". The box clones a public repo and
+# pulls a public image, so it needs no forwarded agent — drop a dead socket
+# rather than let devpod try to forward it. A live agent is left untouched.
+if [ -n "${SSH_AUTH_SOCK:-}" ] && [ ! -S "$SSH_AUTH_SOCK" ]; then
+  echo "metal: SSH_AUTH_SOCK ($SSH_AUTH_SOCK) is a dead socket — unsetting so devpod won't try to forward it" >&2
+  unset SSH_AUTH_SOCK
+fi
+
 check_features_table || metal_die "cpu-features.json failed its integrity check"
 ENTRY=$(jq -e --arg t "$TYPE" '.types[$t]' "$(features_table)") \
   || metal_die "server type '$TYPE' not in cpu-features.json — add it (with a vendor-sheet source) first"
+
+# The box CLONES the repo from its git remote on provision — it never uploads
+# the local working tree (target/ alone is tens of GB, and devpod's folder
+# upload ignores .gitignore). So the exact committed HEAD must be reachable on
+# a remote, or the box would build stale code. Check before the meter starts.
+REPO=$(git rev-parse --show-toplevel) || metal_die "not inside a git repo"
+REMOTE=$(git -C "$REPO" remote get-url origin 2>/dev/null) \
+  || metal_die "no git remote 'origin' — metal clones the repo onto the box; add a remote and push first"
+HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+[ -n "$(git -C "$REPO" branch -r --contains "$HEAD_SHA" 2>/dev/null)" ] \
+  || metal_die "HEAD ($HEAD_SHA) isn't on any remote branch — the box clones $REMOTE and would run stale code; push first"
 
 PRICE=$(pnap_api GET "/billing/v1/products?productCategory=SERVER" \
   | jq -r --arg t "$TYPE" \
@@ -66,7 +89,6 @@ fi
 
 # --- results dir + incremental metadata (exists from here on: even an ---
 # --- early abort leaves a record) ----------------------------------------
-REPO=$(git rev-parse --show-toplevel)
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
 OUT="${OUTDIR:-$REPO/target/metal/${TYPE}-${RUN_ID}}"
 mkdir -p "$OUT"
@@ -133,8 +155,13 @@ wait_ready() { # <server-id> — prints IP once powered-on + ssh answers
       echo "metal: server entered error state" >&2; return 1
     fi
     if [ "$status" = "powered-on" ] && [ -n "$ip" ]; then
-      # Default known_hosts + accept-new (not /dev/null): devpod's own
-      # plain `ssh` later depends on the host key accepted here.
+      # PhoenixNAP recycles public IPs across servers, so this IP may carry a
+      # stale known_hosts entry from an earlier box. accept-new only adds a
+      # *new* key — against a mismatched stale one it fails "Host key
+      # verification failed" and never recovers. Purge the old entry first,
+      # then accept-new records this host's real key (devpod's own plain `ssh`
+      # later depends on that entry existing and being correct).
+      ssh-keygen -R "$ip" >/dev/null 2>&1 || true
       if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
              "$(metal_default_ssh_user)@$ip" true 2>>"$OUT/ssh-probe.log"; then
         echo "$ip"; return 0
@@ -184,8 +211,11 @@ fi
 meta_set cpu_expected "$(jq -c '.' <<<"$ENTRY")"
 
 # --- devpod workspace ------------------------------------------------------
-PROVIDER="metal-$RUN_ID"
-WORKSPACE="inferno-metal-$RUN_ID"
+# devpod provider/workspace names accept only [a-z0-9-]; RUN_ID is an ISO-8601
+# basic timestamp (20260710T211824Z) whose literal T/Z are uppercase, so
+# lowercase it for the derived names (the ISO form is kept for $OUT/metadata).
+PROVIDER="metal-${RUN_ID,,}"
+WORKSPACE="inferno-metal-${RUN_ID,,}"
 devpod_cleanup() {
   devpod delete "$WORKSPACE" --force >/dev/null 2>&1 || true
   devpod provider delete "$PROVIDER" >/dev/null 2>&1 || true
@@ -195,9 +225,17 @@ devpod_cleanup() {
 trap 'rc=$?; devpod_cleanup; cleanup "$rc"' EXIT
 
 echo "metal: creating devpod workspace on $SERVER_IP (image pull + devenv — minutes, not seconds)"
-devpod provider add ssh --name "$PROVIDER" --use=false \
+# `devpod up --provider X` refuses to run until X has been initialized
+# ("used") at least once; --use=false skips that init and makes `up` fail with
+# "provider is not initialized". Let add both register and initialize the
+# ephemeral, per-run provider (devpod_cleanup deletes it on exit).
+devpod provider add ssh --name "$PROVIDER" \
   -o "HOST=$(metal_default_ssh_user)@$SERVER_IP"
-devpod up "$REPO" --provider "$PROVIDER" --id "$WORKSPACE" --ide none \
+# Clone the repo from git ON the box (pinned to the committed HEAD), rather
+# than uploading the local working tree — devpod's folder upload ships the
+# whole checkout including the tens-of-GB target/. The box builds fresh inside
+# devenv anyway, so only tracked source needs to travel, and via git it does.
+devpod up "git:$REMOTE@sha256:$HEAD_SHA" --provider "$PROVIDER" --id "$WORKSPACE" --ide none \
   2>&1 | tee "$OUT/devpod-up.log"
 meta_set devpod_workspace "\"$WORKSPACE\""
 

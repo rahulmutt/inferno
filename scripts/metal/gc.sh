@@ -5,9 +5,15 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/lib.sh"
-require_tools curl jq column
+require_tools curl jq
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
+
+# column (util-linux) only aligns the listing; fall back to raw TSV when it's
+# absent so gc — the cost-leak backstop — never fails to run on a minimal box.
+fmt_table() {
+  if command -v column >/dev/null 2>&1; then column -t -s "$(printf '\t')"; else cat; fi
+}
 
 servers=$(mktemp)
 trap 'rm -f "$servers"' EXIT
@@ -20,7 +26,7 @@ fi
 {
   printf 'ID\tTYPE\tHOSTNAME\tPROVISIONED\n'
   printf '%s\n' "$list"
-} | column -t -s "$(printf '\t')"
+} | fmt_table
 if [ "$FORCE" != 1 ]; then
   printf 'delete ALL of the above (the meter is running)? [y/N] '
   read -r answer
