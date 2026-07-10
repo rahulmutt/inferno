@@ -8,10 +8,27 @@ inside the standard dev environment, collect results, deprovision. Spec:
 
 - `PNAP_CLIENT_ID` / `PNAP_CLIENT_SECRET` exported (PhoenixNAP portal →
   API Credentials). Never write them into any file in this repo.
+  When creating the credential, grant the **`bmc`** scope (full BMC API
+  access): `mise run metal` / `metal-gc` create and delete servers, which
+  the read-only **`bmc.read`** scope does not allow. `bmc.read` alone is
+  enough only for the read paths (`metal-catalog`,
+  `metal-record-fixtures` — the billing products/availability endpoints
+  are governed by the same `bmc`/`bmc.read` scope pair), so a
+  least-privilege recon credential is possible, but provisioning needs
+  `bmc`. Scope names are from PhoenixNAP's published OpenAPI specs
+  (bmcapi/billingapi in the `phoenixnap/go-sdk-bmc` repo).
 - An SSH keypair (`~/.ssh/id_ed25519[.pub]` by default; `--ssh-key` to
-  override).
+  override). Generate one if missing:
+
+      ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+
+  Accept or set a passphrase as you prefer; the public key is injected
+  into the server at provision time, nothing needs uploading to the
+  PhoenixNAP portal.
 - devpod (mise-pinned, `mise install`); jq and curl from the system
-  (not mise-pinned).
+  (not mise-pinned). `column` (util-linux) is optional — `metal-catalog`
+  uses it only to align its table and falls back to raw tab-separated
+  output when it's absent.
 - This tooling has never been exercised against the live PhoenixNAP API
   (fixtures are hand-written, not recorded — see the spec's
   [Amendments](../superpowers/specs/2026-07-10-phoenixnap-bench-infra-design.md#amendments)).

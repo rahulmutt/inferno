@@ -253,3 +253,54 @@ is PhoenixNAP's own canonical spec):
   for the default login user on the chosen image** as part of its live
   verification pass (this was not — and could not be — checked by the
   no-credentials Task 2 recon above).
+
+### 2026-07-10 — live read-path recon complete (write-path smoke still OPEN)
+
+Ran against the live PhoenixNAP API with real `PNAP_CLIENT_ID` /
+`PNAP_CLIENT_SECRET` (credential granted the `bmc` scope). **The read path
+is now verified against real API responses, superseding the hand-written
+fixtures from the Task 2 recon:**
+
+- **OAuth2 grant confirmed live:** the client-credentials POST to
+  `PNAP_AUTH_URL` returns a token whose `access_token` field is the shape
+  `lib.sh`'s `pnap_token` expects — previously only static. Auth works.
+- **Both billing endpoints confirmed live:** `mise run metal-record-fixtures`
+  drove `/billing/v1/products?productCategory=SERVER` and
+  `/billing/v1/product-availability?productCategory=SERVER&minQuantity=1`
+  successfully; `mise run metal-catalog` joins the two plus the ISA table
+  into a correct 7-column catalog (79 products). Real field shapes match
+  what `catalog_join` / the sanitizer read — no endpoint or field-shape
+  fix was needed.
+- **`minQuantityAvailable` confirmed boolean live**, as the Task 2 static
+  recon predicted; the catalog's IN-STOCK column is correct.
+- **AMD absence confirmed live:** every priced SERVER product is Intel Xeon
+  (`GenuineIntel`); the only ARM types (`a1.*`/`a2.*`, Ampere Altra) come
+  back UNMAPPED. There is **no AMD EPYC** anywhere in the live catalog —
+  the M4b.7 hardware ask (gates 1–4 wanted a quiet AMD ≥12-core box) has no
+  PhoenixNAP equivalent and must be re-planned onto Intel (e.g.
+  `d3.c3.large`, Xeon Gold 6542Y, 48c, full AVX-512+AMX, in stock PHX/NLD,
+  $1.47/hr).
+- **Fixtures re-recorded and committed.** Two fixes landed while doing so:
+  (1) `record-fixtures.sh` now `unique`s the plans array — the API returns
+  ~30 plan objects per product (one per pricingModel×location) that collapse
+  to ~5 distinct once sanitized to `{pricingModel, price}`, so the raw
+  recording was ~10k lines of duplicates; deduped it is ~2.5k and
+  reviewable, and the tooling only reads the first HOURLY price so behavior
+  is unchanged. (2) `lib-selftest.sh`'s `catalog_join | head -1` was
+  replaced with a full-capture + parameter-expansion first-line read: under
+  `set -o pipefail` the real (large) fixture made `jq` SIGPIPE (exit 141)
+  when `head` closed the pipe early — a latent test bug the tiny
+  hand-written fixture had masked. `mise run metal-selftest` is green
+  against the real fixtures.
+- New mise tasks expose these paths: `metal-selftest` (offline) and
+  `metal-record-fixtures` (live, read-only, `bmc.read` sufficient).
+
+**Still OPEN — the paid write-path E2E smoke** (needs the `bmc` write scope;
+read-only `bmc.read` cannot exercise it): the server-lifecycle path
+(`POST /bmc/v1/servers` create shape, power-on/ssh polling, ssh as the
+`debian` user, **passwordless sudo** for that user per the fix-wave note
+above, host-prep drift check on real silicon, devpod+devenv workload,
+result collection, EXIT-trap deprovision) is entirely unexercised. Complete
+both smokes from the §Testing plan — happy path via
+`mise run metal -- <cheapest-type> --yes -- 'mise run lint'`, then a
+kill-mid-run to verify the trap deprovisions — and record the result here.

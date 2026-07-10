@@ -1,34 +1,274 @@
 [
   {
-    "productCode": "s0.d1.small",
+    "productCode": "a1.c5.large",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 0.08
+        "price": 0.99000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 295.93000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 321.40000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 352.87000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 420.18000
       }
     ],
     "metadata": {
-      "cpu": "Intel E3-1240v3",
+      "cpu": "Ampere Altra Q80-30",
       "cpuCount": 1,
-      "coresPerCpu": 4,
-      "cpuFrequency": 3.4
+      "coresPerCpu": 80,
+      "cpuFrequency": 3.0
     }
   },
   {
-    "productCode": "s2.c2.medium",
+    "productCode": "a1.c5.xlarge",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 0.37
+        "price": 1.09000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 328.36000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 356.63000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 408.32000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 462.62000
       }
     ],
     "metadata": {
-      "cpu": "Intel Xeon E-2388G",
+      "cpu": "Ampere Altra Q80-30",
       "cpuCount": 1,
+      "coresPerCpu": 80,
+      "cpuFrequency": 3.0
+    }
+  },
+  {
+    "productCode": "a2.c9.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 459.18000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 523.86000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 616.25000
+      }
+    ],
+    "metadata": {
+      "cpu": "AmpereOne A96-36X",
+      "cpuCount": 1,
+      "coresPerCpu": 96,
+      "cpuFrequency": 3.6
+    }
+  },
+  {
+    "productCode": "a2.c9.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 482.82000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 650.02000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1098.15000
+      }
+    ],
+    "metadata": {
+      "cpu": "AmpereOne A96-36X",
+      "cpuCount": 1,
+      "coresPerCpu": 96,
+      "cpuFrequency": 3.6
+    }
+  },
+  {
+    "productCode": "d1.c4.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.00000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 516.11000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 554.93000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 587.29000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 702.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6258R",
+      "cpuCount": 2,
+      "coresPerCpu": 28,
+      "cpuFrequency": 2.7
+    }
+  },
+  {
+    "productCode": "d1.c4.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.80000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 408.36000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 439.30000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 465.08000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 556.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6258R",
+      "cpuCount": 2,
+      "coresPerCpu": 28,
+      "cpuFrequency": 2.7
+    }
+  },
+  {
+    "productCode": "d1.c4.small",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.66000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 336.03000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 361.68000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 383.06000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 458.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6258R",
+      "cpuCount": 2,
+      "coresPerCpu": 28,
+      "cpuFrequency": 2.7
+    }
+  },
+  {
+    "productCode": "d1.m4.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.55000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 814.26000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 874.90000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 925.43000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1106.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6258R",
+      "cpuCount": 2,
+      "coresPerCpu": 28,
+      "cpuFrequency": 2.7
+    }
+  },
+  {
+    "productCode": "d2.c1.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.81000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 320.61000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 356.23000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 400.75000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 508.90000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5315Y",
+      "cpuCount": 2,
       "coresPerCpu": 8,
-      "cpuFrequency": 3.2
+      "cpuFrequency": 3.1
     }
   },
   {
@@ -37,11 +277,411 @@
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 0.61
+        "price": 0.61000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 225.01000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 246.44000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 272.38000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 338.24000
       }
     ],
     "metadata": {
-      "cpu": "Dual Gold 5315Y",
+      "cpu": "Dual Xeon Gold 5315Y",
+      "cpuCount": 2,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.1
+    }
+  },
+  {
+    "productCode": "d2.c2.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.86000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 351.54000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 387.16000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 431.69000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 543.27000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5317",
+      "cpuCount": 2,
+      "coresPerCpu": 12,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d2.c2.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.65000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 255.94000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 277.37000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 303.31000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 372.62000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5317",
+      "cpuCount": 2,
+      "coresPerCpu": 12,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d2.c3.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.07000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 415.91000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 463.73000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 523.51000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 667.08000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6326",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 2.6
+    }
+  },
+  {
+    "productCode": "d2.c3.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.83000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 301.55000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 331.66000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 368.10000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 459.01000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6326",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 2.6
+    }
+  },
+  {
+    "productCode": "d2.c4.db1.pliops1",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.23000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 655.78000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 728.51000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 799.82000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1375.50000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6336Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.4
+    }
+  },
+  {
+    "productCode": "d2.c4.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.23000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 522.32000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 570.15000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 629.93000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 785.32000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6336Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.3
+    }
+  },
+  {
+    "productCode": "d2.c4.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.99000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 407.97000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 438.08000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 474.52000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 577.25000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6336Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.3
+    }
+  },
+  {
+    "productCode": "d2.c5.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.41000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 638.81000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 686.64000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 746.42000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 914.76000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8352Y",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 2.2
+    }
+  },
+  {
+    "productCode": "d2.c5.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.17000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 524.47000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 554.56000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 591.00000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 706.69000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8352Y",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 2.2
+    }
+  },
+  {
+    "productCode": "d2.ipm2.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.75000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 1298.04000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1416.54000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1564.67000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1755.12000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8352Y",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 2.2
+    }
+  },
+  {
+    "productCode": "d2.m1.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.15000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 466.36000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 514.75000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 575.23000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 725.53000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5317",
+      "cpuCount": 2,
+      "coresPerCpu": 12,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d2.m1.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.10000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 435.43000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 483.81000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 544.28000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 691.16000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5315Y",
       "cpuCount": 2,
       "coresPerCpu": 8,
       "cpuFrequency": 3.1
@@ -53,23 +693,119 @@
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 1.10
+        "price": 1.10000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 435.43000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 483.81000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 544.28000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 691.16000
       }
     ],
     "metadata": {
-      "cpu": "Dual Gold 5315Y",
+      "cpu": "Dual Xeon Gold 5315Y",
       "cpuCount": 2,
       "coresPerCpu": 8,
       "cpuFrequency": 3.1
     }
   },
   {
-    "productCode": "d2.c5.large",
+    "productCode": "d2.m2.large",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 1.41
+        "price": 1.55000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 646.61000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 708.24000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 785.28000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 982.59000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 6336Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.3
+    }
+  },
+  {
+    "productCode": "d2.m2.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.39000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 540.18000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 601.81000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 678.86000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 864.34000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 6326",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 2.6
+    }
+  },
+  {
+    "productCode": "d2.m2.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.73000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 763.09000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 824.72000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 901.76000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1112.02000
       }
     ],
     "metadata": {
@@ -80,12 +816,316 @@
     }
   },
   {
-    "productCode": "d3.m6.xxlarge",
+    "productCode": "d2.m2.xxlarge",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 2.56
+        "price": 1.15000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 466.36000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 514.75000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 575.23000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 725.53000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5317",
+      "cpuCount": 2,
+      "coresPerCpu": 12,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d2.m3.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.39000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 540.18000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 601.81000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 678.86000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 864.34000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6326",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 2.6
+    }
+  },
+  {
+    "productCode": "d2.m4.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.55000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 646.61000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 708.24000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 785.28000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 982.59000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6336Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.3
+    }
+  },
+  {
+    "productCode": "d2.m5.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.73000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 763.09000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 824.72000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 901.76000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1112.02000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8352Y",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 2.2
+    }
+  },
+  {
+    "productCode": "d3.c1.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.27000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 360.05000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 394.07000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 436.59000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 804.27000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6536",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 3.0
+    }
+  },
+  {
+    "productCode": "d3.c2.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.40000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 449.69000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 483.71000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 526.24000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 903.89000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6540",
+      "cpuCount": 2,
+      "coresPerCpu": 20,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d3.c3.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.47000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 492.62000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 526.64000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 569.17000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 951.59000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6542Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d3.c4.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.20000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 380.78000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 414.21000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 455.49000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 766.61000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5418Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.1
+    }
+  },
+  {
+    "productCode": "d3.c5.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.34000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 481.80000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 515.22000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 556.51000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 867.63000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6430",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 1.9
+    }
+  },
+  {
+    "productCode": "d3.c6.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.47000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 615.79000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 690.49000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 699.72000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 967.82000
       }
     ],
     "metadata": {
@@ -96,19 +1136,387 @@
     }
   },
   {
-    "productCode": "d2.c4.db1.pliops1",
+    "productCode": "d3.g2.c1.xlarge",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 2.23
+        "price": 2.49000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 808.21000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 880.11000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 998.26000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1646.72000
       }
     ],
     "metadata": {
-      "cpu": "Dual Gold 6336Y",
+      "cpu": "Dual Xeon Gold 6426",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d3.g2.c2.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.60000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 875.63000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 947.52000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1065.66000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1726.02000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6436",
+      "cpuCount": 2,
+      "coresPerCpu": 20,
+      "cpuFrequency": 2.7
+    }
+  },
+  {
+    "productCode": "d3.g2.c3.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.67000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 920.23000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 992.12000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1110.27000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1778.49000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6442Y",
       "cpuCount": 2,
       "coresPerCpu": 24,
-      "cpuFrequency": 2.4
+      "cpuFrequency": 2.6
+    }
+  },
+  {
+    "productCode": "d3.m1.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.78000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 552.45000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 607.19000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 675.60000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1125.08000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6536",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 3.0
+    }
+  },
+  {
+    "productCode": "d3.m2.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.91000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 652.07000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 706.80000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 775.22000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1224.69000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6540",
+      "cpuCount": 2,
+      "coresPerCpu": 20,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d3.m3.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.98000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 699.77000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 754.50000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 822.92000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1272.39000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6542Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "d3.m4.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.59000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 703.44000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 768.03000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 847.81000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1010.22000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5418Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.1
+    }
+  },
+  {
+    "productCode": "d3.m4.xxlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.24000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 973.43000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1066.43000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1181.32000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1415.20000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 5418Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.1
+    }
+  },
+  {
+    "productCode": "d3.m5.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.73000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 804.46000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 869.04000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 948.82000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1111.23000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6430",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 1.9
+    }
+  },
+  {
+    "productCode": "d3.m5.xxlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.38000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 1074.45000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1167.45000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1282.34000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1516.21000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Xeon Gold 6430",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 1.9
+    }
+  },
+  {
+    "productCode": "d3.m6.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.92000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 938.45000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1003.03000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1082.81000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1245.22000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8452Y",
+      "cpuCount": 2,
+      "coresPerCpu": 36,
+      "cpuFrequency": 2.0
+    }
+  },
+  {
+    "productCode": "d3.m6.xxlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.56000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 1208.43000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1301.44000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1416.32000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1650.20000
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8452Y",
+      "cpuCount": 2,
+      "coresPerCpu": 36,
+      "cpuFrequency": 2.0
     }
   },
   {
@@ -117,30 +1525,630 @@
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 3.10
+        "price": 3.10000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 1286.06000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1414.24000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1675.17000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1921.61000
       }
     ],
     "metadata": {
-      "cpu": "Dual Gold 6430",
+      "cpu": "Dual Xeon Gold 6430",
       "cpuCount": 2,
       "coresPerCpu": 32,
       "cpuFrequency": 1.9
     }
   },
   {
-    "productCode": "d3.c3.large",
+    "productCode": "s0.d1.medium",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 1.55
+        "price": 0.10000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 49.47000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 54.27000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 58.27000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 63.87000
       }
     ],
     "metadata": {
-      "cpu": "Dual Gold 6542Y",
-      "cpuCount": 2,
+      "cpu": "Single Intel E3-1270v3",
+      "cpuCount": 1,
+      "coresPerCpu": 4,
+      "cpuFrequency": 3.5
+    }
+  },
+  {
+    "productCode": "s0.d1.small",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.08000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 38.81000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 42.83000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 46.18000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 50.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Single Intel E3-1240v3",
+      "cpuCount": 1,
+      "coresPerCpu": 4,
+      "cpuFrequency": 3.4
+    }
+  },
+  {
+    "productCode": "s1.c1.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.24000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 100.60000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 108.96000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 115.93000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 147.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Single Intel E-2276G",
+      "cpuCount": 1,
+      "coresPerCpu": 6,
+      "cpuFrequency": 3.8
+    }
+  },
+  {
+    "productCode": "s1.c1.small",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.16000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 59.47000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 64.83000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 69.29000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 88.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Single Intel E-2276G",
+      "cpuCount": 1,
+      "coresPerCpu": 6,
+      "cpuFrequency": 3.8
+    }
+  },
+  {
+    "productCode": "s1.c2.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.27000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 114.54000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 123.92000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 131.74000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 167.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Single Intel E-2288G",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.7
+    }
+  },
+  {
+    "productCode": "s1.c2.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.24000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 101.99000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 110.46000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 117.51000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 149.87000
+      }
+    ],
+    "metadata": {
+      "cpu": "Single Intel E-2288G",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.7
+    }
+  },
+  {
+    "productCode": "s2.c1.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.37000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 117.81000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 127.44000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 135.46000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 172.57000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon E-2356G",
+      "cpuCount": 1,
+      "coresPerCpu": 6,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s2.c1.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.29000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 90.91000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 98.57000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 104.94000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 133.97000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon E-2356G",
+      "cpuCount": 1,
+      "coresPerCpu": 6,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s2.c1.small",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.17000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 65.36000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 71.15000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 75.96000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 97.31000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon E-2356G",
+      "cpuCount": 1,
+      "coresPerCpu": 6,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s2.c2.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.40000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 129.06000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 139.51000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 148.21000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 188.71000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon E-2388G",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s2.c2.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.37000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 117.34000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 126.93000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 134.92000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 171.89000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon E-2388G",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s2.c2.small",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.31000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 99.20000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 107.46000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 114.34000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 145.86000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon E-2388G",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s3.c3.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.65000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 195.78000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 204.45000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 214.14000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 338.04000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Core i9 14900K",
+      "cpuCount": 1,
       "coresPerCpu": 24,
-      "cpuFrequency": 2.9
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s3.c3.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.47000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 145.85000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 151.75000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 158.35000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 248.99000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Core i9 14900K",
+      "cpuCount": 1,
+      "coresPerCpu": 24,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "s4.c3.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.57000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 204.04000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 223.69000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 251.76000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 396.53000
+      }
+    ],
+    "metadata": {
+      "cpu": "AMD EPYC 4345P",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.8
+    }
+  },
+  {
+    "productCode": "s4.c6.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.68000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 235.20000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 260.34000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 296.27000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 484.66000
+      }
+    ],
+    "metadata": {
+      "cpu": "AMD EPYC 4565P",
+      "cpuCount": 1,
+      "coresPerCpu": 16,
+      "cpuFrequency": 4.3
+    }
+  },
+  {
+    "productCode": "s4.c6.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.15000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 423.35000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 494.20000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 552.24000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 788.71000
+      }
+    ],
+    "metadata": {
+      "cpu": "AMD EPYC 4565P",
+      "cpuCount": 1,
+      "coresPerCpu": 16,
+      "cpuFrequency": 4.3
+    }
+  },
+  {
+    "productCode": "s4.c6.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.77000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 261.72000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 291.55000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 334.16000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 529.82000
+      }
+    ],
+    "metadata": {
+      "cpu": "AMD EPYC 4565P",
+      "cpuCount": 1,
+      "coresPerCpu": 16,
+      "cpuFrequency": 4.3
+    }
+  },
+  {
+    "productCode": "s4.s2.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 301.43000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 346.16000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 617.66000
+      }
+    ],
+    "metadata": {
+      "cpu": "AMD EPYC 4345P",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.8
     }
   },
   {
@@ -149,23 +2157,151 @@
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 2.75
+        "price": 1.72000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 579.64000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 626.50000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 685.07000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1109.79000
       }
     ],
     "metadata": {
-      "cpu": "Intel Xeon 6731E",
+      "cpu": "Intel Xeon 6 6731E",
       "cpuCount": 1,
       "coresPerCpu": 96,
       "cpuFrequency": 2.2
     }
   },
   {
-    "productCode": "s5.x6.c8.medium",
+    "productCode": "s4.x6.m6.xlarge",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 3.25
+        "price": 2.52000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 820.07000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 893.64000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 985.60000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1841.19000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6 6731E",
+      "cpuCount": 1,
+      "coresPerCpu": 96,
+      "cpuFrequency": 2.2
+    }
+  },
+  {
+    "productCode": "s5.x6.c3.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.29000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 433.78000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 485.32000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 558.94000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 870.85000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6527P",
+      "cpuCount": 1,
+      "coresPerCpu": 24,
+      "cpuFrequency": 3.0
+    }
+  },
+  {
+    "productCode": "s5.x6.c3.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.25000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 421.97000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 471.42000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 542.06000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 844.07000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6527P",
+      "cpuCount": 1,
+      "coresPerCpu": 24,
+      "cpuFrequency": 3.0
+    }
+  },
+  {
+    "productCode": "s5.x6.c8.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.23000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 706.73000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 806.91000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 950.03000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1520.70000
       }
     ],
     "metadata": {
@@ -176,51 +2312,187 @@
     }
   },
   {
-    "productCode": "a1.c5.large",
+    "productCode": "s5.x6.c8.medium",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "HOURLY",
-        "price": 0.95
+        "price": 1.91000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 611.63000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 695.03000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 814.17000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1300.94000
       }
     ],
     "metadata": {
-      "cpu": "Ampere Altra Q80-30",
+      "cpu": "Intel Xeon 6767P",
       "cpuCount": 1,
-      "coresPerCpu": 80,
-      "cpuFrequency": 3.0
+      "coresPerCpu": 64,
+      "cpuFrequency": 2.4
     }
   },
   {
-    "productCode": "d3.g2.c1.xlarge",
+    "productCode": "s5.x6.c9.large",
     "productCategory": "SERVER",
     "plans": [
       {
-        "pricingModel": "MONTHLY_PACKAGE",
-        "price": 1646.72
+        "pricingModel": "HOURLY",
+        "price": 2.50000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 791.54000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 903.74000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1064.03000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1703.18000
       }
     ],
     "metadata": {
-      "cpu": "Dual Gold 6426",
-      "cpuCount": 2,
-      "coresPerCpu": 16,
-      "cpuFrequency": 2.5
+      "cpu": "Intel Xeon 6770P",
+      "cpuCount": 1,
+      "coresPerCpu": 64,
+      "cpuFrequency": 2.8
     }
   },
   {
-    "productCode": "d3.g2.c3.xlarge",
+    "productCode": "s5.x6.c9.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.14000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 685.03000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 778.44000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 911.87000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1457.05000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6770P",
+      "cpuCount": 1,
+      "coresPerCpu": 64,
+      "cpuFrequency": 2.8
+    }
+  },
+  {
+    "productCode": "s5.x6.m8.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.77000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 864.41000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 992.41000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1175.27000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 1885.06000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6767P",
+      "cpuCount": 1,
+      "coresPerCpu": 64,
+      "cpuFrequency": 2.4
+    }
+  },
+  {
+    "productCode": "s5.x6.m9.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 3.11000
+      },
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 968.14000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1111.50000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 1316.31000
+      },
+      {
+        "pricingModel": "ONE_MONTH_RESERVATION",
+        "price": 2111.26000
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6770P",
+      "cpuCount": 1,
+      "coresPerCpu": 64,
+      "cpuFrequency": 2.8
+    }
+  },
+  {
+    "productCode": "s5.x6.s5.large",
     "productCategory": "SERVER",
     "plans": [
       {
         "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
-        "price": 1082.62
+        "price": 1504.01000
+      },
+      {
+        "pricingModel": "TWENTY_FOUR_MONTHS_RESERVATION",
+        "price": 1699.19000
+      },
+      {
+        "pricingModel": "TWELVE_MONTHS_RESERVATION",
+        "price": 2330.87000
       }
     ],
     "metadata": {
-      "cpu": "Dual Gold 6442Y",
-      "cpuCount": 2,
-      "coresPerCpu": 24,
-      "cpuFrequency": 2.6
+      "cpu": "Intel Xeon 6767P",
+      "cpuCount": 1,
+      "coresPerCpu": 64,
+      "cpuFrequency": 2.4
     }
   }
 ]

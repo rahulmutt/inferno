@@ -10,9 +10,14 @@ require_env
 require_tools curl jq
 mkdir -p "$HERE/fixtures"
 
+# The API returns one plan object per (pricingModel, location, ...) combo; once
+# we strip everything but pricingModel+price they collapse into ~6 identical
+# copies each. `unique` dedups (and sorts, for stable diffs) — the tooling only
+# reads the first HOURLY price, so dropping the copies changes nothing but the
+# fixture size (~6x smaller and reviewable).
 pnap_api GET "/billing/v1/products?productCategory=SERVER" | jq '
   [.[] | {productCode, productCategory,
-          plans: [.plans[]? | {pricingModel, price}],
+          plans: ([.plans[]? | {pricingModel, price}] | unique),
           metadata: {cpu: .metadata.cpu, cpuCount: .metadata.cpuCount,
                      coresPerCpu: .metadata.coresPerCpu,
                      cpuFrequency: .metadata.cpuFrequency}}]' \

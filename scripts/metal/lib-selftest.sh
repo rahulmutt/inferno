@@ -98,7 +98,11 @@ expect "vendor drift exit code" "$rc" "4"
 rm -rf "$HERE/fixtures/cpuinfo-match.proc" "$HERE/fixtures/cpuinfo-drift.proc"
 
 # --- catalog_join -----------------------------------------------------------
-row=$(catalog_join "$HERE/fixtures/products.json" "$HERE/fixtures/availability.json" "$(features_table)" | head -1)
+# Capture the full join, then take the first line by parameter expansion —
+# `catalog_join | head -1` SIGPIPEs jq (141) under `set -o pipefail` once the
+# fixture is large enough that jq is still streaming when head closes the pipe.
+rows=$(catalog_join "$HERE/fixtures/products.json" "$HERE/fixtures/availability.json" "$(features_table)")
+row=${rows%%$'\n'*}
 [ -n "$row" ] || fail "catalog_join produced no rows"
 expect "catalog_join column count" "$(printf '%s' "$row" | awk -F'\t' '{print NF}')" "7"
 # Every mapped type's flags column must be non-empty; UNMAPPED rows say so.
