@@ -82,3 +82,11 @@ run = "bash scripts/metal/catalog.sh"
 [tasks.metal-gc]
 description = "List + delete stray inferno-metal servers (run after any interrupted metal session)"
 run = "bash scripts/metal/gc.sh"
+
+[tasks.metal-selftest]
+description = "Offline metal tooling selftest (no network, no credentials): API retry/backoff, catalog join, host-prep drift, gc tag match, arg parsing"
+run = "bash scripts/metal/lib-selftest.sh"
+
+[tasks.metal-record-fixtures]
+description = "Re-record scripts/metal/fixtures/ from the live PhoenixNAP API (needs PNAP_CLIENT_ID/SECRET; read-only, free). Diff the result, then re-run metal-selftest"
+run = "bash scripts/metal/record-fixtures.sh"
