@@ -45,4 +45,44 @@ if (unset PNAP_CLIENT_ID PNAP_CLIENT_SECRET 2>/dev/null; require_env 2>/dev/null
   fail "require_env should fail without credentials"
 fi
 
+# --- cpu-features.json integrity ------------------------------------------
+check_features_table || fail "shipped cpu-features.json must pass its own check"
+badtable=$(mktemp)
+cat > "$badtable" <<'EOF'
+{"schema": 1,
+ "flag_vocabulary": ["avx2", "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl"],
+ "types": {"x.bad": {"cpu_model": "Fake 9000", "vendor": "AuthenticAMD",
+                     "physical_cores": 8, "flags": ["avx2", "axv512f"], "source": "test"}}}
+EOF
+if METAL_FEATURES_TABLE="$badtable" check_features_table 2>/dev/null; then
+  fail "typo'd flag (axv512f) must fail the integrity check"
+fi
+cat > "$badtable" <<'EOF'
+{"schema": 1,
+ "flag_vocabulary": ["avx2", "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl"],
+ "types": {"x.bad": {"cpu_model": "Fake 9000", "vendor": "GenuineIntel",
+                     "physical_cores": 8, "flags": ["avx2", "avx512f"], "source": "test"}}}
+EOF
+if METAL_FEATURES_TABLE="$badtable" check_features_table 2>/dev/null; then
+  fail "avx512f without sub-feature enumeration must fail the integrity check"
+fi
+rm -f "$badtable"
+
+# --- host-prep flag verification (fixture /proc, setup skipped) -----------
+hp() { # <cpuinfo-fixture> <flags-csv> <vendor> — runs host-prep in test mode
+  METAL_PROC_ROOT="$HERE/fixtures/$1.proc" METAL_SKIP_SETUP=1 \
+    sh "$HERE/host-prep.sh" "$2" "avx2,avx512f,avx512bw,avx512cd,avx512dq,avx512vl" "$3"
+}
+mkdir -p "$HERE/fixtures/cpuinfo-match.proc" "$HERE/fixtures/cpuinfo-drift.proc"
+cp "$HERE/fixtures/cpuinfo-match.txt" "$HERE/fixtures/cpuinfo-match.proc/cpuinfo"
+cp "$HERE/fixtures/cpuinfo-drift.txt" "$HERE/fixtures/cpuinfo-drift.proc/cpuinfo"
+hp cpuinfo-match "avx2" "AuthenticAMD" >/dev/null || fail "matching flags should pass host-prep"
+rc=0; hp cpuinfo-drift "avx2" "AuthenticAMD" >/dev/null 2>&1 || rc=$?
+expect "unexpected-flag drift exit code" "$rc" "4"          # box has avx512f, table omits it
+rc=0; hp cpuinfo-match "avx2,avx512f" "AuthenticAMD" >/dev/null 2>&1 || rc=$?
+expect "missing-flag drift exit code" "$rc" "4"             # table promises avx512f, box lacks it
+rc=0; hp cpuinfo-match "avx2" "GenuineIntel" >/dev/null 2>&1 || rc=$?
+expect "vendor drift exit code" "$rc" "4"
+rm -rf "$HERE/fixtures/cpuinfo-match.proc" "$HERE/fixtures/cpuinfo-drift.proc"
+
 echo "metal lib-selftest: OK"

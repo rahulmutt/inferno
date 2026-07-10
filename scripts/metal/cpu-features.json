@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "flag_vocabulary": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                      "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                      "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                      "amx_tile", "amx_int8", "amx_bf16"],
+  "types": {
+    "s0.d1.small": {
+      "cpu_model": "Intel Xeon E3-1240 v3",
+      "vendor": "GenuineIntel",
+      "physical_cores": 4,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/75055/intel-xeon-processor-e31240-v3-8m-cache-3-40-ghz.html"
+    },
+    "s2.c2.medium": {
+      "cpu_model": "Intel Xeon E-2388G",
+      "vendor": "GenuineIntel",
+      "physical_cores": 8,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/214805/intel-xeon-e2388g-processor-16m-cache-3-20-ghz.html"
+    },
+    "d2.c1.medium": {
+      "cpu_model": "Intel Xeon Gold 5315Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 16,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/215286/intel-xeon-gold-5315y-processor-12m-cache-3-20-ghz.html"
+    },
+    "d2.m1.xlarge": {
+      "cpu_model": "Intel Xeon Gold 5315Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 16,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/215286/intel-xeon-gold-5315y-processor-12m-cache-3-20-ghz.html"
+    },
+    "d2.c5.large": {
+      "cpu_model": "Intel Xeon Platinum 8352Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 64,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/212284/intel-xeon-platinum-8352y-processor-48m-cache-2-20-ghz.html"
+    },
+    "d3.m6.xxlarge": {
+      "cpu_model": "Intel Xeon Platinum 8452Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 72,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/231761/intel-xeon-platinum-8452y-processor-67-5m-cache-2-00-ghz.html"
+    },
+    "d2.c4.db1.pliops1": {
+      "cpu_model": "Intel Xeon Gold 6336Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 48,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/215280/intel-xeon-gold-6336y-processor-36m-cache-2-40-ghz.html"
+    },
+    "d3.s5.xlarge": {
+      "cpu_model": "Intel Xeon Gold 6430",
+      "vendor": "GenuineIntel",
+      "physical_cores": 64,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/231737/intel-xeon-gold-6430-processor-60m-cache-2-10-ghz.html"
+    },
+    "d3.c3.large": {
+      "cpu_model": "Intel Xeon Gold 6542Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 48,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/237559/intel-xeon-gold-6542y-processor-60m-cache-2-90-ghz.html"
+    },
+    "s4.x6.c6.large": {
+      "cpu_model": "Intel Xeon 6731E",
+      "vendor": "GenuineIntel",
+      "physical_cores": 96,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/240366/intel-xeon-6731e-processor-96m-cache-2-20-ghz.html"
+    },
+    "s5.x6.c8.medium": {
+      "cpu_model": "Intel Xeon 6767P",
+      "vendor": "GenuineIntel",
+      "physical_cores": 64,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/241845/intel-xeon-6767p-processor-336m-cache-2-40-ghz.html"
+    },
+    "d3.g2.c1.xlarge": {
+      "cpu_model": "Intel Xeon Gold 6426Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 32,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/232377/intel-xeon-gold-6426y-processor-37-5m-cache-2-50-ghz.html"
+    },
+    "d3.g2.c3.xlarge": {
+      "cpu_model": "Intel Xeon Gold 6442Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 48,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/232380/intel-xeon-gold-6442y-processor-60m-cache-2-60-ghz.html"
+    }
+  }
+}

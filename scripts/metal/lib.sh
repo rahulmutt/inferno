@@ -81,3 +81,29 @@ pnap_api() {
 # https://phoenixnap.com/kb/bmc-remote-console.
 metal_default_os() { echo "${METAL_OS:-debian/bookworm}"; }
 metal_default_ssh_user() { echo "${METAL_SSH_USER:-debian}"; }
+
+# features_table — path to the curated ISA table (override for tests).
+features_table() {
+  echo "${METAL_FEATURES_TABLE:-$(dirname "${BASH_SOURCE[0]}")/cpu-features.json}"
+}
+
+# check_features_table — integrity: every entry has cpu_model / a real
+# vendor_id / physical_cores >= 1 / flags drawn from flag_vocabulary, and
+# any avx512f entry enumerates the bw/cd/dq/vl sub-features explicitly
+# (kernel dispatch will care exactly which subset exists).
+check_features_table() {
+  jq -e '
+    .flag_vocabulary as $v
+    | [ .types | to_entries[]
+        | select(
+            ((.value.cpu_model // "") == "")
+            or ((.value.vendor // "") | IN("GenuineIntel", "AuthenticAMD") | not)
+            or ((.value.physical_cores // 0) < 1)
+            or (((.value.flags // []) - $v) | length > 0)
+            or (((.value.flags // []) | index("avx512f")) != null
+                and ((["avx512bw", "avx512cd", "avx512dq", "avx512vl"] - .value.flags) | length > 0))
+          )
+        | .key ]
+    | if length == 0 then true else error("bad entries: \(join(","))") end
+  ' "$(features_table)" >/dev/null
+}
