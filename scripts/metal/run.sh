@@ -198,6 +198,6 @@ echo "metal: collecting results"
 devpod ssh "$WORKSPACE" --command \
   'cd /workspace && tar -cf - --ignore-failed-read target/quiet-hw target/criterion 2>/dev/null || true' \
   | tar -xf - -C "$OUT" 2>/dev/null || true
-ls -R "$OUT" | head -30
+ls -R "$OUT" | head -30 || true
 
 exit "$WORKLOAD_RC"
