@@ -42,6 +42,10 @@ if [ "${METAL_PARSE_ONLY:-0}" = 1 ]; then
   exit 0
 fi
 
+# Selftest first — cheap, and it's the pass that guards every later stage
+# (verify.sh discipline).
+bash "$HERE/lib-selftest.sh" >/dev/null
+
 # --- preflight (local, free) -------------------------------------------
 require_tools curl jq ssh tar devpod git
 require_env
