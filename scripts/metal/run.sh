@@ -161,4 +161,43 @@ else
 fi
 meta_set cpu_expected "$(jq -c '.' <<<"$ENTRY")"
 
-metal_die "not implemented: devpod workspace + workload + collect (Task 7)"
+# --- devpod workspace ------------------------------------------------------
+PROVIDER="metal-$RUN_ID"
+WORKSPACE="inferno-metal-$RUN_ID"
+devpod_cleanup() {
+  devpod delete "$WORKSPACE" --force >/dev/null 2>&1 || true
+  devpod provider delete "$PROVIDER" >/dev/null 2>&1 || true
+}
+# Extend the teardown path: devpod objects go first, then the server.
+# The script's exit code is captured before devpod_cleanup can clobber $?.
+trap 'rc=$?; devpod_cleanup; cleanup "$rc"' EXIT
+
+echo "metal: creating devpod workspace on $SERVER_IP (image pull + devenv — minutes, not seconds)"
+devpod provider add ssh --name "$PROVIDER" --use=false \
+  -o "HOST=$(metal_default_ssh_user)@$SERVER_IP"
+devpod up "$REPO" --provider "$PROVIDER" --id "$WORKSPACE" --ide none \
+  2>&1 | tee "$OUT/devpod-up.log"
+meta_set devpod_workspace "\"$WORKSPACE\""
+
+# --- workload ---------------------------------------------------------------
+# Joined into one string, run in the workspace root inside devenv shell —
+# same environment every runbook assumes. %q-quoted so operator quoting
+# survives the two ssh hops.
+WORKLOAD_STR="${WORKLOAD[*]}"
+echo "metal: running: $WORKLOAD_STR"
+meta_set workload "$(jq -n --arg w "$WORKLOAD_STR" '$w')"
+WORKLOAD_RC=0
+devpod ssh "$WORKSPACE" --command \
+  "cd /workspace && devenv shell -- bash -c $(printf '%q' "$WORKLOAD_STR")" \
+  2>&1 | tee "$OUT/workload.log" || WORKLOAD_RC=$?
+meta_set workload_exit "$WORKLOAD_RC"
+meta_set finished "\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+
+# --- collect (ALWAYS — a failed gate's partial output is the diagnostic) ----
+echo "metal: collecting results"
+devpod ssh "$WORKSPACE" --command \
+  'cd /workspace && tar -cf - --ignore-failed-read target/quiet-hw target/criterion 2>/dev/null || true' \
+  | tar -xf - -C "$OUT" 2>/dev/null || true
+ls -R "$OUT" | head -30
+
+exit "$WORKLOAD_RC"
