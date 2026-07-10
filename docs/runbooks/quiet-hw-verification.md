@@ -41,7 +41,8 @@ AMD box, gate 5 a quiet Intel SKL+ box; pick types with
     mise run metal -- <intel-type> --yes -- \
       'MODEL=$(bash scripts/fetch-qwen-gguf.sh) && mise run verify-quiet-hw -- "$MODEL"'
 
-Gate outputs land in `target/metal/<type>-<timestamp>/quiet-hw/`; paste
+Gate outputs land in `target/metal/<type>-<timestamp>/target/quiet-hw/`
+(the collect tar preserves the box's `target/` prefix); paste
 verdicts into the owning specs per the table above. The preflight still
 rules: if the rented box is noisy, UNFIT is the correct answer there too.
 

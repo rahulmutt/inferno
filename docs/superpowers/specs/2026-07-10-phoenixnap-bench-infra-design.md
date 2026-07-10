@@ -242,3 +242,14 @@ is PhoenixNAP's own canonical spec):
   with full specs on that page (Intel Xeon 6731E, 6767P; Ampere Altra
   Q80-30). Prices for a few newer/AI-ML SKUs without a published hourly
   rate are plausible placeholders, flagged as such above.
+
+### 2026-07-10 — final-review fix wave
+
+- **host-prep is invoked via `sudo`, not as root directly:** the default
+  login user on PhoenixNAP's Debian/Ubuntu cloud images has no password
+  set and is not `root`; `run.sh` runs `host-prep.sh` over ssh as that
+  default user with `sudo sh -s`, relying on the cloud image granting it
+  passwordless sudo. **Task 10 must explicitly verify passwordless sudo
+  for the default login user on the chosen image** as part of its live
+  verification pass (this was not — and could not be — checked by the
+  no-credentials Task 2 recon above).

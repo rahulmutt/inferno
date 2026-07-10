@@ -10,7 +10,13 @@ inside the standard dev environment, collect results, deprovision. Spec:
   API Credentials). Never write them into any file in this repo.
 - An SSH keypair (`~/.ssh/id_ed25519[.pub]` by default; `--ssh-key` to
   override).
-- devpod, jq, curl — all mise-pinned (`mise install`).
+- devpod (mise-pinned, `mise install`); jq and curl from the system
+  (not mise-pinned).
+- This tooling has never been exercised against the live PhoenixNAP API
+  (fixtures are hand-written, not recorded — see the spec's
+  [Amendments](../superpowers/specs/2026-07-10-phoenixnap-bench-infra-design.md#amendments)).
+  Before first real use, complete the live recon + paid E2E smoke
+  recorded there as OPEN, then re-record fixtures.
 
 ## Pick hardware
 
