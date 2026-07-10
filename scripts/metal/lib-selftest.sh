@@ -85,4 +85,13 @@ rc=0; hp cpuinfo-match "avx2" "GenuineIntel" >/dev/null 2>&1 || rc=$?
 expect "vendor drift exit code" "$rc" "4"
 rm -rf "$HERE/fixtures/cpuinfo-match.proc" "$HERE/fixtures/cpuinfo-drift.proc"
 
+# --- catalog_join -----------------------------------------------------------
+row=$(catalog_join "$HERE/fixtures/products.json" "$HERE/fixtures/availability.json" "$(features_table)" | head -1)
+[ -n "$row" ] || fail "catalog_join produced no rows"
+expect "catalog_join column count" "$(printf '%s' "$row" | awk -F'\t' '{print NF}')" "7"
+# Every mapped type's flags column must be non-empty; UNMAPPED rows say so.
+catalog_join "$HERE/fixtures/products.json" "$HERE/fixtures/availability.json" "$(features_table)" \
+  | awk -F'\t' '$2 != "UNMAPPED" && $5 == "" { exit 1 }' \
+  || fail "mapped catalog row with empty flags column"
+
 echo "metal lib-selftest: OK"

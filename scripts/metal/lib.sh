@@ -107,3 +107,26 @@ check_features_table() {
     | if length == 0 then true else error("bad entries: \(join(","))") end
   ' "$(features_table)" >/dev/null
 }
+
+# catalog_join <products.json> <availability.json> <features.json> — TSV:
+# type, cpu_model, vendor, cores, flags(csv), $/hr, in-stock locations.
+# Types missing from the features table print UNMAPPED — visible on
+# purpose: that is the prompt to extend cpu-features.json.
+catalog_join() {
+  jq -r --slurpfile av "$2" --slurpfile ft "$3" '
+    ($av[0] | map({key: .productCode,
+                   value: ([.locationAvailabilityDetails[]?
+                            | select(.minQuantityAvailable == true) | .location]
+                           | join(","))})
+             | from_entries) as $stock
+    | $ft[0].types as $t
+    | .[] | select(.productCategory == "SERVER")
+    | [ .productCode,
+        ($t[.productCode].cpu_model // "UNMAPPED"),
+        ($t[.productCode].vendor // "-"),
+        ($t[.productCode].physical_cores // "-"),
+        (($t[.productCode].flags // []) | join(",")),
+        (([.plans[]? | select(.pricingModel == "HOURLY") | .price] | first) // "-"),
+        (($stock[.productCode] // "") | if . == "" then "-" else . end) ]
+    | @tsv' "$1"
+}
