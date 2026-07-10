@@ -102,4 +102,15 @@ case "$gc_out" in
   *bbb-222*|*ccc-333*) fail "gc must never match untagged/substring-tagged servers" ;;
 esac
 
+# --- run.sh arg parsing (METAL_PARSE_ONLY short-circuits before preflight) --
+parse() { METAL_PARSE_ONLY=1 bash "$HERE/run.sh" "$@"; }
+expect "parse basic" \
+  "$(parse d3.m5.xlarge --yes -- mise run lint)" \
+  "type=d3.m5.xlarge yes=1 keep=0 reuse= workload=mise run lint"
+expect "parse keep+reuse" \
+  "$(parse d3.m5.xlarge --keep --reuse aaa-111 -- echo hi)" \
+  "type=d3.m5.xlarge yes=0 keep=1 reuse=aaa-111 workload=echo hi"
+if parse d3.m5.xlarge --yes 2>/dev/null; then fail "run.sh without a workload must fail"; fi
+if parse d3.m5.xlarge --bogus -- echo hi 2>/dev/null; then fail "unknown flag must fail"; fi
+
 echo "metal lib-selftest: OK"
