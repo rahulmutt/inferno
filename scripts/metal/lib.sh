@@ -28,6 +28,7 @@ require_tools() {
 _pnap_curl() {
   local method="$1" url="$2" body="${3:-}"
   local args=(-sS -X "$method" \
+    --connect-timeout 10 --max-time 120 \
     -H "Authorization: Bearer $PNAP_TOKEN" \
     -H "Content-Type: application/json" \
     -w $'\n%{http_code}')
@@ -41,6 +42,7 @@ pnap_token() {
   require_env
   local resp
   resp=$(curl -sS -X POST "$PNAP_AUTH_URL" \
+    --connect-timeout 10 --max-time 120 \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     -d "grant_type=client_credentials&client_id=${PNAP_CLIENT_ID}&client_secret=${PNAP_CLIENT_SECRET}") \
     || metal_die "token request to $PNAP_AUTH_URL failed"
@@ -51,6 +53,9 @@ pnap_token() {
 # pnap_api <METHOD> <path> [json-body] — authed call, bounded retry on
 # 429/5xx (backoff attempt*5s; METAL_RETRY_SLEEP overrides for tests).
 # 401/403 die immediately with a credentials hint. Prints the body.
+# METAL_NO_RETRY=1: a 429/5xx is NOT retried (the caller's request is
+# non-idempotent — e.g. POST /bmc/v1/servers — and a blind retry after a
+# real create risks provisioning a second, orphaned, billed server).
 pnap_api() {
   local method="$1" path="$2" body="${3:-}"
   pnap_token
@@ -62,7 +67,12 @@ pnap_api() {
     case "$code" in
       2??) printf '%s\n' "$out"; return 0 ;;
       401|403) metal_die "API $code on $method $path — check PNAP_CLIENT_ID/PNAP_CLIENT_SECRET" ;;
-      429|5??) sleep "${METAL_RETRY_SLEEP:-$((attempt * 5))}" ;;
+      429|5??)
+        if [ "${METAL_NO_RETRY:-0}" = 1 ]; then
+          echo "metal: API $code on $method $path (non-idempotent, not retrying — check for a stray server: mise run metal-gc): $out" >&2
+          return 1
+        fi
+        sleep "${METAL_RETRY_SLEEP:-$((attempt * 5))}" ;;
       *) echo "metal: API $code on $method $path: $out" >&2; return 1 ;;
     esac
   done

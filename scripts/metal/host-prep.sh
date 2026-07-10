@@ -1,6 +1,8 @@
 #!/bin/sh
-# Host prep for a freshly provisioned PhoenixNAP box. Runs as root ON the
-# target host over ssh (portable sh — Debian or Ubuntu; never bash-isms).
+# Host prep for a freshly provisioned PhoenixNAP box. Invoked over ssh via
+# `sudo sh -s` by the default login user (PhoenixNAP cloud images grant
+# that user passwordless sudo) — portable sh — Debian or Ubuntu; never
+# bash-isms.
 #   host-prep.sh <expected-flags-csv> <vocabulary-csv> <expected-vendor>
 # Exit codes: 0 ok, 4 = CPU vendor/flag drift vs cpu-features.json (the
 # caller aborts BEFORE the slow devpod stage; fix the table in a commit —
@@ -38,12 +40,27 @@ if [ "${METAL_SKIP_SETUP:-0}" != 1 ]; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq && apt-get install -y -qq docker.io
   }
-  n=0
+  # devpod's ssh sessions run as the invoking (non-root) user; docker.io's
+  # postinst creates the docker group, so add that user to it here — new
+  # ssh sessions (which is what devpod opens) pick up the membership.
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    usermod -aG docker "$SUDO_USER"
+  fi
+  found=0 written=0
   for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     [ -e "$g" ] || continue
-    echo performance > "$g" && n=$((n + 1))
+    found=$((found + 1))
+    if echo performance > "$g" 2>/dev/null; then
+      written=$((written + 1))
+    fi
   done
-  if [ "$n" -gt 0 ]; then echo "governor: performance on $n cpus"
-  else echo "governor: no cpufreq interface (leaving as-is)"; fi
+  if [ "$found" -eq 0 ]; then
+    echo "governor: no cpufreq interface (leaving as-is)"
+  elif [ "$written" -lt "$found" ]; then
+    echo "governor: FAILED to set performance on $((found - written))/$found cpus (need root/sudo)" >&2
+    exit 1
+  else
+    echo "governor: performance on $written cpus"
+  fi
 fi
 echo "host-prep: OK"

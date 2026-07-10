@@ -40,6 +40,18 @@ if out=$(
 expect "bounded retries" "$(cat "$attempts")" "5"
 rm -f "$attempts"
 
+# --- pnap_api: METAL_NO_RETRY=1 fails a 503 on the first attempt, no retry -
+attempts=$(mktemp); echo 0 > "$attempts"
+if out=$(
+  _pnap_curl() {
+    local n; n=$(cat "$attempts"); echo $((n + 1)) > "$attempts"
+    printf 'nope\n503\n'
+  }
+  PNAP_TOKEN=test METAL_NO_RETRY=1 METAL_RETRY_SLEEP=0 pnap_api POST /bmc/v1/servers '{}' 2>/dev/null
+); then fail "METAL_NO_RETRY=1 with a 503 should fail (got '$out')"; fi
+expect "no-retry attempt count" "$(cat "$attempts")" "1"
+rm -f "$attempts"
+
 # --- require_env ----------------------------------------------------------
 if (unset PNAP_CLIENT_ID PNAP_CLIENT_SECRET 2>/dev/null; require_env 2>/dev/null); then
   fail "require_env should fail without credentials"

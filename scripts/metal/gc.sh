@@ -5,7 +5,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/lib.sh"
-require_tools curl jq
+require_tools curl jq column
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
 

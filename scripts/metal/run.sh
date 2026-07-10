@@ -94,8 +94,14 @@ cleanup() {
       echo "metal: rerun with '--reuse $SERVER_ID', or delete via 'mise run metal-gc'."
     else
       echo "metal: deleting server $SERVER_ID"
-      pnap_api DELETE "/bmc/v1/servers/$SERVER_ID" >/dev/null \
-        || echo "metal: DELETE FAILED — run 'mise run metal-gc' NOW" >&2
+      # Explicit subshell: pnap_api can metal_die (exit) on a fatal status
+      # (e.g. 401/403). An `exit` inside a `||`-guarded call terminates the
+      # whole shell without ever reaching the `||` branch, silently
+      # swallowing this hint. Running it in "$(...)"-free `(...)` contains
+      # the exit to the subshell so the `if !` always gets to react.
+      if ! (pnap_api DELETE "/bmc/v1/servers/$SERVER_ID" >/dev/null); then
+        echo "metal: DELETE FAILED — run 'mise run metal-gc' NOW" >&2
+      fi
     fi
   fi
   echo "metal: results in $OUT (exit $rc)"
@@ -110,12 +116,15 @@ provision() { # prints the new server id
   body=$(jq -n --arg h "$hostname" --arg t "$TYPE" --arg os "$OS" \
     --arg loc "$LOCATION" --arg tag "$METAL_TAG" --arg key "$(cat "$SSH_KEY")" \
     '{hostname: $h, description: $tag, os: $os, type: $t, location: $loc, sshKeys: [$key]}')
-  pnap_api POST /bmc/v1/servers "$body" | jq -er '.id'
+  # POST /bmc/v1/servers is not idempotent: a blind retry after a 429/5xx
+  # that actually succeeded server-side would provision a second, orphaned,
+  # billed server (only the retry's id gets tracked/torn down).
+  METAL_NO_RETRY=1 pnap_api POST /bmc/v1/servers "$body" | jq -er '.id'
 }
 
 wait_ready() { # <server-id> — prints IP once powered-on + ssh answers
   local deadline=$(( $(date +%s) + ${METAL_PROVISION_TIMEOUT:-1800} ))
-  local s status ip
+  local s status ip lastline
   while [ "$(date +%s)" -lt "$deadline" ]; do
     s=$(pnap_api GET "/bmc/v1/servers/$1")
     status=$(jq -r '.status' <<<"$s")
@@ -123,12 +132,18 @@ wait_ready() { # <server-id> — prints IP once powered-on + ssh answers
     if [ "$status" = "error" ]; then
       echo "metal: server entered error state" >&2; return 1
     fi
-    if [ "$status" = "powered-on" ] && [ -n "$ip" ] \
-       && ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
-              "$(metal_default_ssh_user)@$ip" true 2>/dev/null; then
-      echo "$ip"; return 0
+    if [ "$status" = "powered-on" ] && [ -n "$ip" ]; then
+      # Default known_hosts + accept-new (not /dev/null): devpod's own
+      # plain `ssh` later depends on the host key accepted here.
+      if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
+             "$(metal_default_ssh_user)@$ip" true 2>>"$OUT/ssh-probe.log"; then
+        echo "$ip"; return 0
+      fi
+      lastline=$(tail -n1 "$OUT/ssh-probe.log" 2>/dev/null)
+      echo "metal: waiting ($status, ssh: ${lastline:-no output yet})..." >&2
+    else
+      echo "metal: waiting ($status)..." >&2
     fi
-    echo "metal: waiting ($status)..." >&2
     sleep 20
   done
   echo "metal: not ready after ${METAL_PROVISION_TIMEOUT:-1800}s — deleting via trap" >&2
@@ -140,9 +155,12 @@ host_prep() { # <ip> — drift check + docker + governor, BEFORE slow devpod
   vocab=$(jq -r '.flag_vocabulary | join(",")' "$(features_table)")
   expected=$(jq -r '.flags | join(",")' <<<"$ENTRY")
   vendor=$(jq -r '.vendor' <<<"$ENTRY")
+  # sudo: PhoenixNAP cloud-image default login users have passwordless
+  # sudo (verified live in Task 10) — host-prep.sh needs root for apt-get
+  # and the /sys governor + docker-group writes.
   # shellcheck disable=SC2029
   if ! ssh -o StrictHostKeyChecking=accept-new "$(metal_default_ssh_user)@$1" \
-       'sh -s' "$expected" "$vocab" "$vendor" < "$HERE/host-prep.sh" \
+       'sudo sh -s' "$expected" "$vocab" "$vendor" < "$HERE/host-prep.sh" \
        2>&1 | tee "$OUT/host-prep.log"; then
     metal_die "host-prep failed — if it printed DRIFT lines, fix cpu-features.json in a commit (no override exists on purpose)"
   fi
@@ -185,8 +203,9 @@ meta_set devpod_workspace "\"$WORKSPACE\""
 
 # --- workload ---------------------------------------------------------------
 # Joined into one string, run in the workspace root inside devenv shell —
-# same environment every runbook assumes. %q-quoted so operator quoting
-# survives the two ssh hops.
+# same environment every runbook assumes. %q-protects the one remote
+# re-parse; the workload string is then shell source evaluated exactly
+# once on the box (bash -c rules apply to quoting inside it).
 WORKLOAD_STR="${WORKLOAD[*]}"
 echo "metal: running: $WORKLOAD_STR"
 meta_set workload "$(jq -n --arg w "$WORKLOAD_STR" '$w')"
