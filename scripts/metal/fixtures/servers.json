@@ -1,0 +1,11 @@
+[
+  {"id": "aaa-111", "type": "d3.m5.xlarge", "hostname": "inferno-metal-d3-m5-xlarge-20260710T120000Z",
+   "description": "inferno-metal", "status": "powered-on", "provisionedOn": "2026-07-10T12:03:00Z",
+   "publicIpAddresses": ["203.0.113.10"]},
+  {"id": "bbb-222", "type": "s1.c1.medium", "hostname": "prod-db-do-not-touch",
+   "description": "production database", "status": "powered-on", "provisionedOn": "2025-01-01T00:00:00Z",
+   "publicIpAddresses": ["203.0.113.20"]},
+  {"id": "ccc-333", "type": "s1.c1.medium", "hostname": "other-team-box",
+   "description": "not-inferno-metal-related", "status": "powered-on", "provisionedOn": "2026-07-01T00:00:00Z",
+   "publicIpAddresses": ["203.0.113.30"]}
+]

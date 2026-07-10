@@ -80,3 +80,9 @@ for the v1 design.
   active)`, override with `INFERNO_DECODE_THREADS=N`. The cap is
   bit-neutral (`shard_table` keeps each row on one lane); never treat a
   cap change as a numeric change.
+- **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
+  operator-driven only, never CI. After any interrupted session run
+  `mise run metal-gc` — EXIT traps don't survive killed terminals. The
+  ISA table (`scripts/metal/cpu-features.json`) is verified against
+  `/proc/cpuinfo` on every provision; on drift, fix the table in a
+  commit, never override (see docs/runbooks/metal.md).

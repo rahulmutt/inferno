@@ -1,0 +1,4 @@
+processor	: 0
+vendor_id	: AuthenticAMD
+model name	: AMD EPYC 7402P 24-Core Processor
+flags		: fpu vme de pse msr sse sse2 sse4_1 sse4_2 avx avx2 fma f16c avx512f avx512bw avx512cd avx512dq avx512vl
