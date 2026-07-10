@@ -1,0 +1,226 @@
+[
+  {
+    "productCode": "s0.d1.small",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.08
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel E3-1240v3",
+      "cpuCount": 1,
+      "coresPerCpu": 4,
+      "cpuFrequency": 3.4
+    }
+  },
+  {
+    "productCode": "s2.c2.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.37
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon E-2388G",
+      "cpuCount": 1,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.2
+    }
+  },
+  {
+    "productCode": "d2.c1.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.61
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 5315Y",
+      "cpuCount": 2,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.1
+    }
+  },
+  {
+    "productCode": "d2.m1.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.10
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 5315Y",
+      "cpuCount": 2,
+      "coresPerCpu": 8,
+      "cpuFrequency": 3.1
+    }
+  },
+  {
+    "productCode": "d2.c5.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.41
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8352Y",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 2.2
+    }
+  },
+  {
+    "productCode": "d3.m6.xxlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.56
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Platinum 8452Y",
+      "cpuCount": 2,
+      "coresPerCpu": 36,
+      "cpuFrequency": 2.0
+    }
+  },
+  {
+    "productCode": "d2.c4.db1.pliops1",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.23
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 6336Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.4
+    }
+  },
+  {
+    "productCode": "d3.s5.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 3.10
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 6430",
+      "cpuCount": 2,
+      "coresPerCpu": 32,
+      "cpuFrequency": 1.9
+    }
+  },
+  {
+    "productCode": "d3.c3.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 1.55
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 6542Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.9
+    }
+  },
+  {
+    "productCode": "s4.x6.c6.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 2.75
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6731E",
+      "cpuCount": 1,
+      "coresPerCpu": 96,
+      "cpuFrequency": 2.2
+    }
+  },
+  {
+    "productCode": "s5.x6.c8.medium",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 3.25
+      }
+    ],
+    "metadata": {
+      "cpu": "Intel Xeon 6767P",
+      "cpuCount": 1,
+      "coresPerCpu": 64,
+      "cpuFrequency": 2.4
+    }
+  },
+  {
+    "productCode": "a1.c5.large",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "HOURLY",
+        "price": 0.95
+      }
+    ],
+    "metadata": {
+      "cpu": "Ampere Altra Q80-30",
+      "cpuCount": 1,
+      "coresPerCpu": 80,
+      "cpuFrequency": 3.0
+    }
+  },
+  {
+    "productCode": "d3.g2.c1.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "MONTHLY_PACKAGE",
+        "price": 1646.72
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 6426",
+      "cpuCount": 2,
+      "coresPerCpu": 16,
+      "cpuFrequency": 2.5
+    }
+  },
+  {
+    "productCode": "d3.g2.c3.xlarge",
+    "productCategory": "SERVER",
+    "plans": [
+      {
+        "pricingModel": "THIRTY_SIX_MONTHS_RESERVATION",
+        "price": 1082.62
+      }
+    ],
+    "metadata": {
+      "cpu": "Dual Gold 6442Y",
+      "cpuCount": 2,
+      "coresPerCpu": 24,
+      "cpuFrequency": 2.6
+    }
+  }
+]

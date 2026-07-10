@@ -161,4 +161,84 @@ Intel SKL-or-newer box.
 
 ## Amendments
 
-(none yet)
+### 2026-07-10 — Task 2 recon (no-credentials fallback; live steps still OPEN)
+
+`PNAP_CLIENT_ID`/`PNAP_CLIENT_SECRET` were **not available** in the
+environment that ran Task 2. Per the task's own no-credentials fallback,
+`scripts/metal/record-fixtures.sh` was written but never executed against
+the live API, and `scripts/metal/fixtures/{products,availability}.json`
+are **HAND-WRITTEN** from public PhoenixNAP catalog information (not
+recorded from a real API response). This is a material gap:
+
+- **Still OPEN, MUST be completed before Task 10:** run
+  `bash scripts/metal/record-fixtures.sh` against the live API with real
+  credentials, diff the result against the hand-written fixtures, and fix
+  any field-shape or endpoint-path mismatch this recon could not observe
+  live (e.g. actual HTTP status/error bodies, pagination, rate limits,
+  whether the account's OAuth2 grant truly returns `access_token` in the
+  shape `lib.sh`'s `pnap_token` expects). Re-run `lib-selftest.sh` after.
+
+**What this recon *did* verify, statically, against PhoenixNAP's own
+published OpenAPI source** (`specs/bmcapi.spec.yaml` and
+`specs/billingapi.spec.yaml` in the `phoenixnap/go-sdk-bmc` GitHub repo —
+the developer portal's `developers.phoenixnap.com/assets/bmc-api.yaml`
+link 404s/redirects to the portal's JS app shell and is not fetchable
+directly; the GitHub repo is the source the portal's app renders from and
+is PhoenixNAP's own canonical spec):
+
+- **Auth URL confirmed correct, statically:** `billingapi.spec.yaml`'s
+  `securitySchemes.OAuth2.flows.clientCredentials.tokenUrl` is exactly
+  `https://auth.phoenixnap.com/auth/realms/BMC/protocol/openid-connect/token`
+  — matches `PNAP_AUTH_URL` in `lib.sh` verbatim. Not live-tested (no
+  credentials to complete a real client-credentials grant and confirm the
+  response actually contains `access_token`).
+- **Endpoints/params confirmed correct, statically:** `/billing/v1/products`
+  (query params `productCode`, `productCategory`, `skuCode`, `location`)
+  and `/billing/v1/product-availability` (query params `productCategory`,
+  `productCode`, `showOnlyMinQuantityAvailable`, `location`, `solution`,
+  **`minQuantity`**) match `record-fixtures.sh`'s calls exactly.
+- **Fixture field shapes confirmed correct** against the `ServerProduct` /
+  `ProductAvailability` schemas: `productCode`, `productCategory`, `plans[].
+  {pricingModel, price}`, `metadata.{cpu, cpuCount, coresPerCpu,
+  cpuFrequency}`, and `locationAvailabilityDetails[].{location,
+  minQuantityAvailable}` are all present with those exact names.
+- **New finding, not previously known:** `minQuantityAvailable` in the real
+  schema is a **boolean** ("is product available in specific location for
+  the requested quantity"), not a count — the count lives in a separate
+  `availableQuantity` field that the sanitizer does *not* capture (by
+  design, matching the brief). Task 4 (`catalog.sh`) should treat
+  `minQuantityAvailable` as a yes/no flag, not a quantity.
+- **`METAL_OS` default — Debian was available in the enum, resolved:** the
+  create-server `os` enum (`bmcapi.spec.yaml`, `Server.os` schema) offers
+  `debian/bullseye`, `debian/bookworm`, `debian/trixie` (newest) alongside
+  many Ubuntu/CentOS/Windows/etc. options. Per the spec's Debian
+  preference, `metal_default_os` is now `debian/bookworm` (chosen over the
+  newer `debian/trixie` as the better-tested current stable — cloud-init
+  support in the same spec is also only documented through
+  `debian/bookworm`, not `trixie`; override via `METAL_OS` if `trixie` is
+  wanted). `ubuntu/jammy` remains available as a fallback value.
+- **`METAL_SSH_USER` default — corrected, not just confirmed:** the BMC
+  OpenAPI spec itself does not document per-OS default SSH users; that
+  lives in the phoenixNAP KB
+  (https://phoenixnap.com/kb/bmc-remote-console). It documents **`debian`**
+  as the default login user for Debian servers (Ubuntu → `ubuntu`, CentOS
+  → `centos`, Rocky Linux → `rockylinux`, ESXi/Proxmox → `root`). Task 1's
+  provisional `root` default was **wrong** for Debian/Ubuntu Linux
+  images (root has no password/key configured on those cloud images) —
+  `metal_default_ssh_user` is now `debian`, matching the corrected
+  `metal_default_os`.
+- **AMD EPYC — not offered, contrary to the task brief's assumption:**
+  PhoenixNAP's public Bare Metal Cloud instance catalog
+  (phoenixnap.com/bare-metal-cloud/instances) lists only Intel Xeon (many
+  generations: Haswell E3 through Xeon 6 Granite Rapids) and Ampere Altra
+  ARM server types; no AMD EPYC bare-metal product was found anywhere in
+  the public catalog as of this recon. The hand-written fixtures therefore
+  span Intel Xeon generations plus one Ampere Altra (`a1.c5.large`, ARM,
+  aarch64) as the "unmapped ISA" case for Task 3, and omit AMD EPYC rather
+  than fabricate a nonexistent product code.
+- **Fixture recording "date":** hand-written 2026-07-10, from public
+  phoenixnap.com/bare-metal-cloud/instances pricing/spec pages and public
+  CPU-vendor spec sheets for the cores/frequency of newer SKUs not listed
+  with full specs on that page (Intel Xeon 6731E, 6767P; Ampere Altra
+  Q80-30). Prices for a few newer/AI-ML SKUs without a published hourly
+  rate are plausible placeholders, flagged as such above.

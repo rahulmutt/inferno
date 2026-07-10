@@ -70,7 +70,14 @@ pnap_api() {
   return 1
 }
 
-# PROVISIONAL defaults — Task 2's live recon verifies both against the BMC
-# OpenAPI definition (Debian preferred per spec) and updates this comment.
-metal_default_os() { echo "${METAL_OS:-ubuntu/jammy}"; }
-metal_default_ssh_user() { echo "${METAL_SSH_USER:-root}"; }
+# Verified against the BMC OpenAPI definition on 2026-07-10 (Task 2 recon):
+# the create-server `os` enum offers debian/bullseye, debian/bookworm and
+# debian/trixie (newest), so Debian is used per spec preference; bookworm
+# chosen as the current well-tested stable (trixie is newer but only ~1yr
+# out; override via METAL_OS if trixie is preferred). Default SSH login
+# user is documented per-OS in the phoenixNAP KB (not the OpenAPI spec
+# itself): Debian servers use `debian`, not `root` (root is only
+# documented for ESXi/Proxmox) — source:
+# https://phoenixnap.com/kb/bmc-remote-console.
+metal_default_os() { echo "${METAL_OS:-debian/bookworm}"; }
+metal_default_ssh_user() { echo "${METAL_SSH_USER:-debian}"; }

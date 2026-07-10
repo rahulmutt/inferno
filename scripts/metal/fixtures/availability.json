@@ -1,0 +1,196 @@
+[
+  {
+    "productCode": "s0.d1.small",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "NLD",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "s2.c2.medium",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "SGP",
+        "minQuantityAvailable": false
+      }
+    ]
+  },
+  {
+    "productCode": "d2.c1.medium",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "NLD",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "CHI",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "d2.m1.xlarge",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "NLD",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "d2.c5.large",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": false
+      },
+      {
+        "location": "SGP",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "d3.m6.xxlarge",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "CHI",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "d2.c4.db1.pliops1",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "d3.s5.xlarge",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "NLD",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "SEA",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "d3.c3.large",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "s4.x6.c6.large",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "s5.x6.c8.medium",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "a1.c5.large",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
+        "minQuantityAvailable": false
+      }
+    ]
+  },
+  {
+    "productCode": "d3.g2.c1.xlarge",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
+    "productCode": "d3.g2.c3.xlarge",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": false
+      }
+    ]
+  }
+]
