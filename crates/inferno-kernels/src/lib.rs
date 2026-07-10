@@ -22,6 +22,7 @@ mod buf;
 mod error;
 mod expf;
 pub mod f32k;
+mod pf;
 pub mod q4_k;
 pub mod q8_0;
 pub mod registry;

@@ -14,9 +14,14 @@ const GROUP_BYTES: usize = 288; // 8 f32 d + 8×32 qs
 /// Weight groups to software-prefetch ahead in the AVX2 GEMV (M4b.4). A
 /// strip's `nb` groups are contiguous (`nb × GROUP_BYTES`), so prefetching
 /// `PF_DIST` groups ahead reaches cleanly across the block loop and into the
-/// next strip. Plan default (4); the Task 2 sweep was deferred to quiet
-/// hardware — see the spec Amendment. Pure hint, so it never affects output bits.
-const PF_DIST: usize = 4;
+/// next strip. Pure hint, so it never affects output bits at any value.
+/// Compile-time override via `INFERNO_PF_DIST` for the M4b.7 quiet-hardware
+/// sweep (`0` = no prefetch emitted); default 4 pending the deferred M4b.4
+/// sweep — see that spec's Amendment.
+const PF_DIST: usize = match option_env!("INFERNO_PF_DIST") {
+    Some(s) => crate::pf::parse_pf_dist(s),
+    None => 4,
+};
 
 pub fn packed_len_q8_0_rs8(rows: usize, k: usize) -> usize {
     rows.div_ceil(STRIP) * (k / WBLOCK) * GROUP_BYTES
@@ -152,15 +157,17 @@ pub unsafe extern "C" fn inferno_gemv_q8_0_rs8_avx2(
             let mut acc = _mm256_setzero_ps();
             for b in 0..nb {
                 let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
-                // Prefetch a future weight group into L1 to overlap DRAM latency
-                // with this block's int8 dot. `wrapping_add` (not `add`) because
-                // the last strip's tail offsets point past the buffer end;
-                // `_mm_prefetch` never dereferences and never faults, so it stays
-                // a pure hint — output is unchanged.
-                let pf_addr = w
-                    .wrapping_add((strip * nb + b + PF_DIST) * GROUP_BYTES)
-                    .cast();
-                _mm_prefetch::<_MM_HINT_T0>(pf_addr);
+                if PF_DIST != 0 {
+                    // Prefetch a future weight group into L1 to overlap DRAM latency
+                    // with this block's int8 dot. `wrapping_add` (not `add`) because
+                    // the last strip's tail offsets point past the buffer end;
+                    // `_mm_prefetch` never dereferences and never faults, so it stays
+                    // a pure hint — output is unchanged.
+                    let pf_addr = w
+                        .wrapping_add((strip * nb + b + PF_DIST) * GROUP_BYTES)
+                        .cast();
+                    _mm_prefetch::<_MM_HINT_T0>(pf_addr);
+                }
                 let xb = unsafe { x.add(b * Q8A_BLOCK_BYTES) };
                 let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
                 // Activation qs shared across the strip's 8 rows.
