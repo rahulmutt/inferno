@@ -29,6 +29,26 @@ check first (bitrot guard):
 Smoke output is stamped `SMOKE — NON-RECORDABLE` and must never be pasted
 into a spec.
 
+## On PhoenixNAP bare metal
+
+No local quiet hardware? Rent it (see [metal runbook](metal.md); costs
+real money). Two sequential invocations — gates 1–4 want a quiet ≥12-core
+AMD box, gate 5 a quiet Intel SKL+ box; pick types with
+`mise run metal-catalog`:
+
+    mise run metal -- <amd-type> --yes -- \
+      'MODEL=$(bash scripts/fetch-qwen-gguf.sh) && mise run verify-quiet-hw -- "$MODEL"'
+    mise run metal -- <intel-type> --yes -- \
+      'MODEL=$(bash scripts/fetch-qwen-gguf.sh) && mise run verify-quiet-hw -- "$MODEL"'
+
+Gate outputs land in `target/metal/<type>-<timestamp>/quiet-hw/`; paste
+verdicts into the owning specs per the table above. The preflight still
+rules: if the rented box is noisy, UNFIT is the correct answer there too.
+
+Note: as of 2026-07 PhoenixNAP's catalog is Intel Xeon + Ampere ARM only —
+no AMD EPYC. Until that changes, the AMD leg of gates 1–4 needs a different
+vendor (or your own hardware); the Intel leg and gate 5 work as shown.
+
 ## Recording verdicts (human step — scripts never touch docs/)
 
 | Gate output | Paste into | Decision recorded |
