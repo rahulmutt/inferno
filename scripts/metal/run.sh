@@ -35,6 +35,16 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ ${#WORKLOAD[@]} -ge 1 ] || metal_die "no workload given (everything after -- runs in the workspace)"
+# A literal newline inside the workload is almost always a lost backslash
+# continuation (single quotes keep the newline verbatim): the 2026-07-11
+# payload run shipped '… && mise run\n  verify-quiet-hw …', which the box ran
+# as two statements — a bare `mise run`, then an orphan command, exit 127 —
+# AFTER the meter had paid for provisioning + devpod up. A genuinely
+# multi-line workload can always be joined with && or ; — die before the
+# meter starts.
+case "${WORKLOAD[*]}" in *$'\n'*) metal_die \
+  "workload contains a literal newline (lost backslash continuation?) — it would run as separate statements on the box; join it into one line with && or ;" ;;
+esac
 
 if [ "${METAL_PARSE_ONLY:-0}" = 1 ]; then
   printf 'type=%s yes=%s keep=%s reuse=%s workload=%s\n' \

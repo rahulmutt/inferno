@@ -128,6 +128,13 @@ expect "parse keep+reuse" \
   "type=d3.m5.xlarge yes=0 keep=1 reuse=aaa-111 workload=echo hi"
 if parse d3.m5.xlarge --yes 2>/dev/null; then fail "run.sh without a workload must fail"; fi
 if parse d3.m5.xlarge --bogus -- echo hi 2>/dev/null; then fail "unknown flag must fail"; fi
+# Regression for the 2026-07-11 payload run: a lost backslash continuation
+# left a literal newline inside the quoted workload, so the box ran it as two
+# statements (a bare `mise run`, then an orphan command — exit 127) after the
+# meter had already paid for provisioning + devpod up.
+if parse d3.m5.xlarge --yes -- $'mise run\nverify-quiet-hw' 2>/dev/null; then
+  fail "a workload containing a literal newline must fail preflight"
+fi
 
 # --- metal_devpod_source: a devpod-clonable workspace source ----------------
 # Regression for the mangled clone URL that failed the live E2E smoke with
