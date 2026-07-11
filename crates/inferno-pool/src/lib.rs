@@ -181,8 +181,9 @@ pub unsafe extern "C" fn inferno_par_gemm(
 /// shares `DISPATCH_CLAIMED` deliberately — within one forward pass GEMV,
 /// GEMM and attention dispatches are issued serially and never overlap,
 /// so one guard suffices. `m <= 1` (decode-shaped calls, T=1 prefill
-/// tiles) takes a direct serial path with no CAS and no job publish, so
-/// decode never touches the pool for attention. On the CAS-loss (or
+/// tiles) takes a direct serial path with no CAS and no job publish
+/// (decode itself never calls this dispatcher — its codegen invokes the
+/// kernel directly; the guard covers T=1 prefill tiles). On the CAS-loss (or
 /// uninitialized-pool) path this runs the serial full-range token loop,
 /// bit-identical to the pooled path since each token's out row is
 /// computed by a single kernel invocation either way.
