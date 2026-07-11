@@ -12,7 +12,7 @@ pub mod shard;
 
 pub use error::PoolError;
 pub use pool::{GemmFn, GemvFn, Pool};
-pub use shard::{SHARD_ALIGN, shard_table};
+pub use shard::{SHARD_ALIGN, shard_table, shard_table_aligned};
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
