@@ -425,3 +425,10 @@ machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical C
 gate: prefill scale @ t=12 = 4.11x (target ≥6x) -> NOT MET
 note: on a MET=no result, take the M4b.1 spec's attribution fork (serial attention vs memory bandwidth) — see its Amendments.
 ```
+
+### 2026-07-11 — parallel-attention amendment scoped as M4b.8
+
+The follow-up the fork authorized is designed in
+[M4b.8 — Parallel Prefill Attention](2026-07-11-m4b8-parallel-attention-design.md)
+(own doc per repo convention). The ≥6x @ t=12 exit criterion stays owned
+by this spec; M4b.8's quiet-hw verdict will be recorded here.
