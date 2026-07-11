@@ -592,3 +592,41 @@ keep/revert (v=0 faster => revert prefetch); best of {2,4,8} decides the
 distance; a >=5%-class win on any DRAM-bound shape is the signal that
 would authorize M4b.4 Task 3 (interleave).
 ```
+
+### 2026-07-11 — second quiet-hw session: format-split reproduced (keep Q8_0, revert Q4_K); Task 3 still unauthorized
+
+Second session, same box type (d2.c1.medium, PREFLIGHT FIT), inferno @
+1804d9f. The morning's split verdict reproduces: **Q8_0 keeps v=4**
+(v=0 slower on 5/6 shapes, +1.3% to +2.3% — weaker than the morning's
+up-to-+6.7% but same direction; 896x896 at −0.89% is noise-level) and
+**Q4_K wants the revert** (v=0 faster on all 4 shapes again, −1.2% to
+−9.7%, morning −1.1% to −8.9%). Two independent sessions agreeing on
+both halves upgrades the per-format PF_DIST change from "finding" to
+"ready to implement". Task 3 (interleave) remains unauthorized — v=8's
+Q4_K wins track v=0's (they say "remove the prefetch", not "interleave
+it"), and Q4_K v=2 is uniformly bad again (+8.6% to +21.5%),
+reproducing the unexplained morning pattern.
+
+```
+# gate-pf-dist (M4b.4 keep/revert + {2,4,8} sweep) — 2026-07-11T20:43:42Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+values={0 2 4 8} reps=3 (interleaved; per-rep ratios vs v=4) filter=gemv/(Q8_0|Q4_K)/inferno-avx2/
+
+| bench id | v=0 vs 4 (median %) | v=2 vs 4 | v=8 vs 4 | (negative = faster than shipped v=4) |
+|---|---|---|---|---|
+| gemv/Q8_0/inferno-avx2/896x896 | -0.89% | -1.5% | 0.4% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4864x896 | 2.26% | 2% | 20.87% | (n/a) |
+| gemv/Q8_0/inferno-avx2/896x4864 | 1.96% | 2.21% | 20.36% | (n/a) |
+| gemv/Q8_0/inferno-avx2/151936x896 | 1.32% | 0.19% | 12.41% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4096x4096 | 1.72% | 4.39% | 17.03% | (n/a) |
+| gemv/Q8_0/inferno-avx2/14336x4096 | 1.55% | 4.89% | 20.68% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x4096 | -4.08% | 10.49% | 0.85% | (n/a) |
+| gemv/Q4_K/inferno-avx2/14336x4096 | -9.68% | 8.68% | -3.52% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x14336 | -6.42% | 8.64% | -4.72% | (n/a) |
+| gemv/Q4_K/inferno-avx2/128256x4096 | -1.22% | 21.45% | -0.97% | (n/a) |
+
+gate inputs (human verdict to M4b.4 Amendments): v=0 column decides
+keep/revert (v=0 faster => revert prefetch); best of {2,4,8} decides the
+distance; a >=5%-class win on any DRAM-bound shape is the signal that
+would authorize M4b.4 Task 3 (interleave).
+```

@@ -364,3 +364,50 @@ gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats
 best-fixed? high-thread regression gone (compare cap=16 row vs knee)?
 t=1 decode unchanged (t1 row vs prior recorded t=1)?
 ```
+
+### 2026-07-11 — second quiet-hw session: Leg 2 miss reproduced (knee 12, default −11.19%)
+
+Second session on the same box type (d2.c1.medium, PREFLIGHT FIT),
+inferno @ 1804d9f. Knee = cap 12 (63.88 tok/s; morning session said 13 —
+the 8–16 plateau is flat, both sit on it), default = 56.73 →
+**−11.19% vs best fixed (morning: −9.82%). The Leg 2 miss is
+reproduced; verdict unchanged** — the `active/3` constant undershoots
+the knee on this machine class, formula revision still deferred to a
+different machine class. Noted for the record: t=1 medians differ
+between sessions (23.79 vs 16.94, with one 24.40 rep inside this
+session) — single-thread decode on these boxes is bimodal across runs
+(frequency/turbo behavior suspected); cap=1 tracks t1 within each
+session, so the cap plumbing is not implicated.
+
+```
+# gate-decode-cap (M4b.5 default-vs-best sweep) — 2026-07-11T20:38:31Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+sweep: caps={1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 } + default + t1 | reps=3 (interleaved rounds) | max-tokens=128
+
+| cap | decode tok/s (median of 3) | per-rep |
+|---|---|---|
+| 1 | 17.06 | 17.01 23.73 17.06 |
+| 2 | 30.65 | 30.42 40.98 30.65 |
+| 3 | 42.11 | 42.11 42.13 41.75 |
+| 4 | 51.88 | 51.88 50.76 52.10 |
+| 5 | 56.88 | 56.88 56.24 56.98 |
+| 6 | 59.72 | 60.13 58.04 59.72 |
+| 7 | 61.03 | 61.03 59.27 61.08 |
+| 8 | 62.08 | 62.20 60.28 62.08 |
+| 9 | 61.07 | 63.44 60.40 61.07 |
+| 10 | 63.4 | 63.58 61.33 63.40 |
+| 11 | 63.86 | 63.86 61.84 64.09 |
+| 12 | 63.88 | 64.16 61.21 63.88 |
+| 13 | 63.7 | 63.96 61.37 63.70 |
+| 14 | 63.61 | 61.13 64.11 63.61 |
+| 15 | 62.78 | 61.35 63.99 62.78 |
+| 16 | 63.47 | 61.66 63.75 63.47 |
+| default | 56.73 | 55.81 57.31 56.73 |
+| t1 | 16.94 | 24.40 16.86 16.94 |
+
+knee (best fixed cap): 12 (63.88 tok/s median)
+default clamp(active/3,2,active): 56.73 tok/s median -> -11.19% vs best fixed (median of per-rep ratios)
+gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats
+best-fixed? high-thread regression gone (compare cap=16 row vs knee)?
+t=1 decode unchanged (t1 row vs prior recorded t=1)?
+```

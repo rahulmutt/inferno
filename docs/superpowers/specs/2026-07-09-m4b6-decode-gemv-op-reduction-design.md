@@ -404,3 +404,44 @@ projected_decode_win = 3.14% (weights .270/.211/.407/.087 per M4b.6 amendment)
 WARNING: a shape's w_r straddles 0 — if it is a deciding shape, re-run with --reps 6 before recording.
 verdict (human, to M4b.6 Amendments): SHIP iff condition 1 MET and condition 2 PASS.
 ```
+
+### 2026-07-11 — second quiet-hw session: SHIP does NOT reproduce — superseded to NO-SHIP
+
+Same box type, same gate, same candidate (PR #11 reduce-unpack), library
+baseline @ 1804d9f, hours after the SHIP session: **condition 1 now
+FAILS (1 of 3 mid shapes, vs MET 2-of-3 this morning), projected win
+2.01% (vs 3.14%), straddle warning again** — this time with negative
+reps on 4864x896 (−3.97) and 896x4864 (−0.94) and every median under
+the morning's. Two same-type quiet boxes disagreeing on the conditions
+means the effect is within session-to-session noise, and the recorded
+rule (SHIP iff condition 1 MET) fails on the repeat. **The morning's
+SHIP verdict is withdrawn; the standing verdict is NO-SHIP — the
+cross-vendor reopening did not survive replication.** A future
+`--reps 6` run may re-open the question if it shows a stable
+every-rep-positive win on the mid shapes; until then the op-reduction
+lever stays closed on Intel as well, consistent with the original
+NO-SHIP on the measurement box.
+
+```
+# gate-intel-ab (M4b.6 reduce-unpack cross-vendor A/B) — 2026-07-11T21:12:18Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+From https://github.com/rahulmutt/inferno
+ * branch            refs/pull/11/head -> FETCH_HEAD
+Preparing worktree (detached HEAD 1804d9f)
+bitwise pre-check (arm vs library kernel, --test mode)…
+
+| shape | w per rep (%) | median w (%) | (w = 1 − t_unpack/t_base; positive = arm wins) |
+|---|---|---|---|
+| 896x896 | 4.70 2.64 2.68 | 2.68 | |
+| 4864x896 | 1.25 -3.97 3.44 | 1.25 | |
+| 896x4864 | -0.94 1.45 1.53 | 1.45 | |
+| 151936x896 | 3.72 3.55 3.22 | 3.55 | |
+| 4096x4096 | 1.18 3.01 -0.29 | 1.18 | |
+| 14336x4096 | 4.67 4.01 0.29 | 4.01 | |
+
+condition 1 (w_r>0 every rep on >=2 of 3 mid shapes): 1 of 3 -> FAILED
+condition 2 (no shape median w < -3%): PASS
+projected_decode_win = 2.01% (weights .270/.211/.407/.087 per M4b.6 amendment)
+WARNING: a shape's w_r straddles 0 — if it is a deciding shape, re-run with --reps 6 before recording.
+verdict (human, to M4b.6 Amendments): SHIP iff condition 1 MET and condition 2 PASS.
+```

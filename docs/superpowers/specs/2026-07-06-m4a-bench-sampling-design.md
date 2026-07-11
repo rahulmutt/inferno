@@ -340,3 +340,43 @@ ratio (inferno/llama.cpp): pp 0.84x | tg 0.87x
 ratios (inferno/llama.cpp, from the independent --json run): pp 0.61x | tg 0.86x
 gate: v1 win criterion (pp > 1x AND tg > 1x) -> NOT MET
 ```
+
+### 2026-07-11 — second quiet-hw session, fixed comparator: first valid ratios — pp 0.23x | tg 0.79x, NOT MET (supersedes the morning's 0.84x/0.61x)
+
+Same box type, inferno @ 1804d9f, protocol now judged against llama at
+its genuine best (pure-CPU ggml build on PATH honoring the -t pin, plus
+a BLAS-build reference row, criterion vs per-metric max — see the
+follow-up note above). **pp 0.23x | tg 0.79x vs best-of → v1 win
+criterion NOT MET.** The morning's pp numbers are formally superseded:
+the BLAS-confounded llama measured ~310 pp; the pure-CPU build does
+**1187.7 ± 242.2** on the same silicon (~4x stronger opponent), and the
+BLAS reference row (685.0 / 61.9) confirms BLAS is not llama's best
+here — the fix strengthened the opponent, exactly as the confound
+predicted. tg is stable across builds (61.3 vs 61.9) and inferno's tg
+0.79–0.80x is consistent with every prior reading. Caveats carried: the
+llama pp stddev is large (±242, ~20%) and its thread-scaling mildly
+superlinear — worth re-measuring on a second machine class before
+treating 0.23x as precise; the direction (deep pp deficit, threading
+AND per-thread — see the M4b.1 same-day fork) is not in doubt.
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-11T21:05:24Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (16 physical / 32 logical cores)
+inferno 0.1.0 (1804d9f) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      248.18 ± 14.74       49.27 ± 0.06 
+inferno (t=1 diag)           1       63.22 ± 0.01        16.16 ± 0.01 
+llama.cpp                   16     1187.74 ± 242.19       61.25 ± 0.07 
+llama.cpp (t=1 diag)         1      118.03 ± 0.18        22.86 ± 0.00 
+
+ratio (inferno/llama.cpp): pp 0.21x | tg 0.80x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 684.97 | tg 61.86 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.23x | tg 0.79x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```

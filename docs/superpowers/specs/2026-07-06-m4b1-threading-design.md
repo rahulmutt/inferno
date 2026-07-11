@@ -389,3 +389,39 @@ machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical C
 gate: prefill scale @ t=12 = 4.06x (target ≥6x) -> NOT MET
 note: on a MET=no result, take the M4b.1 spec's attribution fork (serial attention vs memory bandwidth) — see its Amendments.
 ```
+
+### 2026-07-11 — second quiet-hw session (fixed comparator): NOT MET reproduced at 4.11x; ATTRIBUTION FORK TAKEN → serial fraction, not bandwidth
+
+Same box type as the morning session (d2.c1.medium, Xeon Gold 6336Y,
+PREFLIGHT FIT), inferno @ 1804d9f, now with the pure-CPU llama.cpp
+comparator (the BLAS confound is fixed — see the M4a same-day
+amendments). **Prefill scale @ t=12 = 4.11x (vs 4.06x this morning) —
+NOT MET, reproduced.**
+
+**The fork is now decidable and is taken: the deficit is inferno's
+serial fraction (serial attention), NOT memory bandwidth.** The clean
+control scales on the same silicon in the same session: llama.cpp pp
+goes 118.6 → 1109.8 tok/s @ t=12 (~9.4x) while inferno goes 61.4 →
+252.6 (4.11x). A bandwidth-bound box cannot produce a 9.4x pp curve, so
+the spec's bandwidth branch is eliminated. Per the no-silent-scope rule
+this authorizes scoping the parallel-attention amendment as follow-up
+work (not started here). Footnotes for the record: the llama curve is
+mildly superlinear (t=1 may be depressed by its own overhead floor) and
+its t=16 pp carries a ±242 stddev — neither changes the direction by
+enough to matter against a 2.3x gap.
+
+```
+# gate-prefill-scaling (M4b.1 ≥6x @ t=12) — 2026-07-11T20:20:55Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+
+| t | pp tok/s | pp scale | tg tok/s | tg scale | llama pp (corrob.) | llama tg (corrob.) |
+|---|---|---|---|---|---|---|
+| 1 | 61.445261793030646 | 1.00x | 22.149875294979513 | 1.00x | 118.604394 | 22.963362 |
+| 2 | 109.70235179363456 | 1.79x | 28.582096839747617 | 1.29x | 232.769258 | 30.105505 |
+| 4 | 159.99859332670934 | 2.60x | 28.34614277313001 | 1.28x | 445.223471 | 49.738081 |
+| 8 | 220.20366614545551 | 3.58x | 28.35285556520114 | 1.28x | 810.536708 | 58.216329 |
+| 12 | 252.56605806102783 | 4.11x | 45.60576209003862 | 2.06x | 1109.83946 | 60.881269 |
+
+gate: prefill scale @ t=12 = 4.11x (target ≥6x) -> NOT MET
+note: on a MET=no result, take the M4b.1 spec's attribution fork (serial attention vs memory bandwidth) — see its Amendments.
+```
