@@ -79,7 +79,10 @@ for the v1 design.
   Prefill (`inferno_par_gemm`) is uncapped. Default `clamp(active/3, 2,
   active)`, override with `INFERNO_DECODE_THREADS=N`. The cap is
   bit-neutral (`shard_table` keeps each row on one lane); never treat a
-  cap change as a numeric change.
+  cap change as a numeric change. Prefill attention (M4b.8) dispatches per
+  tile through `inferno_par_attention`, sharding the tile's tokens with
+  align-1 shards at full `active` — the decode cap never applies to it,
+  and `m <= 1` calls bypass the pool entirely.
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
   operator-driven only, never CI. After any interrupted session run
   `mise run metal-gc` — EXIT traps don't survive killed terminals. The
