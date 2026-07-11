@@ -345,3 +345,11 @@ a false success.
 **Still OPEN — the kill-mid-run smoke:** Ctrl-C a run after provisioning
 returns a server id and verify the EXIT trap deprovisions (then
 `mise run metal-gc` to confirm nothing is left). Not yet exercised live.
+
+### 2026-07-11 — kill-mid-run smoke verified: no OPEN items remain
+
+Operator-run this session: a run was Ctrl-C'd after provisioning
+returned a server id; the EXIT trap deleted the server on the way out
+and a follow-up `mise run metal-gc` found nothing tagged. Both smokes
+from the §Testing plan are now complete — the infra has no OPEN
+verification items left.

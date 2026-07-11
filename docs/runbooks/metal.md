@@ -32,9 +32,9 @@ inside the standard dev environment, collect results, deprovision. Spec:
 - Live status (see the spec's
   [Amendments](../superpowers/specs/2026-07-10-phoenixnap-bench-infra-design.md#amendments)):
   read path verified against the real API with re-recorded fixtures
-  (2026-07-10), and the paid happy-path E2E smoke is green end-to-end
-  (2026-07-11). Still OPEN: the kill-mid-run smoke (verify the EXIT trap
-  deprovisions on Ctrl-C).
+  (2026-07-10), the paid happy-path E2E smoke is green end-to-end, and
+  the kill-mid-run smoke is verified (both 2026-07-11) — no OPEN
+  verification items remain.
 
 ## Pick hardware
 
