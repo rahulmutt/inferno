@@ -545,3 +545,50 @@ contention, not by the (bit-identical) prefetch. Not a verdict.
   change whose perf value (or the approach-B pivot) is to be confirmed on
   quiet hardware, together with the deferred Task 1 ceiling diagnostic,
   the PF_DIST/PF_DIST_F32 sweep, and the Task 3 interleave go/no-go.
+
+### 2026-07-11 — quiet-hw verdict (M4b.7 gate-pf-dist, bare metal): keep for Q8_0, revert for Q4_K; Task 3 NOT authorized
+
+Quiet bare metal via `mise run metal` (d2.c1.medium, Xeon Gold 6336Y, 16
+physical / 32 logical, PREFLIGHT FIT), inferno @ 6b0df49, reps=3
+interleaved, ratios vs shipped v=4 (negative = faster than v=4).
+
+- **Keep/revert splits by format.** Q8_0: v=0 is *slower* on 5/6 shapes
+  (up to +6.71% on 14336x4096) — **prefetch@4 keeps its win, KEEP**.
+  Q4_K: v=0 is *faster* on all 4 shapes (−1.08% to −8.92%) — **the
+  prefetch hurts Q4_K, REVERT there**. The shipped single global PF_DIST
+  cannot express this; making the distance per-format (or disabling it
+  for Q4_K) is a scoped code follow-up, not done in this pass.
+- **Distance stays 4 where prefetch is kept.** On Q8_0, v=2 ≈ v=4
+  (within ±2.3% everywhere except a +6.73% loss on 14336x4096) and v=8
+  is catastrophic (+11.7% to +22.8%).
+- **Task 3 (interleave) NOT authorized:** no {2,4,8} distance beats v=4
+  by the ≥5% class on any shape where prefetch helps. (Q4_K's v=8 wins
+  vs v=4 track its v=0 wins — they say "remove the prefetch", not
+  "interleave it".)
+- Oddity worth carrying: Q4_K v=2 is uniformly terrible (+11.6% to
+  +21.7%) while v=0 and v=8 are fine — consistent across all 4 shapes,
+  so likely a real cache-geometry interaction, but unexplained.
+
+```
+# gate-pf-dist (M4b.4 keep/revert + {2,4,8} sweep) — 2026-07-11T12:48:16Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+values={0 2 4 8} reps=3 (interleaved; per-rep ratios vs v=4) filter=gemv/(Q8_0|Q4_K)/inferno-avx2/
+
+| bench id | v=0 vs 4 (median %) | v=2 vs 4 | v=8 vs 4 | (negative = faster than shipped v=4) |
+|---|---|---|---|---|
+| gemv/Q8_0/inferno-avx2/896x896 | 0.53% | -0.53% | 0.03% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4864x896 | 4.27% | 2.19% | 22.76% | (n/a) |
+| gemv/Q8_0/inferno-avx2/896x4864 | 2.17% | 0.88% | 19.1% | (n/a) |
+| gemv/Q8_0/inferno-avx2/151936x896 | -1.35% | 0.14% | 11.67% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4096x4096 | 1.76% | -0.76% | 15.49% | (n/a) |
+| gemv/Q8_0/inferno-avx2/14336x4096 | 6.71% | 6.73% | 22.78% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x4096 | -2.88% | 11.62% | 0.44% | (n/a) |
+| gemv/Q4_K/inferno-avx2/14336x4096 | -7.49% | 16.36% | -10.67% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x14336 | -8.92% | 12.44% | -7.28% | (n/a) |
+| gemv/Q4_K/inferno-avx2/128256x4096 | -1.08% | 21.74% | -0.67% | (n/a) |
+
+gate inputs (human verdict to M4b.4 Amendments): v=0 column decides
+keep/revert (v=0 faster => revert prefetch); best of {2,4,8} decides the
+distance; a >=5%-class win on any DRAM-bound shape is the signal that
+would authorize M4b.4 Task 3 (interleave).
+```

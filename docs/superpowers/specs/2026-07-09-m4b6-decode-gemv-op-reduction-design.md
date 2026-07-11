@@ -354,3 +354,53 @@ Criterion.
   (`git diff -- crates/inferno-graph/src/tolerance.rs` empty at every
   commit; the branch touches only `benches/gemv.rs`, net-zero, and this
   spec).
+
+### 2026-07-11 — quiet-hw Intel A/B (M4b.7 gate-intel-ab, bare metal): SHIP — the op-reduction lever is REOPENED cross-vendor
+
+Quiet bare metal via `mise run metal` (d2.c1.medium, Xeon Gold 6336Y, 16
+physical / 32 logical, PREFLIGHT FIT), candidate = PR #11's reduce-unpack
+("arm") kernel A/B'd against the library kernel at 6b0df49, reps=3,
+bitwise pre-check green. Script verdict inputs: **condition 1 (w_r > 0
+every rep on ≥2 of 3 mid shapes): 2 of 3 → MET; condition 2 (no shape
+median w < −3%): PASS; projected_decode_win = 3.14%** (weights
+.270/.211/.407/.087 per the earlier amendment). Per the recorded rule —
+SHIP iff condition 1 MET and condition 2 PASS — **the verdict is SHIP:
+the candidate that was NO-SHIP on the original measurement box wins on
+Intel, so the lever is reopened cross-vendor.**
+
+The script's straddling-rep WARNING (896x4864 has one negative rep, and
+4096x4096 one at −4.08) is noted and did not force a --reps 6 re-run:
+both straddlers already count against condition 1 — a re-run could only
+move MET 2-of-3 to MET 3-of-3, never flip the verdict; condition 2
+medians (1.35, 0.79) are clear of the −3% line.
+
+Shipping is a scoped follow-up, not part of this pass: PR #11
+deliberately touches only `benches/gemv.rs`, so SHIP here authorizes
+porting the reduce-unpack kernel into the library GEMV (bit-identity
+gates and the standing tolerances untouched, per this spec's rules) —
+with the cross-vendor caveat that the win is Intel-measured; re-run the
+A/B on the original vendor before making it the unconditional kernel.
+
+```
+# gate-intel-ab (M4b.6 reduce-unpack cross-vendor A/B) — 2026-07-11T13:15:57Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+From https://github.com/rahulmutt/inferno
+ * branch            refs/pull/11/head -> FETCH_HEAD
+Preparing worktree (detached HEAD 6b0df49)
+bitwise pre-check (arm vs library kernel, --test mode)…
+
+| shape | w per rep (%) | median w (%) | (w = 1 − t_unpack/t_base; positive = arm wins) |
+|---|---|---|---|
+| 896x896 | 2.60 6.93 0.96 | 2.6 | |
+| 4864x896 | 3.37 1.33 3.13 | 3.13 | |
+| 896x4864 | 1.35 -0.50 1.38 | 1.35 | |
+| 151936x896 | 4.35 23.43 5.02 | 5.02 | |
+| 4096x4096 | 0.86 -4.08 0.79 | 0.79 | |
+| 14336x4096 | 3.69 32.22 4.75 | 4.75 | |
+
+condition 1 (w_r>0 every rep on >=2 of 3 mid shapes): 2 of 3 -> MET
+condition 2 (no shape median w < -3%): PASS
+projected_decode_win = 3.14% (weights .270/.211/.407/.087 per M4b.6 amendment)
+WARNING: a shape's w_r straddles 0 — if it is a deciding shape, re-run with --reps 6 before recording.
+verdict (human, to M4b.6 Amendments): SHIP iff condition 1 MET and condition 2 PASS.
+```

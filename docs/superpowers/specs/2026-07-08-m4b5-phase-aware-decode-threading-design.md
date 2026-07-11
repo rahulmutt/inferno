@@ -305,3 +305,62 @@ unquota'd bare-metal re-run — the reversible `active/3` default and the
   measured optimum and removes the proven high-thread regression; the final
   constant/formula and formal Leg 2 verdict are deferred to a quiet-hardware
   re-run, together with the `memory_bw_class`-keyed refinement if built.
+
+### 2026-07-11 — quiet-hw Leg 2 verdict (M4b.7 gate-decode-cap, bare metal): default does NOT meet-or-beat; formula revision deferred
+
+Quiet bare metal via `mise run metal` (d2.c1.medium, Xeon Gold 6336Y, 16
+physical / 32 logical, PREFLIGHT FIT), inferno @ 6b0df49, reps=3
+interleaved. Leg 2 sub-verdicts:
+
+- **(b) default meets-or-beats best fixed: NOT MET.** Knee = cap 13
+  (63.98 tok/s median); shipped `clamp(active/3, 2, active)` → cap 5 on
+  this box → 55.93 tok/s, **−9.82% vs best fixed**. The measured knee is
+  ≈ 0.8×active here vs the ⅓×active hypothesis (whose only prior support
+  was the knee=4-on-12-cores point from the quota'd devpod).
+- **(b) high-thread regression: gone.** Uncapped-equivalent cap=16 =
+  61.03 tok/s, −4.6% vs knee — a mild tail, not the cliff the cap was
+  built against; on this box the cap prevents little and costs 9.8%.
+- **(c) t=1 decode unchanged:** t1 = 23.79 median (one noisy rep at
+  17.17), consistent with cap=1 (23.49) — no t=1 damage.
+- **(d) prefill unchanged:** not re-measured here; covered by
+  gate-prefill-scaling the same session (M4b.1 amendment).
+
+**Verdict: the `active/3` constant is wrong on this machine class, but
+one quiet knee point is not enough to pick a replacement — the formula
+revision is deferred to a scoped follow-up with at least one more quiet
+machine (ideally a different core count / memory class).**
+`INFERNO_DECODE_THREADS` remains the override; users on 16-core Ice
+Lake-SP-class boxes should set it ≈ 13 meanwhile.
+
+```
+# gate-decode-cap (M4b.5 default-vs-best sweep) — 2026-07-11T12:42:47Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+sweep: caps={1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 } + default + t1 | reps=3 (interleaved rounds) | max-tokens=128
+
+| cap | decode tok/s (median of 3) | per-rep |
+|---|---|---|
+| 1 | 23.49 | 23.53 23.44 23.49 |
+| 2 | 40.88 | 33.78 41.42 40.88 |
+| 3 | 42.06 | 42.28 42.06 41.02 |
+| 4 | 50.61 | 50.61 51.80 49.81 |
+| 5 | 56.28 | 56.66 56.28 55.91 |
+| 6 | 57.82 | 57.82 60.03 57.52 |
+| 7 | 60.07 | 60.07 61.38 58.76 |
+| 8 | 59.89 | 59.89 62.83 59.27 |
+| 9 | 60.63 | 60.63 63.60 59.55 |
+| 10 | 60.69 | 60.56 63.09 60.69 |
+| 11 | 63.22 | 61.73 63.22 64.31 |
+| 12 | 62.7 | 61.56 64.33 62.70 |
+| 13 | 63.98 | 61.92 64.06 63.98 |
+| 14 | 63.53 | 61.45 63.53 63.85 |
+| 15 | 60.99 | 60.94 60.99 62.15 |
+| 16 | 61.03 | 61.03 59.20 63.91 |
+| default | 55.93 | 55.84 55.93 58.00 |
+| t1 | 23.79 | 24.14 23.79 17.17 |
+
+knee (best fixed cap): 13 (63.98 tok/s median)
+default clamp(active/3,2,active): 55.93 tok/s median -> -9.82% vs best fixed (median of per-rep ratios)
+gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats
+best-fixed? high-thread regression gone (compare cap=16 row vs knee)?
+t=1 decode unchanged (t1 row vs prior recorded t=1)?
+```

@@ -291,3 +291,42 @@ CLI flag validation as above.
     quality. Both per-thread parity and M4b threading are needed to close the
     headline 0.36x/0.39x gap. (The t=1 range is wide because of the scheduling
     noise already noted above.)
+
+### 2026-07-11 — quiet-hw verdict (M4b.7 gate-bench-protocol, bare metal): v1 win criterion NOT MET
+
+First run of the protocol on genuinely quiet hardware — bare metal via
+`mise run metal` (d2.c1.medium, Xeon Gold 6336Y, 16 physical / 32
+logical, PREFLIGHT FIT), inferno 0.1.0 @ 6b0df49 vs llama.cpp 6f4f53f,
+pp=512 tg=128 reps=5. **pp 0.84x | tg 0.87x (independent --json run: pp
+0.61x | tg 0.86x) → v1 win criterion (pp > 1x AND tg > 1x) NOT MET.**
+
+Caveat recorded with the number: the llama.cpp side reports a **BLAS cpu
+backend**, and its t=1 diagnostic (pp 403.53) *exceeds* its t=16 run
+(pp 310.30) — BLAS almost certainly multithreads internally regardless
+of -t, so the pp ratio compares inferno@16 threads against an
+effectively-all-cores llama, and the t=1 "per-thread parity" diagnostic
+is meaningless for pp. tg is barely affected (22.03 @ t=1 vs 56.39 @
+t=16 scales plausibly). Follow-up: pin the llama-bench build to the
+pure-CPU backend (no BLAS) so pp ratios compare like-for-like; the tg
+0.87x reading stands meanwhile — decode is within 13% of llama.cpp on
+quiet Intel, per-thread tg 0.73x (16.14 vs 22.03).
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-11T13:10:00Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: BLAS, Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (16 physical / 32 logical cores)
+inferno 0.1.0 (6b0df49) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      260.72 ± 8.24        49.17 ± 0.11 
+inferno (t=1 diag)           1       63.24 ± 0.02        16.14 ± 0.01 
+llama.cpp                   16      310.30 ± 22.05       56.39 ± 0.07 
+llama.cpp (t=1 diag)         1      403.53 ± 2.22        22.03 ± 2.36 
+
+ratio (inferno/llama.cpp): pp 0.84x | tg 0.87x
+
+ratios (inferno/llama.cpp, from the independent --json run): pp 0.61x | tg 0.86x
+gate: v1 win criterion (pp > 1x AND tg > 1x) -> NOT MET
+```
