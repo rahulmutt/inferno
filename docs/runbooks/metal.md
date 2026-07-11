@@ -29,11 +29,12 @@ inside the standard dev environment, collect results, deprovision. Spec:
   (not mise-pinned). `column` (util-linux) is optional — `metal-catalog`
   uses it only to align its table and falls back to raw tab-separated
   output when it's absent.
-- This tooling has never been exercised against the live PhoenixNAP API
-  (fixtures are hand-written, not recorded — see the spec's
-  [Amendments](../superpowers/specs/2026-07-10-phoenixnap-bench-infra-design.md#amendments)).
-  Before first real use, complete the live recon + paid E2E smoke
-  recorded there as OPEN, then re-record fixtures.
+- Live status (see the spec's
+  [Amendments](../superpowers/specs/2026-07-10-phoenixnap-bench-infra-design.md#amendments)):
+  read path verified against the real API with re-recorded fixtures
+  (2026-07-10), and the paid happy-path E2E smoke is green end-to-end
+  (2026-07-11). Still OPEN: the kill-mid-run smoke (verify the EXIT trap
+  deprovisions on Ctrl-C).
 
 ## Pick hardware
 

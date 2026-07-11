@@ -304,3 +304,44 @@ result collection, EXIT-trap deprovision) is entirely unexercised. Complete
 both smokes from the §Testing plan — happy path via
 `mise run metal -- <cheapest-type> --yes -- 'mise run lint'`, then a
 kill-mid-run to verify the trap deprovisions — and record the result here.
+
+### 2026-07-11 — paid happy-path E2E smoke GREEN (kill-mid-run smoke still OPEN)
+
+`mise run metal -- s2.c2.medium --yes -- 'mise run lint'` completed the
+full pipeline end-to-end: **s2.c2.medium** (Xeon E-2388G, 8c, $0.37/hr) in
+NLD, server `6a521c0db55bb37c998de7e2`, started 10:33:47Z, finished
+10:49:52Z (**~16 min wall**, dominated by devcontainer image pull + devenv
+build), workload `mise run lint` **exit 0** on the box, results +
+`metadata.json` landed in `target/metal/s2.c2.medium-20260711T103347Z/`,
+server deleted by the teardown path. Every write-path item from the
+2026-07-10 OPEN list is now verified live: create shape, power-on/ssh
+polling, ssh as `debian`, **passwordless sudo confirmed** (host-prep ran
+apt/governor/docker-group as root), drift check green on real silicon
+(E-2388G matched the table), devpod+devenv workload, collect (empty tar —
+correct for lint, which produces no `target/quiet-hw`/`target/criterion`),
+EXIT-trap deprovision.
+
+Getting to green peeled four live-only failures off the pipeline, each
+fixed at root cause in a commit: (1) `devpod up --provider` on an
+uninitialized provider (`--use=false` removed from `provider add`);
+(2) `git:`-prefixed workspace source mangled by devpod's
+`NormalizeRepository` into `https://git:https://…` (scheme guard in
+`metal_devpod_source`, fails preflight before the meter);
+(3) dead inherited `SSH_AUTH_SOCK` making `devpod up` fatal (preflight
+drops dead sockets); (4) devpod's default `INJECT_DOCKER_CREDENTIALS=true`
+forwarding the operator's docker credsStore to the box — when the operator
+is itself a devpod workspace, that credsStore points at the OUTER devpod's
+credentials server (dead in headless sessions) and the failed lookup
+aborts the image pull with `retrieve image …: EOF` even for a public image
+(no anonymous fallback in devpod). Fixed with
+`-o INJECT_DOCKER_CREDENTIALS=false` on the ephemeral provider
+(commit 24b2520). A trailing `Error tunneling to container: wait: remote
+command exited without exit status or exit signal` in workload logs is a
+benign devpod v0.6.15 teardown race (logged-and-swallowed in a goroutine
+after the command session already returned the real exit code — see the
+comment at the workload `devpod ssh` call in `run.sh`); it cannot fabricate
+a false success.
+
+**Still OPEN — the kill-mid-run smoke:** Ctrl-C a run after provisioning
+returns a server id and verify the EXIT trap deprovisions (then
+`mise run metal-gc` to confirm nothing is left). Not yet exercised live.
