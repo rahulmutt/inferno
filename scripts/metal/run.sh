@@ -229,8 +229,18 @@ echo "metal: creating devpod workspace on $SERVER_IP (image pull + devenv — mi
 # ("used") at least once; --use=false skips that init and makes `up` fail with
 # "provider is not initialized". Let add both register and initialize the
 # ephemeral, per-run provider (devpod_cleanup deletes it on exit).
+# INJECT_DOCKER_CREDENTIALS defaults true: mid-`up` the box's agent asks THIS
+# machine for docker credentials. When the operator is itself a devpod
+# workspace, ~/.docker/config.json says credsStore=devpod, whose helper posts
+# to the OUTER devpod's credentials server on a hardcoded localhost port —
+# alive only while the outer client holds a tunnel, dead in a headless
+# session. devpod treats the failed lookup as fatal for image resolution
+# ("retrieve image ...: EOF") instead of falling back to anonymous. The
+# devcontainer image is public, so don't inject at all (same class as the
+# dead-SSH_AUTH_SOCK guard in preflight).
 devpod provider add ssh --name "$PROVIDER" \
-  -o "HOST=$(metal_default_ssh_user)@$SERVER_IP"
+  -o "HOST=$(metal_default_ssh_user)@$SERVER_IP" \
+  -o INJECT_DOCKER_CREDENTIALS=false
 # Clone the repo from git ON the box (pinned to the committed HEAD), rather
 # than uploading the local working tree — devpod's folder upload ships the
 # whole checkout including the tens-of-GB target/. The box builds fresh inside
@@ -249,6 +259,13 @@ WORKLOAD_STR="${WORKLOAD[*]}"
 echo "metal: running: $WORKLOAD_STR"
 meta_set workload "$(jq -n --arg w "$WORKLOAD_STR" '$w')"
 WORKLOAD_RC=0
+# A trailing "Error tunneling to container: wait: remote command exited
+# without exit status or exit signal" in the log is a benign devpod teardown
+# race (v0.6.15 pkg/tunnel/container.go: the auxiliary container-tunnel
+# goroutine gets cancelled after the command session already returned the
+# real exit code; the error is logged and swallowed there). It does NOT
+# affect $?: a lost exit status on the *command* session surfaces as a
+# non-zero devpod exit — a false failure, never a false success.
 devpod ssh "$WORKSPACE" --command \
   "cd /workspace && devenv shell -- bash -c $(printf '%q' "$WORKLOAD_STR")" \
   2>&1 | tee "$OUT/workload.log" || WORKLOAD_RC=$?
