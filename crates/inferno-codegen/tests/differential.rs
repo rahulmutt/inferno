@@ -21,7 +21,6 @@ use inferno_codegen::{CompileOptions, compile};
 use inferno_formats::{DType, ModelDesc, load_desc};
 use inferno_graph::tolerance::logits_abs_tol;
 use inferno_graph::{Interpreter, KvCache, build_graph};
-use inferno_pool;
 use inferno_target::TargetDesc;
 use serde::Deserialize;
 
