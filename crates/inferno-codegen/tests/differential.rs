@@ -47,11 +47,13 @@ type PrefillFn = unsafe extern "C" fn(
 );
 
 /// Force the linker to retain (and, with `-rdynamic` from build.rs, export) the
-/// kernel symbols *and* the `inferno_par_gemv` dispatcher (M4b.1) the compiled
+/// kernel symbols *and* the `inferno_par_gemv` (M4b.1), `inferno_par_gemm`
+/// (M4b.2), and `inferno_par_attention` (M4b.8) dispatchers the compiled
 /// `model.so` resolves against the host binary. Without at least one
 /// reference the linker may drop `inferno-kernels`/`inferno-pool` entirely,
 /// leaving nothing to export and `dlopen` failing on the first undefined
-/// `inferno_gemv_*` / `inferno_quantize_row_*` / `inferno_par_gemv` symbol.
+/// `inferno_gemv_*` / `inferno_quantize_row_*` / `inferno_par_gemv` /
+/// `inferno_par_gemm` / `inferno_par_attention` symbol.
 fn retain_kernel_symbols() {
     use std::hint::black_box;
     let p = |f: *const ()| black_box(f as usize);
@@ -75,6 +77,7 @@ fn retain_kernel_symbols() {
     p(inferno_kernels::inferno_attention_f32_avx2 as *const ());
     p(inferno_pool::inferno_par_gemv as *const ());
     p(inferno_pool::inferno_par_gemm as *const ());
+    p(inferno_pool::inferno_par_attention as *const ());
 }
 
 /// dlopen `model.so`, run `prefill(tokens)`, and return the last-token logits.
