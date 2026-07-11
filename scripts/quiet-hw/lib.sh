@@ -71,6 +71,20 @@ smoke_header() {
   echo "# $1 — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
+# llama_bench_pp_tg <llama-bench -o json file> — "pp_tok_s tg_tok_s" from
+# the -p row (n_prompt>0, n_gen==0) and -n row (n_gen>0). -e + error():
+# schema drift or a missing row fails the caller loudly (same discipline as
+# cli/src/llama_bench.rs, which parses the same schema strictly).
+llama_bench_pp_tg() {
+  jq -er '
+    def one(f): [.[] | select(f) | .avg_ts]
+      | if length == 1 then .[0] else error("expected exactly one matching row") end;
+    "\(one(.n_prompt > 0 and .n_gen == 0)) \(one(.n_prompt == 0 and .n_gen > 0))"' "$1"
+}
+
+# fmax <a> <b> — the larger of two floats, verbatim (no reformatting).
+fmax() { awk -v a="$1" -v b="$2" 'BEGIN { print (a + 0 > b + 0) ? a : b }'; }
+
 # phys_cores — physical core count (sweep upper bound for gate-decode-cap).
 # Never fails under `set -euo pipefail`: an lscpu that exists but emits no
 # data rows (sandboxes, odd VMs) falls back to nproc.

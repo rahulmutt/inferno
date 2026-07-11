@@ -54,6 +54,18 @@ expect "override stamp" \
   "### UNFIT-OVERRIDE (preflight failed; operator forced the run — record the override alongside any data) ###"
 QHW_OVERRIDE=0
 
+# llama_bench_pp_tg: pp/tg extraction from llama-bench -o json (golden
+# fixture shared with cli/src/llama_bench.rs — one schema, two parsers).
+fixture="$(dirname "$0")/../../cli/tests/fixtures/llama-bench.json"
+expect "llama_bench_pp_tg" "$(llama_bench_pp_tg "$fixture")" "486.4 84.0"
+# A json missing one of the two rows must fail loudly, not emit a blank.
+if out=$(echo '[]' | llama_bench_pp_tg - 2>/dev/null); then
+  fail "llama_bench_pp_tg on empty json should fail (got '$out')"
+fi
+
+expect "fmax a wins" "$(fmax 403.53 310.30)" "403.53"
+expect "fmax b wins" "$(fmax 84 486.4)" "486.4"
+
 # median with no args must fail loudly, not return 0.
 if out=$(median 2>/dev/null); then fail "median with no args should return nonzero (got '$out')"; fi
 

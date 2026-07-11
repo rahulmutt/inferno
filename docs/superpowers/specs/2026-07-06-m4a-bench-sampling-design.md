@@ -311,6 +311,16 @@ pure-CPU backend (no BLAS) so pp ratios compare like-for-like; the tg
 0.87x reading stands meanwhile — decode is within 13% of llama.cpp on
 quiet Intel, per-thread tg 0.73x (16.14 vs 22.03).
 
+*Follow-up done same day:* devenv now pins the pure-CPU ggml build as
+the PATH comparator (`pkgs.llama-cpp.override { blasSupport = false; }`
+— verified: no `libggml-blas.so` in the package, `backends: CPU` at
+runtime), and `gate-bench-protocol.sh` additionally records the stock
+BLAS build as a "llama at its best" reference row (via
+`INFERNO_LLAMA_BENCH_BLAS`, kept off PATH), judging the v1 criterion
+against the per-metric max of the two builds. The pp numbers above
+predate this and keep their confound caveat; the next quiet-hw pass
+supersedes them.
+
 ```
 # gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-11T13:10:00Z
 machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-11
