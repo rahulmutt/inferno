@@ -92,6 +92,25 @@ pnap_api() {
 metal_default_os() { echo "${METAL_OS:-debian/bookworm}"; }
 metal_default_ssh_user() { echo "${METAL_SSH_USER:-debian}"; }
 
+# metal_devpod_source <git-remote-url> <commit-sha> — the workspace source
+# string for `devpod up`. devpod clones this ON the box and pins the exact
+# commit through its "@sha256:<hash>" delimiter (git.CommitDelimiter). The
+# remote must already carry a scheme devpod's positional git.NormalizeRepository
+# recognizes (ssh://, git@, http(s)://, file://). Anything else — notably a bare
+# "git:" prefix, which is a --source flag convenience that NormalizeRepository
+# does NOT strip — gets "https://" blindly prepended, yielding a mangled
+# "https://git:https://…" clone URL that dies with `git clone` exit 128 only
+# once the billed box is already up. Guard it here so a bad remote fails local
+# preflight, before the meter starts.
+metal_devpod_source() {
+  local remote="$1" sha="$2"
+  case "$remote" in
+    ssh://*|git@*|http://*|https://*|file://*) : ;;
+    *) metal_die "git remote '$remote' has no devpod-recognized scheme (ssh://, git@, http(s)://, file://) — devpod would prepend https:// and mangle the clone URL" ;;
+  esac
+  printf '%s@sha256:%s\n' "$remote" "$sha"
+}
+
 # features_table — path to the curated ISA table (override for tests).
 features_table() {
   echo "${METAL_FEATURES_TABLE:-$(dirname "${BASH_SOURCE[0]}")/cpu-features.json}"

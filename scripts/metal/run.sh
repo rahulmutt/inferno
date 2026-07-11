@@ -235,7 +235,8 @@ devpod provider add ssh --name "$PROVIDER" \
 # than uploading the local working tree — devpod's folder upload ships the
 # whole checkout including the tens-of-GB target/. The box builds fresh inside
 # devenv anyway, so only tracked source needs to travel, and via git it does.
-devpod up "git:$REMOTE@sha256:$HEAD_SHA" --provider "$PROVIDER" --id "$WORKSPACE" --ide none \
+devpod up "$(metal_devpod_source "$REMOTE" "$HEAD_SHA")" \
+  --provider "$PROVIDER" --id "$WORKSPACE" --ide none \
   2>&1 | tee "$OUT/devpod-up.log"
 meta_set devpod_workspace "\"$WORKSPACE\""
 

@@ -129,4 +129,17 @@ expect "parse keep+reuse" \
 if parse d3.m5.xlarge --yes 2>/dev/null; then fail "run.sh without a workload must fail"; fi
 if parse d3.m5.xlarge --bogus -- echo hi 2>/dev/null; then fail "unknown flag must fail"; fi
 
+# --- metal_devpod_source: a devpod-clonable workspace source ----------------
+# Regression for the mangled clone URL that failed the live E2E smoke with
+# `git clone` exit 128: a "git:"-prefixed remote (a --source flag convenience
+# that devpod's positional git.NormalizeRepository does NOT strip) had
+# "https://" blindly prepended, producing "https://git:https://…@sha256:…".
+# The source must pin the commit and start with a devpod-recognized scheme.
+expect "devpod source pins the commit" \
+  "$(metal_devpod_source https://github.com/o/r.git deadbeef)" \
+  "https://github.com/o/r.git@sha256:deadbeef"
+if (metal_devpod_source "git:https://github.com/o/r.git" deadbeef) 2>/dev/null; then
+  fail "a 'git:'-prefixed remote must be rejected — devpod would mangle it into https://git:https://…"
+fi
+
 echo "metal lib-selftest: OK"
