@@ -21,6 +21,7 @@ use inferno_codegen::{CompileOptions, compile};
 use inferno_formats::{DType, ModelDesc, load_desc};
 use inferno_graph::tolerance::logits_abs_tol;
 use inferno_graph::{Interpreter, KvCache, build_graph};
+use inferno_pool;
 use inferno_target::TargetDesc;
 use serde::Deserialize;
 
@@ -308,4 +309,56 @@ fn differential_tiny_bias() {
     );
 
     differential_for(fixture);
+}
+
+/// THE THREADS GATE (M4b.8): prefill logits must be **bitwise** identical
+/// across pool thread counts. Compile at T=4 (so a 10-token prompt spans
+/// 3 tiles and each tile's `inferno_par_attention` dispatch shards m
+/// tokens into align-1 shards), run the same prompt with the pool capped
+/// at 1 lane and at 8 lanes, and compare bits. Each token's attention out
+/// row is computed entirely by one lane with the unchanged per-token
+/// kernel, and GEMM sharding was already bit-neutral (M4b.1/2), so any
+/// difference means the dispatcher partitioned wrongly — fix the pool,
+/// never the tolerance.
+///
+/// This is the only test in this binary that initializes the global pool;
+/// other tests in the same process then dispatch through it too, which is
+/// harmless — bit-identical by construction (that is this crate's whole
+/// invariant).
+#[test]
+fn prefill_is_bit_invariant_to_thread_count() {
+    let fixture = "../inferno-formats/tests/fixtures/tiny.gguf";
+    let desc = load_desc(Path::new(fixture)).unwrap();
+    let graph = build_graph(&desc).unwrap();
+    let target = TargetDesc::detect().unwrap();
+    let tokens: Vec<u32> = vec![1, 5, 9, 3, 2, 7, 4, 6, 0, 8];
+
+    let tmp = tempfile::tempdir().unwrap();
+    let art = compile(
+        &desc,
+        &graph,
+        &target,
+        64,
+        &CompileOptions {
+            profile: false,
+            prefill_tile: 4,
+        },
+        tmp.path(),
+    )
+    .unwrap();
+    let meta: Meta =
+        serde_json::from_slice(&std::fs::read(art.dir.join("meta.json")).unwrap()).unwrap();
+
+    inferno_pool::init_global(8).unwrap();
+    inferno_pool::set_global_active_threads(1);
+    let l1 = unsafe { run_compiled(&art.dir, &tokens, &meta) };
+    inferno_pool::set_global_active_threads(8);
+    let l8 = unsafe { run_compiled(&art.dir, &tokens, &meta) };
+    for (i, (a, b)) in l1.iter().zip(&l8).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "logit {i} differs between t=1 and t=8 ({a} vs {b})"
+        );
+    }
 }
