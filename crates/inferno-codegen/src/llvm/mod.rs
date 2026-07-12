@@ -193,6 +193,18 @@ impl<'c> LlvmModule<'c> {
             par_attn_ty,
             Some(Linkage::External),
         );
+
+        // void inferno_par_token_loop(ptr body, ptr ctx, i64 m)
+        // — the M4b.9 serial-tail dispatcher; `body` is a module-emitted
+        // outlined token-span function (`tok_body.*`) and `ctx` its opaque
+        // argument pack (layout private to ops.rs). Shards the tile's m
+        // tokens align-1, exactly like par_attention.
+        let par_tok_ty = void.fn_type(&[ptr.into(), ptr.into(), i64_t.into()], false);
+        self.module.add_function(
+            "inferno_par_token_loop",
+            par_tok_ty,
+            Some(Linkage::External),
+        );
     }
 
     /// Emit the profiler counter global `inferno_prof_counters : [n x i64]`
@@ -368,6 +380,7 @@ mod tests {
         assert!(ir.contains("inferno_par_gemv"));
         assert!(ir.contains("inferno_par_gemm"));
         assert!(ir.contains("inferno_par_attention"));
+        assert!(ir.contains("inferno_par_token_loop"));
         assert!(ir.contains("inferno_attention_f32_scalar"));
         assert!(ir.contains("inferno_attention_f32_avx2"));
     }

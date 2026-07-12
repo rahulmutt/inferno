@@ -82,7 +82,13 @@ for the v1 design.
   cap change as a numeric change. Prefill attention (M4b.8) dispatches per
   tile through `inferno_par_attention`, sharding the tile's tokens with
   align-1 shards at full `active` — the decode cap never applies to it,
-  and `m <= 1` calls bypass the pool entirely.
+  and `m <= 1` calls bypass the pool entirely. Since M4b.9 the serial tail
+  (rmsnorm/rope/add/swiglu/bias/embed, KV-append, activation-quantize panel
+  fill) is token-sharded too: codegen outlines each per-token body into a
+  private `tok_body.*` function dispatched through `inferno_par_token_loop`
+  (opaque-ctx ABI, align-1 shards, `m <= 1` direct) — outlined bodies must
+  never reference caller SSA values or call the profiler, and the
+  `kv_append` dispatch always joins before the attention read is issued.
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
   operator-driven only, never CI. After any interrupted session run
   `mise run metal-gc` — EXIT traps don't survive killed terminals. The

@@ -131,6 +131,8 @@ struct Codegen<'c, 'a> {
     weight_globals: RefCell<HashMap<usize, PointerValue<'c>>>,
     /// (theta bits, head_dim) -> `[half x float]` rope frequency table.
     rope_freqs: RefCell<HashMap<(u32, u64), PointerValue<'c>>>,
+    /// Monotonic counter naming outlined `tok_body.*` functions uniquely.
+    outlined: RefCell<usize>,
 
     /// Profiler counter array base (`[N x i64]`), or None when not profiling.
     prof_counters: Option<PointerValue<'c>>,
@@ -174,6 +176,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
             sqrt_fn: decl("llvm.sqrt"),
             weight_globals: RefCell::new(HashMap::new()),
             rope_freqs: RefCell::new(HashMap::new()),
+            outlined: RefCell::new(0),
             readcyc_fn: Intrinsic::find("llvm.readcyclecounter")
                 .expect("readcyclecounter intrinsic")
                 .get_declaration(module, &[])
@@ -571,6 +574,119 @@ impl<'c, 'a> Codegen<'c, 'a> {
         self.builder.position_at_end(exit);
     }
 
+    /// Outline `per_token` into a private `void tok_body.<label>.<n>(ptr
+    /// ctx, i64 t0, i64 t1)` function and emit ONE
+    /// `inferno_par_token_loop(body, ctx, m)` dispatch sharding the tile's
+    /// `m` tokens across pool lanes (M4b.9). The ctx pack is 6 i64 words on
+    /// the caller's stack — ptrtoint(tokens), pos_off, ptrtoint(weights),
+    /// ptrtoint(kv), ptrtoint(arena), tile_start — rebuilt per dispatch;
+    /// the pool treats ctx as opaque, only this emitter knows the layout.
+    ///
+    /// `per_token(cg, env, ti, row)` is emitted POSITIONED INSIDE the
+    /// outlined function, once, looped over the span: `ti` is the
+    /// tile-local token index, `row = tile_start + ti` the arena row. It
+    /// must derive every runtime value from the rebuilt `env`/`ti`/`row`,
+    /// module-level globals/functions, or constants — referencing an SSA
+    /// value from the calling function is malformed IR (module
+    /// verification fails). Never call `profiled` inside `per_token`: the
+    /// counter accumulation is non-atomic and belongs to the dispatcher
+    /// thread; brackets wrap the dispatch call in the caller instead.
+    ///
+    /// Bit-neutrality: each token's writes are disjoint rows produced by
+    /// the identical loop-body IR the serial `range_loop(m)` emitted, and
+    /// exactly one lane runs each token — thread count and shard layout
+    /// cannot change output bits (M4b.8 argument, verbatim).
+    fn par_token_loop(
+        &self,
+        env: &TileEnv<'c>,
+        tile_start: IntValue<'c>,
+        m: IntValue<'c>,
+        label: &str,
+        per_token: impl FnOnce(&Self, &TileEnv<'c>, IntValue<'c>, IntValue<'c>),
+    ) {
+        // Caller side: pack ctx on the stack (6 stores per dispatch).
+        let ctx = self.entry_alloca(self.i64_t.array_type(6), "tokctx");
+        let p2i =
+            |p: PointerValue<'c>| self.builder.build_ptr_to_int(p, self.i64_t, "p2i").unwrap();
+        let fields = [
+            p2i(env.tokens),
+            env.pos_off,
+            p2i(env.weights),
+            p2i(env.kv),
+            p2i(env.arena),
+            tile_start,
+        ];
+        for (i, v) in fields.iter().enumerate() {
+            let slot = self.byte_ptr(ctx, self.const_i64((i * 8) as u64));
+            self.builder.build_store(slot, *v).unwrap();
+        }
+
+        // Emit the outlined body function.
+        let n = {
+            let mut c = self.outlined.borrow_mut();
+            *c += 1;
+            *c
+        };
+        let sanitized: String = label
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+            .collect();
+        let fn_ty = self.ctx.void_type().fn_type(
+            &[self.ptr_t.into(), self.i64_t.into(), self.i64_t.into()],
+            false,
+        );
+        let f = self.module.add_function(
+            &format!("tok_body.{sanitized}.{n}"),
+            fn_ty,
+            Some(Linkage::Private),
+        );
+        let saved = self.builder.get_insert_block().unwrap();
+        let entry = self.ctx.append_basic_block(f, "entry");
+        self.builder.position_at_end(entry);
+
+        let ctx_p = f.get_nth_param(0).unwrap().into_pointer_value();
+        let t0 = f.get_nth_param(1).unwrap().into_int_value();
+        let t1 = f.get_nth_param(2).unwrap().into_int_value();
+        let field = |i: usize| {
+            let p = self.byte_ptr(ctx_p, self.const_i64((i * 8) as u64));
+            self.load_i64(p)
+        };
+        let i2p = |v: IntValue<'c>| self.builder.build_int_to_ptr(v, self.ptr_t, "i2p").unwrap();
+        let body_env = TileEnv {
+            tokens: i2p(field(0)),
+            pos_off: field(1),
+            weights: i2p(field(2)),
+            kv: i2p(field(3)),
+            arena: i2p(field(4)),
+        };
+        let ts = field(5);
+        let span = self.builder.build_int_sub(t1, t0, "span").unwrap();
+        self.range_loop(span, |cg, i| {
+            let ti = cg.add(i, t0);
+            let row = cg.add(ts, ti);
+            per_token(cg, &body_env, ti, row);
+        });
+        self.builder.build_return(None).unwrap();
+        self.builder.position_at_end(saved);
+
+        // Caller side: one dispatch over the tile.
+        let pfn = self
+            .module
+            .get_function("inferno_par_token_loop")
+            .expect("par token-loop dispatcher declared");
+        self.builder
+            .build_call(
+                pfn,
+                &[
+                    f.as_global_value().as_pointer_value().into(),
+                    ctx.into(),
+                    m.into(),
+                ],
+                "par_token_loop",
+            )
+            .unwrap();
+    }
+
     // ---- entry points -------------------------------------------------------
 
     fn lower_prefill(&self, func: FunctionValue<'c>, loopir: &LoopIr) {
@@ -702,14 +818,11 @@ impl<'c, 'a> Codegen<'c, 'a> {
     /// One tile's forward pass over rows `tile_start..tile_start+m`: iterate the
     /// program's steps once, batching each matmul into a single `inferno_par_gemm`
     /// and looping every other op over the tile's `m` rows. Step order is
-    /// identical to the old per-token body. Attention is the one step that
-    /// doesn't use the per-row m-loop directly: it appends the whole tile's k/v
-    /// in token order, then dispatches a single parallel `inferno_par_attention`
-    /// call over the tile. That is bit-identical and T-invariant because each
-    /// token's result is still computed by exactly one lane with the unchanged
-    /// per-token kernel, and that token's causal read never reaches KV rows
-    /// past its own position, so appending the whole tile before the parallel
-    /// read changes nothing observable.
+    /// identical to the old per-token body. Attention appends the whole tile's
+    /// k/v via one token-loop dispatch, then issues a single parallel read;
+    /// both are bit-identical and T-invariant because each token's rows are
+    /// written by exactly one lane and a token's causal read never reaches
+    /// KV rows past its own position.
     ///
     /// Profiling attributes per op-kind: the matmul is timed once per tile; each
     /// elementwise/attention op is timed once per tile across its whole m-loop.
@@ -725,7 +838,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
                 let label = crate::profile::step_label(step, self.plan, self.desc);
                 match step {
                     Step::Gemv { .. } => {
-                        self.profiled(&label, |cg| cg.lower_gemm(env, step, tile_start, m));
+                        self.lower_gemm(env, step, tile_start, m, &label);
                     }
                     // Quantization is folded into `lower_gemm` (it happens inline
                     // while filling the activation panel for a quantized-weight
@@ -735,15 +848,17 @@ impl<'c, 'a> Codegen<'c, 'a> {
                     // "quantize" profiler accumulation. Skip it entirely.
                     Step::Quantize { .. } => {}
                     Step::Attention { .. } => {
+                        self.profiled(crate::profile::KV_APPEND_LABEL, |cg| {
+                            cg.lower_tile_kv_append(env, step, tile_start, m)
+                        });
                         self.profiled(&label, |cg| {
                             cg.lower_tile_attention(env, step, tile_start, m)
                         });
                     }
                     _ => {
                         self.profiled(&label, |cg| {
-                            cg.range_loop(m, |cg, ti| {
-                                let row = cg.add(tile_start, ti);
-                                let frame = cg.tile_frame(env, row);
+                            cg.par_token_loop(env, tile_start, m, &label, |cg, benv, _ti, row| {
+                                let frame = cg.tile_frame(benv, row);
                                 cg.lower_step(&frame, step);
                             });
                         });
@@ -767,12 +882,20 @@ impl<'c, 'a> Codegen<'c, 'a> {
     /// (stride `k` f32) — no copy. Output is written token-major
     /// (`y[ti*rows + r]`), which coincides with the arena rows of `out` starting
     /// at `tile_start`.
+    ///
+    /// The quantized-panel fill is sharded across pool lanes (M4b.9) via
+    /// `par_token_loop`: each token quantizes only its own panel row, so
+    /// shards write disjoint bytes. This function now emits its own two
+    /// profile brackets — `"quantize"` around the panel fill dispatch, then
+    /// `label` around the `inferno_par_gemm` dispatch — instead of being
+    /// wrapped by a single `profiled(&label, ...)` call in `lower_tile`.
     fn lower_gemm(
         &self,
         env: &TileEnv<'c>,
         step: &Step,
         tile_start: IntValue<'c>,
         m: IntValue<'c>,
+        label: &str,
     ) {
         let Step::Gemv {
             weight,
@@ -793,27 +916,44 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let gemm_sym = crate::loopir::gemm_symbol(&pw.dtype, pw.isa);
 
         let panel_ptr = if pw.dtype != inferno_formats::DType::F32 {
-            // Quantize each token's source row into scratch[ti * act_len(k)].
+            // Quantize each token's source row into scratch[ti * act_len(k)],
+            // sharded across pool lanes (M4b.9) — each token fills only its
+            // own panel row, so shards write disjoint bytes. Bracketed as
+            // "quantize" so the profile attributes the panel fill separately
+            // from the matmul dispatch (it was folded into the matmul row
+            // before M4b.9).
             let act_row = Self::packed_act_bytes(&pw.dtype, *k);
-            let scratch = self.act_scratch_ptr_row0(env.arena);
             let qsym = Self::quantize_symbol(&pw.dtype, pw.isa);
             let qfn = self
                 .module
                 .get_function(&qsym)
                 .expect("quantize kernel declared (Task 8)");
-            self.range_loop(m, |cg, ti| {
-                let row = cg.add(tile_start, ti);
-                let src_ptr = cg.arena_row_ptr_at(env.arena, src, row);
-                let off = cg
-                    .builder
-                    .build_int_mul(ti, cg.const_i64(act_row), "actoff")
-                    .unwrap();
-                let dst = cg.byte_ptr(scratch, off);
-                cg.builder
-                    .build_call(qfn, &[src_ptr.into(), dst.into(), k_c.into()], "quantize")
-                    .unwrap();
+            let kk = *k as u64;
+            self.profiled(crate::profile::QUANTIZE_LABEL, |cg| {
+                cg.par_token_loop(
+                    env,
+                    tile_start,
+                    m,
+                    crate::profile::QUANTIZE_LABEL,
+                    |cg, benv, ti, row| {
+                        let src_ptr = cg.arena_row_ptr_at(benv.arena, src, row);
+                        let scratch = cg.act_scratch_ptr_row0(benv.arena);
+                        let off = cg
+                            .builder
+                            .build_int_mul(ti, cg.const_i64(act_row), "actoff")
+                            .unwrap();
+                        let dst = cg.byte_ptr(scratch, off);
+                        cg.builder
+                            .build_call(
+                                qfn,
+                                &[src_ptr.into(), dst.into(), cg.const_i64(kk).into()],
+                                "quantize",
+                            )
+                            .unwrap();
+                    },
+                );
             });
-            scratch
+            self.act_scratch_ptr_row0(env.arena)
         } else {
             // F32 weight: the source rows are already a contiguous f32 panel.
             self.arena_row_ptr_at(env.arena, src, tile_start)
@@ -829,31 +969,60 @@ impl<'c, 'a> Codegen<'c, 'a> {
             .module
             .get_function("inferno_par_gemm")
             .expect("par gemm dispatcher declared");
-        self.builder
-            .build_call(
-                pfn,
-                &[
-                    gfn.as_global_value().as_pointer_value().into(),
-                    y_ptr.into(),
-                    panel_ptr.into(),
-                    w_ptr.into(),
-                    k_c.into(),
-                    m.into(),
-                    rows_c.into(),
-                ],
-                "par_gemm",
-            )
-            .unwrap();
+        self.profiled(label, |cg| {
+            cg.builder
+                .build_call(
+                    pfn,
+                    &[
+                        gfn.as_global_value().as_pointer_value().into(),
+                        y_ptr.into(),
+                        panel_ptr.into(),
+                        w_ptr.into(),
+                        k_c.into(),
+                        m.into(),
+                        rows_c.into(),
+                    ],
+                    "par_gemm",
+                )
+                .unwrap();
+        });
         // Bias (if any) is a separate Step handled in the elementwise m-loop.
     }
 
-    /// Tiled prefill attention (M4b.8): append the whole tile's k/v
-    /// serially (same per-token order as before), then ONE
-    /// `inferno_par_attention` call shards the tile's `m` tokens across
-    /// pool lanes. Each token's out row is computed entirely by one lane
-    /// with the unchanged per-token kernel, so thread count never changes
-    /// output bits, and token i's causal read never reaches KV rows past
-    /// `pos_i`, so appending the whole tile first is bit-neutral.
+    /// The write half of the tile's attention step (M4b.9): shard the
+    /// tile's `m` KV-appends across pool lanes. Bit-safe by the same
+    /// argument as the parallel read: each token writes only its own KV
+    /// row (`pos0 + t`), rows are disjoint across tokens, and the
+    /// dispatch joins before `lower_tile_attention` issues the parallel
+    /// read — so every KV row `<= pos_i` is in place when token i's
+    /// causal read runs, exactly as with the old serial append loop.
+    fn lower_tile_kv_append(
+        &self,
+        env: &TileEnv<'c>,
+        step: &Step,
+        tile_start: IntValue<'c>,
+        m: IntValue<'c>,
+    ) {
+        let Step::Attention { k, v, layer, .. } = step else {
+            unreachable!("lower_tile_kv_append called on non-Attention step")
+        };
+        let (k, v, layer) = (*k, *v, *layer);
+        self.par_token_loop(
+            env,
+            tile_start,
+            m,
+            crate::profile::KV_APPEND_LABEL,
+            |cg, benv, _ti, row| {
+                let frame = cg.tile_frame(benv, row);
+                cg.lower_kv_append(&frame, k, v, layer);
+            },
+        );
+    }
+
+    /// Tiled prefill attention read (M4b.8/M4b.9): the tile's k/v was
+    /// appended by `lower_tile_kv_append`'s dispatch (already joined), then
+    /// ONE `inferno_par_attention` call shards the tile's `m` tokens across
+    /// pool lanes.
     fn lower_tile_attention(
         &self,
         env: &TileEnv<'c>,
@@ -863,22 +1032,16 @@ impl<'c, 'a> Codegen<'c, 'a> {
     ) {
         let Step::Attention {
             q,
-            k,
-            v,
             layer,
             n_heads,
             n_kv_heads,
             head_dim,
             out,
+            ..
         } = step
         else {
             unreachable!("lower_tile_attention called on non-Attention step")
         };
-        self.range_loop(m, |cg, ti| {
-            let row = cg.add(tile_start, ti);
-            let frame = cg.tile_frame(env, row);
-            cg.lower_kv_append(&frame, *k, *v, *layer);
-        });
         let kv_dim = self.plan.kv.kv_dim as u64;
         let seq_len = self.plan.max_seq_len as u64;
         let kv_base = *layer as u64 * seq_len * kv_dim * 2;
@@ -1277,9 +1440,11 @@ impl<'c, 'a> Codegen<'c, 'a> {
     /// Append this token's k/v rows into the f32 KV cache at `frame.pos` —
     /// the write half of `Step::Attention`. Called per token by the decode
     /// path (`lower_attention`) and by the prefill tile arm
-    /// (`lower_tile_attention`), which appends the WHOLE tile before its
-    /// parallel attention read. That reordering is bit-safe: token i's
-    /// causal read never reaches rows past `pos_i`.
+    /// (`lower_tile_kv_append`), which dispatches the WHOLE tile's appends
+    /// across pool lanes via `inferno_par_token_loop` and joins before
+    /// `lower_tile_attention` issues its parallel attention read. That
+    /// reordering is bit-safe: token i's causal read never reaches rows past
+    /// `pos_i`.
     fn lower_kv_append(&self, frame: &Frame<'c>, k: usize, v: usize, layer: usize) {
         let kv_dim = self.plan.kv.kv_dim as u64;
         let seq_len = self.plan.max_seq_len as u64;

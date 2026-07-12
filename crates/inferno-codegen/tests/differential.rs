@@ -48,12 +48,13 @@ type PrefillFn = unsafe extern "C" fn(
 
 /// Force the linker to retain (and, with `-rdynamic` from build.rs, export) the
 /// kernel symbols *and* the `inferno_par_gemv` (M4b.1), `inferno_par_gemm`
-/// (M4b.2), and `inferno_par_attention` (M4b.8) dispatchers the compiled
-/// `model.so` resolves against the host binary. Without at least one
-/// reference the linker may drop `inferno-kernels`/`inferno-pool` entirely,
-/// leaving nothing to export and `dlopen` failing on the first undefined
-/// `inferno_gemv_*` / `inferno_quantize_row_*` / `inferno_par_gemv` /
-/// `inferno_par_gemm` / `inferno_par_attention` symbol.
+/// (M4b.2), `inferno_par_attention` (M4b.8), and `inferno_par_token_loop`
+/// (M4b.9) dispatchers the compiled `model.so` resolves against the host
+/// binary. Without at least one reference the linker may drop
+/// `inferno-kernels`/`inferno-pool` entirely, leaving nothing to export and
+/// `dlopen` failing on the first undefined `inferno_gemv_*` /
+/// `inferno_quantize_row_*` / `inferno_par_gemv` / `inferno_par_gemm` /
+/// `inferno_par_attention` / `inferno_par_token_loop` symbol.
 fn retain_kernel_symbols() {
     use std::hint::black_box;
     let p = |f: *const ()| black_box(f as usize);
@@ -78,6 +79,7 @@ fn retain_kernel_symbols() {
     p(inferno_pool::inferno_par_gemv as *const ());
     p(inferno_pool::inferno_par_gemm as *const ());
     p(inferno_pool::inferno_par_attention as *const ());
+    p(inferno_pool::inferno_par_token_loop as *const ());
 }
 
 /// dlopen `model.so`, run `prefill(tokens)`, and return the last-token logits.
@@ -358,6 +360,18 @@ fn prefill_is_bit_invariant_to_thread_count() {
             a.to_bits(),
             b.to_bits(),
             "logit {i} differs between t=1 and t=8 ({a} vs {b})"
+        );
+    }
+    // t=2 (tile=4 over a 10-token prompt) yields shard table [(0,2),(2,4)] —
+    // the only run above with an offset shard (t0=2, span=2); the t=8 run
+    // above is all span=1 shards, so this exercises a different shard shape.
+    inferno_pool::set_global_active_threads(2);
+    let l2 = unsafe { run_compiled(&art.dir, &tokens, &meta) };
+    for (i, (a, b)) in l1.iter().zip(&l2).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "logit {i} differs between t=1 and t=2 ({a} vs {b})"
         );
     }
 }

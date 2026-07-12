@@ -64,6 +64,13 @@ pub struct AttnJob {
     pub out_stride: usize,
 }
 
+/// The M4b.9 outlined token-body ABI: `(ctx, t0, t1)` runs tokens
+/// `[t0, t1)` of a prefill tile. `ctx` is an opaque argument pack built by
+/// the emitting module (codegen packs pointers + tile_start; only it knows
+/// the layout — the pool just passes ctx through). Each token's writes are
+/// disjoint rows, so thread count never changes output bits.
+pub type TokenBodyFn = unsafe extern "C" fn(*const u8, usize, usize);
+
 /// The kind of kernel a published [`Job`] carries. A `Copy` enum of `Copy`
 /// fields so a worker reads it out of the shared job exactly like the old
 /// bare `GemvFn` payload — no change to the epoch/remaining SAFETY protocol.
@@ -78,6 +85,10 @@ enum JobKind {
         rows: usize,
     },
     Attention(AttnJob),
+    TokenLoop {
+        body: TokenBodyFn,
+        ctx: *const u8,
+    },
 }
 
 /// Run one shard's slice `[start, end)` of the current job. For `Gemm` the
@@ -106,6 +117,8 @@ unsafe fn run_shard(
         JobKind::Gemm { kernel, m, rows } => unsafe { kernel(y, xq, w, k, m, rows, start, end) },
         // SAFETY: forwarding the caller's contract for the disjoint token span.
         JobKind::Attention(job) => unsafe { run_attn_span(&job, start, end) },
+        // SAFETY: forwarding the caller's contract for the disjoint token span.
+        JobKind::TokenLoop { body, ctx } => unsafe { body(ctx, start, end) },
     }
 }
 
@@ -531,6 +544,77 @@ impl Pool {
             }
         }
     }
+
+    /// Outlined token-span work across up to `active_threads()` lanes
+    /// (M4b.9): splits the tile's `m` tokens into align-1 contiguous
+    /// shards and calls `body(ctx, start, end)` once per shard. Each
+    /// token's writes are disjoint rows computed by exactly one lane, so
+    /// thread count never changes output bits. The M4b.5 decode cap does
+    /// NOT apply — token loops are prefill work.
+    ///
+    /// # Safety
+    /// `body` must be a valid `TokenBodyFn` whose contract holds for
+    /// every token span within `0..m` given `ctx`; `ctx` and every buffer
+    /// the body touches stay live and otherwise-untouched until this
+    /// returns; per-token writes must be disjoint across tokens; calls
+    /// must not overlap (one job at a time).
+    pub unsafe fn par_token_loop(&self, body: TokenBodyFn, ctx: *const u8, m: usize) {
+        if m == 0 {
+            return;
+        }
+        let active = self.active_threads();
+        let shards = shard_table_aligned(m, active, 1);
+        if shards.len() == 1 {
+            // SAFETY: caller contract covers the full token range.
+            unsafe { body(ctx, 0, m) };
+            return;
+        }
+        let n_worker = shards.len() - 1;
+        let (s0, e0) = shards[0];
+        let kind = JobKind::TokenLoop { body, ctx };
+        // SAFETY (job write): the previous dispatch ended with
+        // `remaining == 0`, and shardless workers never read `job`
+        // (packed-epoch protocol) — no reader exists here.
+        unsafe {
+            *self.shared.job.get() = Job {
+                kind: Some(kind),
+                y: std::ptr::null_mut(),
+                xq: std::ptr::null(),
+                w: std::ptr::null(),
+                k: 0,
+                shards,
+            };
+        }
+        self.shared.remaining.store(n_worker, Ordering::SeqCst);
+        let counter =
+            (self.shared.epoch.load(Ordering::SeqCst) >> PACKED_SHARD_BITS).wrapping_add(1);
+        self.shared.epoch.store(
+            (counter << PACKED_SHARD_BITS) | (n_worker + 1),
+            Ordering::SeqCst,
+        );
+        // Wake exactly the workers that hold a shard (same handshake as
+        // par_gemv; see there for the lost-wakeup argument).
+        for slot in &self.shared.slots[..n_worker] {
+            if slot.parked.load(Ordering::SeqCst) {
+                slot.thread
+                    .get()
+                    .expect("worker registered in Pool::new")
+                    .unpark();
+            }
+        }
+        // SAFETY: caller contract; shard 0's tokens are disjoint from
+        // worker shards.
+        unsafe { body(ctx, s0, e0) };
+        let mut spins = 0u32;
+        while self.shared.remaining.load(Ordering::Acquire) != 0 {
+            if spins < SPIN_ITERS {
+                spins += 1;
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    }
 }
 
 impl Drop for Pool {
@@ -831,5 +915,73 @@ mod tests {
     fn attention_zero_tokens_is_a_noop() {
         let pool = Pool::new(4);
         assert!(attn_dispatch(&pool, 0, 0).is_empty());
+    }
+
+    /// Fake outlined token body with the real M4b.9 ABI: ctx is two usize
+    /// words [out_ptr_bits, stride]; each token t writes its own disjoint
+    /// out row — a deterministic function of (t, i), like the codegen
+    /// bodies it stands in for.
+    unsafe extern "C" fn stamp_tokens(ctx: *const u8, t0: usize, t1: usize) {
+        let words = ctx as *const usize;
+        // SAFETY: tests pass a 2-word ctx pack, live for the call.
+        let out = unsafe { *words } as *mut f32;
+        let stride = unsafe { *words.add(1) };
+        for t in t0..t1 {
+            for i in 0..stride {
+                // SAFETY: out has m*stride elements and t < m per contract.
+                unsafe { *out.add(t * stride + i) = (t * 31 + i) as f32 };
+            }
+        }
+    }
+
+    const TOK_STRIDE: usize = 5;
+
+    fn tok_dispatch(pool: &Pool, m: usize) -> Vec<f32> {
+        let mut out = vec![f32::NAN; m * TOK_STRIDE];
+        let ctx = [out.as_mut_ptr() as usize, TOK_STRIDE];
+        // SAFETY: ctx/out sized per stamp_tokens' expectations, live for the call.
+        unsafe { pool.par_token_loop(stamp_tokens, ctx.as_ptr() as *const u8, m) };
+        out
+    }
+
+    fn tok_expected(m: usize) -> Vec<f32> {
+        (0..m * TOK_STRIDE)
+            .map(|j| ((j / TOK_STRIDE) * 31 + j % TOK_STRIDE) as f32)
+            .collect()
+    }
+
+    #[test]
+    fn token_loop_parallel_matches_serial_expectation() {
+        let pool = Pool::new(4);
+        for m in [1, 2, 7, 63, 64, 100] {
+            assert_eq!(tok_dispatch(&pool, m), tok_expected(m), "m={m}");
+        }
+    }
+
+    #[test]
+    fn token_loop_threads_exceeding_tokens_collapses() {
+        let pool = Pool::new(16);
+        assert_eq!(tok_dispatch(&pool, 3), tok_expected(3));
+    }
+
+    #[test]
+    fn token_loop_capacity_one_runs_inline() {
+        let pool = Pool::new(1);
+        assert_eq!(tok_dispatch(&pool, 64), tok_expected(64));
+    }
+
+    #[test]
+    fn token_loop_ignores_decode_cap() {
+        // The decode cap applies to par_gemv only; token loops are prefill
+        // work and shard over full active. Result identical either way.
+        let pool = Pool::new(8);
+        pool.set_decode_threads(1);
+        assert_eq!(tok_dispatch(&pool, 64), tok_expected(64));
+    }
+
+    #[test]
+    fn token_loop_zero_tokens_is_a_noop() {
+        let pool = Pool::new(4);
+        assert!(tok_dispatch(&pool, 0).is_empty());
     }
 }
