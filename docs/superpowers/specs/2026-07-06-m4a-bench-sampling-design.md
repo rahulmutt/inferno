@@ -380,3 +380,37 @@ llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 684.97 | tg 61.86
 ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.23x | tg 0.79x
 gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
 ```
+
+### 2026-07-12 — third quiet-hw session, post-M4b.8: pp 0.32x | tg 0.79x — NOT MET, pp materially improved
+
+Same box type and protocol (pure-CPU comparator + BLAS reference row,
+judged vs per-metric best-of), inferno @ 823437f — first reading with
+M4b.8's parallel prefill attention. **pp 0.32x | tg 0.79x vs llama
+best-of → v1 win criterion NOT MET.** pp moved 0.23x → 0.32x (+39%,
+entirely the M4b.8 prefill gain — inferno pp512 285→398 tok/s at t=16);
+tg 0.79x unchanged, consistent with every prior reading. Caveat carried
+from the second session: llama's pp stddev remains large (±272 here,
+~24%); the pure-CPU build (1143.5) again beats the BLAS reference
+(698.2), confirming the comparator choice.
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-12T08:50:44Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-12
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (16 physical / 32 logical cores)
+inferno 0.1.0 (823437f) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      398.01 ± 3.88        48.87 ± 0.04 
+inferno (t=1 diag)           1       63.44 ± 0.02        17.31 ± 0.01 
+llama.cpp                   16     1143.51 ± 272.44       61.35 ± 0.26 
+llama.cpp (t=1 diag)         1      118.15 ± 0.04        17.96 ± 0.01 
+
+ratio (inferno/llama.cpp): pp 0.35x | tg 0.80x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 698.20 | tg 61.53 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.32x | tg 0.79x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```

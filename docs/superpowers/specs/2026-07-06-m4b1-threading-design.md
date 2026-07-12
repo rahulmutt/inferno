@@ -432,3 +432,46 @@ The follow-up the fork authorized is designed in
 [M4b.8 — Parallel Prefill Attention](2026-07-11-m4b8-parallel-attention-design.md)
 (own doc per repo convention). The ≥6x @ t=12 exit criterion stays owned
 by this spec; M4b.8's quiet-hw verdict will be recorded here.
+
+### 2026-07-12 — third quiet-hw session, post-M4b.8: 5.67x @ t=12 — NOT MET; attribution: remaining serial ops
+
+Same box type as both prior sessions (d2.c1.medium → Xeon Gold 6336Y,
+16 physical / 32 logical, PREFLIGHT FIT), inferno @ 823437f — the first
+run with M4b.8's parallel prefill attention. **Prefill scale @ t=12 =
+5.67x against the ≥6x target — NOT MET, but up from 4.06x/4.11x on the
+same silicon**, with t=1 unchanged (61.2 vs 61.4–61.6 tok/s — no serial
+regression) and absolute t=12 throughput 249.9→346.8 tok/s (+39%).
+
+**The attribution fork is taken this session, both ways ruled decisive:**
+
+- *Memory bandwidth of the box*: ruled out. The pure-CPU llama.cpp
+  control (fixed comparator, second-session follow-up) scales 117.7 →
+  1082.6 pp tok/s = **9.2x @ t=12 on this box** — the hardware supports
+  well past 6x at these throughput levels.
+- *Dispatch overhead vs remaining serial ops* (the M4b.8 spec's item-3
+  fork): the sweep shape is a **slope deficit persisting across t**
+  (1.90x@2, 3.07x@4, 4.72x@8, 5.67x@12 — near-ideal at t=2, deficit
+  growing with t), not low-t degradation with high-t recovery. That is
+  the remaining-serial-ops signature. Amdahl fit: residual serial
+  fraction ≈ 10.2%; the 6x line needs ≈ 9.1% — the top of the M4b.8
+  spec's predicted 5–10% band, missed by ~1pp of serial work.
+
+Per the M4b.8 spec's Risks section, the recorded attribution authorizes
+**rope/norm/append parallelization as the next lever** — not loosening
+the gate. Scoping deferred to a dedicated design (M4b.9 candidate).
+
+```
+# gate-prefill-scaling (M4b.1 ≥6x @ t=12) — 2026-07-12T08:06:10Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-12
+
+| t | pp tok/s | pp scale | tg tok/s | tg scale | llama pp (corrob.) | llama tg (corrob.) |
+|---|---|---|---|---|---|---|
+| 1 | 61.180962962430556 | 1.00x | 24.36003144785473 | 1.00x | 117.727526 | 24.548485 |
+| 2 | 116.05132249378607 | 1.90x | 30.262036892614805 | 1.24x | 233.513123 | 31.238757 |
+| 4 | 187.9838116436776 | 3.07x | 29.934194425207068 | 1.23x | 449.758712 | 49.208576 |
+| 8 | 288.520376217837 | 4.72x | 30.09539046002045 | 1.24x | 827.517343 | 57.428537 |
+| 12 | 346.8010463910017 | 5.67x | 47.17741791944487 | 1.94x | 1082.552108 | 59.288741 |
+
+gate: prefill scale @ t=12 = 5.67x (target ≥6x) -> NOT MET
+note: on a MET=no result, take the M4b.1 spec's attribution fork (serial attention vs memory bandwidth) — see its Amendments.
+```

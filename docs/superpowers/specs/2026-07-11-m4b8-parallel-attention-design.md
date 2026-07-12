@@ -155,3 +155,34 @@ the verdict protocol distinguishes "remaining serial ops" from
   first tiles split unevenly under contiguous shards; those tiles are
   also the cheapest, so the effect is bounded. Accepted; cost-weighted
   sharding stays out of scope unless the verdict blames it.
+
+## Amendments
+
+### 2026-07-12 — implementation merged; quiet-hw verdict: 5.67x @ t=12 — NOT MET; attribution recorded
+
+Implementation squash-merged to main @ 823437f (PR #14); all
+implementation gates green (threads bit-gate t=1 vs t=8 bitwise,
+tiling gate, artifact differential, 281/281 + lint 0).
+
+**Verification protocol outcomes:**
+
+1. `bench-compiled` (nightly t=1 codegen-quality gate): pending the
+   first post-merge nightly; the quiet-hw sweep's t=1 row (61.2 tok/s,
+   unchanged vs 61.4–61.6 pre-M4b.8 on the same box) already indicates
+   no single-thread regression.
+2. **Quiet-hw verdict (d2.c1.medium → 6336Y, PREFLIGHT FIT, third
+   session): prefill scale @ t=12 = 5.67x → NOT MET**, up from
+   4.06x/4.11x pre-M4b.8 on the same silicon (+39% absolute at t=12,
+   249.9→346.8 pp tok/s). Full table and the taken attribution fork
+   recorded in the M4b.1 spec (the verdict ledger), same-day entry.
+   The M4a headline did move materially as predicted: pp vs llama
+   best-of 0.23x → 0.32x.
+3. **NOT MET attribution (item-3 fork, taken):** sweep shape is a
+   slope deficit persisting across t (near-ideal 1.90x@2, growing
+   deficit through 5.67x@12), not low-t degradation — i.e. **remaining
+   serial ops, not dispatch overhead**. Amdahl fit: residual serial
+   fraction ≈ 10.2% (top of this spec's predicted 5–10% band); 6x
+   needs ≈ 9.1%. Per Risks, the authorized next lever is
+   rope/norm/append parallelization (M4b.9 candidate) — the gate is
+   not loosened, and the ≥6x @ t=12 criterion remains owned by the
+   M4b.1 spec.
