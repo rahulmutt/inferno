@@ -838,7 +838,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
                 let label = crate::profile::step_label(step, self.plan, self.desc);
                 match step {
                     Step::Gemv { .. } => {
-                        self.profiled(&label, |cg| cg.lower_gemm(env, step, tile_start, m));
+                        self.lower_gemm(env, step, tile_start, m, &label);
                     }
                     // Quantization is folded into `lower_gemm` (it happens inline
                     // while filling the activation panel for a quantized-weight
@@ -882,12 +882,20 @@ impl<'c, 'a> Codegen<'c, 'a> {
     /// (stride `k` f32) — no copy. Output is written token-major
     /// (`y[ti*rows + r]`), which coincides with the arena rows of `out` starting
     /// at `tile_start`.
+    ///
+    /// The quantized-panel fill is sharded across pool lanes (M4b.9) via
+    /// `par_token_loop`: each token quantizes only its own panel row, so
+    /// shards write disjoint bytes. This function now emits its own two
+    /// profile brackets — `"quantize"` around the panel fill dispatch, then
+    /// `label` around the `inferno_par_gemm` dispatch — instead of being
+    /// wrapped by a single `profiled(&label, ...)` call in `lower_tile`.
     fn lower_gemm(
         &self,
         env: &TileEnv<'c>,
         step: &Step,
         tile_start: IntValue<'c>,
         m: IntValue<'c>,
+        label: &str,
     ) {
         let Step::Gemv {
             weight,
@@ -908,27 +916,38 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let gemm_sym = crate::loopir::gemm_symbol(&pw.dtype, pw.isa);
 
         let panel_ptr = if pw.dtype != inferno_formats::DType::F32 {
-            // Quantize each token's source row into scratch[ti * act_len(k)].
+            // Quantize each token's source row into scratch[ti * act_len(k)],
+            // sharded across pool lanes (M4b.9) — each token fills only its
+            // own panel row, so shards write disjoint bytes. Bracketed as
+            // "quantize" so the profile attributes the panel fill separately
+            // from the matmul dispatch (it was folded into the matmul row
+            // before M4b.9).
             let act_row = Self::packed_act_bytes(&pw.dtype, *k);
-            let scratch = self.act_scratch_ptr_row0(env.arena);
             let qsym = Self::quantize_symbol(&pw.dtype, pw.isa);
             let qfn = self
                 .module
                 .get_function(&qsym)
                 .expect("quantize kernel declared (Task 8)");
-            self.range_loop(m, |cg, ti| {
-                let row = cg.add(tile_start, ti);
-                let src_ptr = cg.arena_row_ptr_at(env.arena, src, row);
-                let off = cg
-                    .builder
-                    .build_int_mul(ti, cg.const_i64(act_row), "actoff")
-                    .unwrap();
-                let dst = cg.byte_ptr(scratch, off);
-                cg.builder
-                    .build_call(qfn, &[src_ptr.into(), dst.into(), k_c.into()], "quantize")
-                    .unwrap();
+            let kk = *k as u64;
+            self.profiled("quantize", |cg| {
+                cg.par_token_loop(env, tile_start, m, "quantize", |cg, benv, ti, row| {
+                    let src_ptr = cg.arena_row_ptr_at(benv.arena, src, row);
+                    let scratch = cg.act_scratch_ptr_row0(benv.arena);
+                    let off = cg
+                        .builder
+                        .build_int_mul(ti, cg.const_i64(act_row), "actoff")
+                        .unwrap();
+                    let dst = cg.byte_ptr(scratch, off);
+                    cg.builder
+                        .build_call(
+                            qfn,
+                            &[src_ptr.into(), dst.into(), cg.const_i64(kk).into()],
+                            "quantize",
+                        )
+                        .unwrap();
+                });
             });
-            scratch
+            self.act_scratch_ptr_row0(env.arena)
         } else {
             // F32 weight: the source rows are already a contiguous f32 panel.
             self.arena_row_ptr_at(env.arena, src, tile_start)
@@ -944,21 +963,23 @@ impl<'c, 'a> Codegen<'c, 'a> {
             .module
             .get_function("inferno_par_gemm")
             .expect("par gemm dispatcher declared");
-        self.builder
-            .build_call(
-                pfn,
-                &[
-                    gfn.as_global_value().as_pointer_value().into(),
-                    y_ptr.into(),
-                    panel_ptr.into(),
-                    w_ptr.into(),
-                    k_c.into(),
-                    m.into(),
-                    rows_c.into(),
-                ],
-                "par_gemm",
-            )
-            .unwrap();
+        self.profiled(label, |cg| {
+            cg.builder
+                .build_call(
+                    pfn,
+                    &[
+                        gfn.as_global_value().as_pointer_value().into(),
+                        y_ptr.into(),
+                        panel_ptr.into(),
+                        w_ptr.into(),
+                        k_c.into(),
+                        m.into(),
+                        rows_c.into(),
+                    ],
+                    "par_gemm",
+                )
+                .unwrap();
+        });
         // Bias (if any) is a separate Step handled in the elementwise m-loop.
     }
 
