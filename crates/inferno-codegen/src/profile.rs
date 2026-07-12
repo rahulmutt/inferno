@@ -73,12 +73,20 @@ pub fn step_label(step: &Step, plan: &Plan, desc: &ModelDesc) -> String {
     }
 }
 
+/// The prefill lowering brackets the tile's KV-append separately from the
+/// attention read (M4b.9), so the label is interned alongside every
+/// `Attention` step rather than derived from a `Step` kind.
+pub const KV_APPEND_LABEL: &str = "kv_append";
+
 /// Assign a slot to every distinct step label, in first-seen program order.
 pub fn assign_slots(loopir: &LoopIr, plan: &Plan, desc: &ModelDesc) -> ProfileSlots {
     let mut slots = ProfileSlots::default();
     for island in &loopir.islands {
         for step in &island.steps {
             slots.intern(step_label(step, plan, desc));
+            if matches!(step, Step::Attention { .. }) {
+                slots.intern(KV_APPEND_LABEL.into());
+            }
         }
     }
     slots
@@ -117,7 +125,7 @@ mod tests {
                 .all(|l| !l.contains(".0.") && !l.contains(".1."))
         );
         // Sanity: the elementwise kinds each collapse to one slot.
-        for kind in ["rmsnorm", "rope", "swiglu", "add", "attention"] {
+        for kind in ["rmsnorm", "rope", "swiglu", "add", "attention", "kv_append"] {
             assert_eq!(
                 slots.labels.iter().filter(|l| *l == kind).count(),
                 1,

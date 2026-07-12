@@ -818,14 +818,11 @@ impl<'c, 'a> Codegen<'c, 'a> {
     /// One tile's forward pass over rows `tile_start..tile_start+m`: iterate the
     /// program's steps once, batching each matmul into a single `inferno_par_gemm`
     /// and looping every other op over the tile's `m` rows. Step order is
-    /// identical to the old per-token body. Attention is the one step that
-    /// doesn't use the per-row m-loop directly: it appends the whole tile's k/v
-    /// in token order, then dispatches a single parallel `inferno_par_attention`
-    /// call over the tile. That is bit-identical and T-invariant because each
-    /// token's result is still computed by exactly one lane with the unchanged
-    /// per-token kernel, and that token's causal read never reaches KV rows
-    /// past its own position, so appending the whole tile before the parallel
-    /// read changes nothing observable.
+    /// identical to the old per-token body. Attention appends the whole tile's
+    /// k/v via one token-loop dispatch, then issues a single parallel read;
+    /// both are bit-identical and T-invariant because each token's rows are
+    /// written by exactly one lane and a token's causal read never reaches
+    /// KV rows past its own position.
     ///
     /// Profiling attributes per op-kind: the matmul is timed once per tile; each
     /// elementwise/attention op is timed once per tile across its whole m-loop.
@@ -851,6 +848,9 @@ impl<'c, 'a> Codegen<'c, 'a> {
                     // "quantize" profiler accumulation. Skip it entirely.
                     Step::Quantize { .. } => {}
                     Step::Attention { .. } => {
+                        self.profiled(crate::profile::KV_APPEND_LABEL, |cg| {
+                            cg.lower_tile_kv_append(env, step, tile_start, m)
+                        });
                         self.profiled(&label, |cg| {
                             cg.lower_tile_attention(env, step, tile_start, m)
                         });
@@ -962,13 +962,40 @@ impl<'c, 'a> Codegen<'c, 'a> {
         // Bias (if any) is a separate Step handled in the elementwise m-loop.
     }
 
-    /// Tiled prefill attention (M4b.8): append the whole tile's k/v
-    /// serially (same per-token order as before), then ONE
-    /// `inferno_par_attention` call shards the tile's `m` tokens across
-    /// pool lanes. Each token's out row is computed entirely by one lane
-    /// with the unchanged per-token kernel, so thread count never changes
-    /// output bits, and token i's causal read never reaches KV rows past
-    /// `pos_i`, so appending the whole tile first is bit-neutral.
+    /// The write half of the tile's attention step (M4b.9): shard the
+    /// tile's `m` KV-appends across pool lanes. Bit-safe by the same
+    /// argument as the parallel read: each token writes only its own KV
+    /// row (`pos0 + t`), rows are disjoint across tokens, and the
+    /// dispatch joins before `lower_tile_attention` issues the parallel
+    /// read — so every KV row `<= pos_i` is in place when token i's
+    /// causal read runs, exactly as with the old serial append loop.
+    fn lower_tile_kv_append(
+        &self,
+        env: &TileEnv<'c>,
+        step: &Step,
+        tile_start: IntValue<'c>,
+        m: IntValue<'c>,
+    ) {
+        let Step::Attention { k, v, layer, .. } = step else {
+            unreachable!("lower_tile_kv_append called on non-Attention step")
+        };
+        let (k, v, layer) = (*k, *v, *layer);
+        self.par_token_loop(
+            env,
+            tile_start,
+            m,
+            crate::profile::KV_APPEND_LABEL,
+            |cg, benv, _ti, row| {
+                let frame = cg.tile_frame(benv, row);
+                cg.lower_kv_append(&frame, k, v, layer);
+            },
+        );
+    }
+
+    /// Tiled prefill attention read (M4b.8/M4b.9): the tile's k/v was
+    /// appended by `lower_tile_kv_append`'s dispatch (already joined), then
+    /// ONE `inferno_par_attention` call shards the tile's `m` tokens across
+    /// pool lanes.
     fn lower_tile_attention(
         &self,
         env: &TileEnv<'c>,
@@ -978,22 +1005,16 @@ impl<'c, 'a> Codegen<'c, 'a> {
     ) {
         let Step::Attention {
             q,
-            k,
-            v,
             layer,
             n_heads,
             n_kv_heads,
             head_dim,
             out,
+            ..
         } = step
         else {
             unreachable!("lower_tile_attention called on non-Attention step")
         };
-        self.range_loop(m, |cg, ti| {
-            let row = cg.add(tile_start, ti);
-            let frame = cg.tile_frame(env, row);
-            cg.lower_kv_append(&frame, *k, *v, *layer);
-        });
         let kv_dim = self.plan.kv.kv_dim as u64;
         let seq_len = self.plan.max_seq_len as u64;
         let kv_base = *layer as u64 * seq_len * kv_dim * 2;
