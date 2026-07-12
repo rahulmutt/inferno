@@ -78,4 +78,17 @@ n=$(PATH="$stub:$PATH" bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_c
 [ "${n:-0}" -ge 1 ] || fail "phys_cores with data-less lscpu should fall back to nproc (got '$n')"
 rm -rf "$stub"
 
+# cap_grid — fine-grained to 16, step 4 above; always includes 1 and max.
+expect "cap_grid 8"  "$(cap_grid 8)"  "1 2 3 4 5 6 7 8"
+expect "cap_grid 16" "$(cap_grid 16)" "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16"
+expect "cap_grid 32" "$(cap_grid 32)" "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 20 24 28 32"
+expect "cap_grid 1"  "$(cap_grid 1)"  "1"
+# 18 is not a multiple of 4 above 16 — max must still appear, exactly once.
+expect "cap_grid 18" "$(cap_grid 18)" "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 18"
+
+# numa_wrap — empty unless QHW_NUMA_NODE is set.
+expect "numa_wrap unset" "$(numa_wrap)" ""
+expect "numa_wrap set"   "$(QHW_NUMA_NODE=0 numa_wrap)" "numactl --cpunodebind=0 --membind=0"
+expect "numa_wrap node1" "$(QHW_NUMA_NODE=1 numa_wrap)" "numactl --cpunodebind=1 --membind=1"
+
 echo "lib-selftest: OK"

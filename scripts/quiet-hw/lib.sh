@@ -96,3 +96,25 @@ phys_cores() {
   fi
   if [ "${n:-0}" -ge 1 ]; then echo "$n"; else nproc; fi
 }
+
+# cap_grid <max> — decode-cap sweep values: every cap up to 16, then step 4.
+# Bounds session time on many-core boxes (M4b.10) while keeping full
+# resolution where every recorded knee has landed (8..16). `max` always
+# appears, exactly once.
+cap_grid() {
+  local max="$1" i out=""
+  for i in $(seq 1 "$max"); do
+    if [ "$i" -le 16 ] || [ $((i % 4)) -eq 0 ] || [ "$i" -eq "$max" ]; then
+      out="$out $i"
+    fi
+  done
+  echo "${out# }"
+}
+
+# numa_wrap — the numactl prefix pinning CPUs *and* memory to QHW_NUMA_NODE,
+# or nothing when unset. Used to take a NUMA-free single-socket point on a
+# dual-socket box (M4b.10: d2.c5.large is 2x32c).
+numa_wrap() {
+  [ -n "${QHW_NUMA_NODE:-}" ] || return 0
+  echo "numactl --cpunodebind=${QHW_NUMA_NODE} --membind=${QHW_NUMA_NODE}"
+}
