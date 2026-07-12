@@ -76,7 +76,65 @@ printf '#!/usr/bin/env bash\necho "# comment only"\n' > "$stub/lscpu"
 chmod +x "$stub/lscpu"
 n=$(PATH="$stub:$PATH" bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_cores")
 [ "${n:-0}" -ge 1 ] || fail "phys_cores with data-less lscpu should fall back to nproc (got '$n')"
+# Same data-less lscpu with QHW_NUMA_NODE set — the fallback must still fire
+# (no data rows to filter in the first place).
+n=$(PATH="$stub:$PATH" QHW_NUMA_NODE=0 bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_cores")
+[ "${n:-0}" -ge 1 ] || fail "phys_cores(node set) with data-less lscpu should fall back to nproc (got '$n')"
 rm -rf "$stub"
+
+# _cores_from_lscpu_p — node-aware core counting, the helper phys_cores
+# derives from. This box is single-node (phys_cores() above already proves
+# the unfiltered, real-hardware path returns this box's true physical core
+# count), so the NODE filter itself can only be exercised with synthetic
+# lscpu -p output: a dual-socket/dual-node machine, 4 physical cores per
+# node, each core listed twice (hyperthread siblings) to also prove the
+# (CORE,SOCKET) de-dup still holds under a NODE filter.
+lscpu_dual=$(mktemp)
+cat > "$lscpu_dual" <<'EOF'
+# Core,Socket,Node
+0,0,0
+1,0,0
+2,0,0
+3,0,0
+0,0,0
+1,0,0
+2,0,0
+3,0,0
+0,1,1
+1,1,1
+2,1,1
+3,1,1
+0,1,1
+1,1,1
+2,1,1
+3,1,1
+EOF
+expect "cores unfiltered is the whole machine" \
+  "$(_cores_from_lscpu_p < "$lscpu_dual")" "8"
+expect "cores filtered to node 0" \
+  "$(_cores_from_lscpu_p 0 < "$lscpu_dual")" "4"
+expect "cores filtered to node 1" \
+  "$(_cores_from_lscpu_p 1 < "$lscpu_dual")" "4"
+
+# phys_cores end to end: QHW_NUMA_NODE must change the answer against the
+# same stubbed dual-node lscpu (this is Finding 1 — a pinned session must
+# report the pinned node's core count, not the whole machine's).
+stub2=$(mktemp -d)
+{
+  echo '#!/usr/bin/env bash'
+  echo 'cat <<"DATA"'
+  cat "$lscpu_dual"
+  echo 'DATA'
+} > "$stub2/lscpu"
+chmod +x "$stub2/lscpu"
+expect "phys_cores unpinned matches whole-machine count" \
+  "$(PATH="$stub2:$PATH" bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_cores")" "8"
+expect "phys_cores pinned to node 0" \
+  "$(PATH="$stub2:$PATH" QHW_NUMA_NODE=0 bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_cores")" "4"
+expect "phys_cores pinned to node 1" \
+  "$(PATH="$stub2:$PATH" QHW_NUMA_NODE=1 bash -euo pipefail -c ". '$(dirname "$0")/lib.sh'; phys_cores")" "4"
+rm -rf "$stub2"
+rm -f "$lscpu_dual"
 
 # cap_grid — fine-grained to 16, step 4 above; always includes 1 and max.
 expect "cap_grid 8"  "$(cap_grid 8)"  "1 2 3 4 5 6 7 8"

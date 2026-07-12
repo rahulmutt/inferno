@@ -85,14 +85,33 @@ llama_bench_pp_tg() {
 # fmax <a> <b> — the larger of two floats, verbatim (no reformatting).
 fmax() { awk -v a="$1" -v b="$2" 'BEGIN { print (a + 0 > b + 0) ? a : b }'; }
 
+# _cores_from_lscpu_p [node] — count unique (CORE,SOCKET) pairs from
+# `lscpu -p=CORE,SOCKET,NODE` fed on stdin, optionally restricted to a NODE
+# id. No stdin data rows (only/no comment lines) prints 0 — the caller falls
+# back to nproc. Pure text processing so it is testable offline with
+# synthetic input (see lib-selftest.sh).
+_cores_from_lscpu_p() {
+  local node="${1:-}"
+  awk -F, -v node="$node" '
+    !/^#/ && NF {
+      if (node != "" && $3 != node) next
+      key = $1 "," $2
+      if (!seen[key]++) n++
+    }
+    END { print n + 0 }'
+}
+
 # phys_cores — physical core count (sweep upper bound for gate-decode-cap).
-# Never fails under `set -euo pipefail`: an lscpu that exists but emits no
-# data rows (sandboxes, odd VMs) falls back to nproc.
+# When QHW_NUMA_NODE is set, counts only cores on that node — this is what
+# makes a NUMA-pinned session's phys_cores (and every provenance line
+# derived from it) honest instead of describing the whole machine while only
+# half of it is bound. Never fails under `set -euo pipefail`: an lscpu that
+# exists but emits no data rows (sandboxes, odd VMs) falls back to nproc.
 phys_cores() {
   local n=0
   if command -v lscpu >/dev/null; then
-    n=$( (lscpu -p=CORE,SOCKET 2>/dev/null || true) \
-         | awk '!/^#/ && NF && !seen[$0]++ { n++ } END { print n + 0 }')
+    n=$( (lscpu -p=CORE,SOCKET,NODE 2>/dev/null || true) \
+         | _cores_from_lscpu_p "${QHW_NUMA_NODE:-}")
   fi
   if [ "${n:-0}" -ge 1 ]; then echo "$n"; else nproc; fi
 }

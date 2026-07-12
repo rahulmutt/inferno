@@ -6,7 +6,10 @@
 # curve's P predicts the measured decode knee. Verdict destination: the
 # M4b.10 spec §Amendments
 # (docs/superpowers/specs/2026-07-12-m4b10-decode-cap-formula-design.md).
-# Usage: gate-bw-curve.sh   (env: QHW_OUT QHW_SMOKE QHW_NUMA_NODE)
+# Usage: gate-bw-curve.sh   (env: QHW_SMOKE QHW_NUMA_NODE)
+# No QHW_OUT: unlike gate-decode-cap.sh, this gate has no per-run log to tee
+# — the example's stdout below IS the one recordable curve. The orchestrator
+# still redirects this script's own stdout to QHW_OUT/gate-bw-curve.out.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 command -v cargo >/dev/null || { echo "missing cargo (devenv shell)" >&2; exit 2; }

@@ -74,6 +74,7 @@ check — there is no per-gate `--smoke` flag):
     bash scripts/quiet-hw/preflight.sh
     bash scripts/quiet-hw/gate-prefill-scaling.sh "$MODEL"
     bash scripts/quiet-hw/gate-decode-cap.sh "$MODEL"
+    bash scripts/quiet-hw/gate-bw-curve.sh
     bash scripts/quiet-hw/gate-pf-dist.sh
     bash scripts/quiet-hw/gate-bench-protocol.sh "$MODEL"
     bash scripts/quiet-hw/gate-intel-ab.sh            # Intel only

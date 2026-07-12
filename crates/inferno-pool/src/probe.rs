@@ -81,6 +81,12 @@ pub unsafe fn bandwidth_curve(
         restore: pool.decode_threads(),
     };
 
+    debug_assert!(
+        reps > 0,
+        "bandwidth_curve called with reps == 0 — likely a caller bug (a \
+         mis-specified sweep silently collapses to knee-at-1, i.e. maximum \
+         decode throttling); release behavior (empty curve) is unchanged"
+    );
     if reps == 0 {
         return Vec::new();
     }
@@ -200,8 +206,46 @@ mod tests {
         );
     }
 
+    // `reps == 0` is a caller-bug shape (Finding 2, M4b.10 final review): a
+    // mis-specified sweep would otherwise silently collapse to knee-at-1,
+    // i.e. maximum decode throttling, with no signal anything went wrong.
+    // The `debug_assert!` beside the early return makes that loud in
+    // dev/test builds; the release contract (empty curve, cap untouched) is
+    // deliberately unchanged. These two variants cover exactly those two
+    // profiles — only one of them compiles into any given test run, so the
+    // total test count is unaffected by which profile is active.
+
     #[test]
-    fn reps_zero_returns_an_empty_curve_without_panicking() {
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "reps == 0")]
+    fn reps_zero_trips_the_debug_assert_in_dev_and_test_builds() {
+        let pool = Pool::new(4);
+        let mut y = vec![0f32; 64];
+        let xq = [0u8; 8];
+        let w = [0u8; 8];
+        let lanes = [1usize, 2, 4];
+
+        // SAFETY: the debug_assert fires before any dispatch; the buffers
+        // just need to satisfy the (unused) contract shape.
+        let _ = unsafe {
+            bandwidth_curve(
+                &pool,
+                &lanes,
+                0,
+                1 << 20,
+                stub_gemv,
+                y.as_mut_ptr(),
+                xq.as_ptr(),
+                w.as_ptr(),
+                8,
+                64,
+            )
+        };
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn reps_zero_returns_an_empty_curve_in_release_builds() {
         let pool = Pool::new(4);
         pool.set_decode_threads(3);
         let mut y = vec![0f32; 64];
