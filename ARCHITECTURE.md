@@ -24,10 +24,11 @@ Present (M0–M3):
   C ABI, selected by symbol from generated code.
 - `crates/inferno-pool` — persistent fork-join thread pool + the
   `inferno_par_{gemv,gemm,attention}` dispatchers generated code calls for
-  every GEMV, GEMM, and attention kernel. This crate is "the caller" the
-  kernel boundary rule refers to: it partitions row ranges into 8-row-aligned
-  shards and calls the unchanged single-threaded kernels. Third sanctioned
-  `unsafe` crate.
+  every GEMV, every GEMM, and each prefill tile's attention. This crate is
+  "the caller" the kernel boundary rule refers to: it partitions row ranges
+  into aligned shards (8-row for GEMV/GEMM, whole tokens for attention) and
+  calls the unchanged single-threaded kernels. Third sanctioned `unsafe`
+  crate.
 - `crates/inferno-plan` — fusion islands, weight-layout repacking, static
   memory plan. Pure data: no LLVM, no codegen, just `Plan`/`Island`/layout
   structs consumed by `inferno-codegen`.
