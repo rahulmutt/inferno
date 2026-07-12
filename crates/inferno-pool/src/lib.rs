@@ -8,10 +8,12 @@
 
 pub mod error;
 pub mod pool;
+pub mod probe;
 pub mod shard;
 
 pub use error::PoolError;
 pub use pool::{AttnFn, AttnJob, GemmFn, GemvFn, Pool, TokenBodyFn};
+pub use probe::{bandwidth_curve, knee_at_fraction};
 pub use shard::{SHARD_ALIGN, shard_table, shard_table_aligned};
 
 use std::sync::OnceLock;

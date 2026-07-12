@@ -1,0 +1,172 @@
+//! Bandwidth-saturation probe (M4b.10). Times `par_gemv` at a range of lane
+//! counts and derives the lane count at which aggregate streaming bandwidth
+//! saturates — the physically motivated decode cap
+//! (`total_DRAM_bandwidth / per_core_streaming_bandwidth`).
+//!
+//! Generic over the kernel on purpose: the caller supplies the `GemvFn` and
+//! the packed buffers, so this crate gains no dependency on `inferno-kernels`.
+
+use crate::pool::{GemvFn, Pool};
+use std::time::Instant;
+
+/// The smallest lane count in `curve` reaching `frac` of the curve's peak
+/// rate — the saturation knee. An empty curve knees at 1 lane.
+///
+/// Deliberately reads the *first* lane count at or above the threshold, not
+/// the argmax: past saturation the curve is flat-to-noisy, and the cheapest
+/// lane count on the plateau is the one we want.
+pub fn knee_at_fraction(curve: &[(usize, f64)], frac: f64) -> usize {
+    let peak = curve.iter().map(|&(_, r)| r).fold(f64::MIN, f64::max);
+    if curve.is_empty() {
+        return 1;
+    }
+    let target = peak * frac;
+    curve
+        .iter()
+        .find(|&&(_, r)| r >= target)
+        .map(|&(lanes, _)| lanes)
+        .unwrap_or_else(|| curve.last().map(|&(l, _)| l).unwrap_or(1))
+}
+
+/// Time `reps` full-range `par_gemv` dispatches at each lane count in
+/// `lanes`, returning `(lanes, GB/s)` per entry. `stream_bytes` is the number
+/// of bytes the kernel streams per dispatch (the packed weight image), which
+/// is what makes the rate a *bandwidth* rather than a throughput.
+///
+/// Takes the median of `reps` timings per lane count, so one descheduled
+/// iteration cannot move the curve. Saves and restores the pool's decode cap.
+///
+/// # Safety
+/// Same contract as [`Pool::par_gemv`] for `(kernel, y, xq, w, k, rows)`:
+/// `y` valid for `rows` f32 writes, `xq`/`w` valid packed buffers built for
+/// this exact `k` and `rows`, and `kernel` a valid GEMV-ABI pointer.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn bandwidth_curve(
+    pool: &Pool,
+    lanes: &[usize],
+    reps: usize,
+    stream_bytes: usize,
+    kernel: GemvFn,
+    y: *mut f32,
+    xq: *const u8,
+    w: *const u8,
+    k: usize,
+    rows: usize,
+) -> Vec<(usize, f64)> {
+    let restore = pool.decode_threads();
+    let mut out = Vec::with_capacity(lanes.len());
+
+    for &n in lanes {
+        pool.set_decode_threads(n);
+
+        // Warm the lanes and the weight image into whatever caches will hold
+        // it, so the first timed rep is not paying for a cold pool.
+        // SAFETY: forwarding the caller's contract unchanged.
+        unsafe { pool.par_gemv(kernel, y, xq, w, k, rows) };
+
+        let mut secs: Vec<f64> = Vec::with_capacity(reps);
+        for _ in 0..reps {
+            let t0 = Instant::now();
+            // SAFETY: forwarding the caller's contract unchanged.
+            unsafe { pool.par_gemv(kernel, y, xq, w, k, rows) };
+            secs.push(t0.elapsed().as_secs_f64());
+        }
+        secs.sort_by(f64::total_cmp);
+        let med = secs[secs.len() / 2].max(f64::EPSILON);
+        out.push((n, stream_bytes as f64 / med / 1e9));
+    }
+
+    pool.set_decode_threads(restore);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Pool;
+
+    #[test]
+    fn knee_is_the_first_lane_count_reaching_the_fraction_of_peak() {
+        // Saturates at 2 lanes: peak 21.0, 95% of peak = 19.95, and 2 lanes
+        // already delivers 20.0.
+        let curve = [(1, 10.0), (2, 20.0), (4, 21.0), (8, 21.0)];
+        assert_eq!(knee_at_fraction(&curve, 0.95), 2);
+    }
+
+    #[test]
+    fn a_curve_that_never_saturates_knees_at_the_top() {
+        let curve = [(1, 10.0), (2, 20.0), (4, 40.0)];
+        assert_eq!(knee_at_fraction(&curve, 0.95), 4);
+    }
+
+    #[test]
+    fn a_non_monotonic_tail_does_not_move_the_knee_below_the_peak_fraction() {
+        // 8 lanes regresses; the knee is still where 95% of peak is first hit.
+        let curve = [(1, 10.0), (2, 20.0), (4, 21.0), (8, 18.0)];
+        assert_eq!(knee_at_fraction(&curve, 0.95), 2);
+    }
+
+    #[test]
+    fn degenerate_curves_knee_at_one_lane() {
+        assert_eq!(knee_at_fraction(&[], 0.95), 1);
+        assert_eq!(knee_at_fraction(&[(3, 12.0)], 0.95), 3);
+    }
+
+    /// A stub kernel: writes each row so the dispatcher's work is real but
+    /// trivially fast. The GB/s values are meaningless here — this test is
+    /// about the curve's *shape contract*, not its numbers.
+    unsafe extern "C" fn stub_gemv(
+        y: *mut f32,
+        _xq: *const u8,
+        _w: *const u8,
+        _k: usize,
+        row_start: usize,
+        row_end: usize,
+    ) {
+        for r in row_start..row_end {
+            // SAFETY: the dispatcher only ever passes rows within `y`'s length.
+            unsafe { *y.add(r) = r as f32 };
+        }
+    }
+
+    #[test]
+    fn bandwidth_curve_returns_one_entry_per_lane_and_restores_the_cap() {
+        let pool = Pool::new(4);
+        pool.set_decode_threads(3);
+        let mut y = vec![0f32; 64];
+        let xq = [0u8; 8];
+        let w = [0u8; 8];
+        let lanes = [1usize, 2, 4];
+
+        // SAFETY: stub_gemv only writes y[row_start..row_end]; rows == y.len().
+        let curve = unsafe {
+            bandwidth_curve(
+                &pool,
+                &lanes,
+                2,
+                1 << 20,
+                stub_gemv,
+                y.as_mut_ptr(),
+                xq.as_ptr(),
+                w.as_ptr(),
+                8,
+                64,
+            )
+        };
+
+        assert_eq!(curve.len(), 3);
+        assert_eq!(
+            curve.iter().map(|&(l, _)| l).collect::<Vec<_>>(),
+            vec![1, 2, 4]
+        );
+        assert!(
+            curve.iter().all(|&(_, gbps)| gbps > 0.0),
+            "every lane count must record a positive rate: {curve:?}"
+        );
+        assert_eq!(
+            pool.decode_threads(),
+            3,
+            "the probe must restore the caller's decode cap"
+        );
+    }
+}
