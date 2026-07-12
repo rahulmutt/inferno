@@ -28,13 +28,36 @@ pub fn knee_at_fraction(curve: &[(usize, f64)], frac: f64) -> usize {
         .unwrap_or_else(|| curve.last().map(|&(l, _)| l).unwrap_or(1))
 }
 
+/// Restores the pool's decode cap on drop, whether the sweep in
+/// `bandwidth_curve` completes normally or unwinds (e.g. a panic from a
+/// caller-supplied kernel, or anywhere else mid-sweep). Private to this
+/// module — `bandwidth_curve` is the only thing that constructs one.
+struct CapGuard<'a> {
+    pool: &'a Pool,
+    restore: usize,
+}
+
+impl Drop for CapGuard<'_> {
+    fn drop(&mut self) {
+        self.pool.set_decode_threads(self.restore);
+    }
+}
+
 /// Time `reps` full-range `par_gemv` dispatches at each lane count in
 /// `lanes`, returning `(lanes, GB/s)` per entry. `stream_bytes` is the number
 /// of bytes the kernel streams per dispatch (the packed weight image), which
 /// is what makes the rate a *bandwidth* rather than a throughput.
 ///
 /// Takes the median of `reps` timings per lane count, so one descheduled
-/// iteration cannot move the curve. Saves and restores the pool's decode cap.
+/// iteration cannot move the curve. Saves and restores the pool's decode cap
+/// around the sweep — the cap is restored even if a dispatch unwinds, since
+/// this probe is meant to run against the process-global pool and must never
+/// strand it at a mid-sweep lane count.
+///
+/// `reps == 0` returns an empty curve without dispatching anything: there is
+/// no timing data to take a median of, so "zero reps" and "no lane counts
+/// swept" collapse to the same empty result. This composes with
+/// [`knee_at_fraction`], which already treats an empty curve as knee-at-1.
 ///
 /// # Safety
 /// Same contract as [`Pool::par_gemv`] for `(kernel, y, xq, w, k, rows)`:
@@ -53,7 +76,15 @@ pub unsafe fn bandwidth_curve(
     k: usize,
     rows: usize,
 ) -> Vec<(usize, f64)> {
-    let restore = pool.decode_threads();
+    let _guard = CapGuard {
+        pool,
+        restore: pool.decode_threads(),
+    };
+
+    if reps == 0 {
+        return Vec::new();
+    }
+
     let mut out = Vec::with_capacity(lanes.len());
 
     for &n in lanes {
@@ -76,7 +107,6 @@ pub unsafe fn bandwidth_curve(
         out.push((n, stream_bytes as f64 / med / 1e9));
     }
 
-    pool.set_decode_threads(restore);
     out
 }
 
@@ -167,6 +197,87 @@ mod tests {
             pool.decode_threads(),
             3,
             "the probe must restore the caller's decode cap"
+        );
+    }
+
+    #[test]
+    fn reps_zero_returns_an_empty_curve_without_panicking() {
+        let pool = Pool::new(4);
+        pool.set_decode_threads(3);
+        let mut y = vec![0f32; 64];
+        let xq = [0u8; 8];
+        let w = [0u8; 8];
+        let lanes = [1usize, 2, 4];
+
+        // SAFETY: reps == 0 means the sweep returns before any dispatch;
+        // the buffers just need to satisfy the (unused) contract shape.
+        let curve = unsafe {
+            bandwidth_curve(
+                &pool,
+                &lanes,
+                0,
+                1 << 20,
+                stub_gemv,
+                y.as_mut_ptr(),
+                xq.as_ptr(),
+                w.as_ptr(),
+                8,
+                64,
+            )
+        };
+
+        assert!(
+            curve.is_empty(),
+            "reps == 0 must yield an empty curve, got {curve:?}"
+        );
+        assert_eq!(
+            pool.decode_threads(),
+            3,
+            "reps == 0 must still leave the caller's decode cap untouched"
+        );
+    }
+
+    #[test]
+    fn the_decode_cap_is_restored_after_a_mid_sweep_unwind() {
+        let pool = Pool::new(4);
+        pool.set_decode_threads(3);
+
+        // `GemvFn` is `unsafe extern "C" fn(...)`, and `extern "C"` is a
+        // non-unwinding ABI in Rust: a panic thrown from inside a
+        // caller-supplied kernel aborts the process instead of unwinding
+        // (verified empirically — swapping in a panicking `extern "C"`
+        // kernel here takes down the whole test binary rather than being
+        // caught by `catch_unwind`, since Rust inserts an abort at the FFI
+        // boundary per RFC 2945). So the only *reachable* mid-sweep unwind
+        // is from Rust-side code in the loop body — exactly the shape of
+        // the finding-1 bug (`secs[secs.len() / 2]` on an empty `Vec`)
+        // before it was fixed. This test exercises the real mechanism
+        // directly: open a `CapGuard` exactly as `bandwidth_curve` does,
+        // mutate the cap exactly as the loop does for its first lane count,
+        // then panic from plain Rust while the guard is alive.
+        //
+        // `Pool` holds an `UnsafeCell` behind its `Arc<Shared>`, so `&Pool`
+        // is not `RefUnwindSafe`; `AssertUnwindSafe` is sound here because
+        // the panic happens without calling into any pool method that
+        // mutates through that cell, so no partially-mutated invariant can
+        // leak across the catch.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = CapGuard {
+                pool: &pool,
+                restore: pool.decode_threads(),
+            };
+            pool.set_decode_threads(1);
+            panic!("forced panic to exercise CapGuard's unwind cleanup");
+        }));
+
+        assert!(
+            result.is_err(),
+            "the forced panic must propagate through catch_unwind"
+        );
+        assert_eq!(
+            pool.decode_threads(),
+            3,
+            "the probe must restore the caller's decode cap even after an unwind"
         );
     }
 }
