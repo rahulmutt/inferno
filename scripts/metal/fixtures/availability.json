@@ -7,7 +7,7 @@
         "minQuantityAvailable": true
       },
       {
-        "location": "SGP",
+        "location": "NLD",
         "minQuantityAvailable": true
       },
       {
@@ -24,10 +24,6 @@
         "minQuantityAvailable": true
       },
       {
-        "location": "SGP",
-        "minQuantityAvailable": true
-      },
-      {
         "location": "CHI",
         "minQuantityAvailable": true
       }
@@ -38,10 +34,6 @@
     "locationAvailabilityDetails": [
       {
         "location": "PHX",
-        "minQuantityAvailable": true
-      },
-      {
-        "location": "SGP",
         "minQuantityAvailable": true
       },
       {
@@ -198,21 +190,7 @@
   },
   {
     "productCode": "s4.x6.m6.xlarge",
-    "locationAvailabilityDetails": [
-      {
-        "location": "PHX",
-        "minQuantityAvailable": true
-      }
-    ]
-  },
-  {
-    "productCode": "a1.c5.xlarge",
-    "locationAvailabilityDetails": [
-      {
-        "location": "PHX",
-        "minQuantityAvailable": true
-      }
-    ]
+    "locationAvailabilityDetails": []
   },
   {
     "productCode": "s4.c6.medium",
@@ -236,6 +214,15 @@
     ]
   },
   {
+    "productCode": "a1.c5.xlarge",
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      }
+    ]
+  },
+  {
     "productCode": "s4.c6.xlarge",
     "locationAvailabilityDetails": []
   },
@@ -245,6 +232,10 @@
       {
         "location": "PHX",
         "minQuantityAvailable": true
+      },
+      {
+        "location": "NLD",
+        "minQuantityAvailable": true
       }
     ]
   },
@@ -253,6 +244,10 @@
     "locationAvailabilityDetails": [
       {
         "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "NLD",
         "minQuantityAvailable": true
       }
     ]
@@ -282,10 +277,6 @@
     "productCode": "d3.m6.xlarge",
     "locationAvailabilityDetails": [
       {
-        "location": "PHX",
-        "minQuantityAvailable": true
-      },
-      {
         "location": "NLD",
         "minQuantityAvailable": true
       }
@@ -294,10 +285,6 @@
   {
     "productCode": "d3.m4.xlarge",
     "locationAvailabilityDetails": [
-      {
-        "location": "PHX",
-        "minQuantityAvailable": true
-      },
       {
         "location": "NLD",
         "minQuantityAvailable": true
@@ -308,10 +295,6 @@
     "productCode": "d3.m5.xlarge",
     "locationAvailabilityDetails": [
       {
-        "location": "PHX",
-        "minQuantityAvailable": true
-      },
-      {
         "location": "NLD",
         "minQuantityAvailable": true
       }
@@ -319,27 +302,12 @@
   },
   {
     "productCode": "d1.c4.medium",
-    "locationAvailabilityDetails": []
-  },
-  {
-    "productCode": "s5.x6.c9.large",
-    "locationAvailabilityDetails": []
-  },
-  {
-    "productCode": "s5.x6.c8.large",
-    "locationAvailabilityDetails": []
-  },
-  {
-    "productCode": "d3.c5.medium",
-    "locationAvailabilityDetails": []
-  },
-  {
-    "productCode": "d3.c6.medium",
-    "locationAvailabilityDetails": []
-  },
-  {
-    "productCode": "d3.c4.medium",
-    "locationAvailabilityDetails": []
+    "locationAvailabilityDetails": [
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      }
+    ]
   },
   {
     "productCode": "d3.m1.xlarge",
@@ -367,6 +335,26 @@
         "minQuantityAvailable": true
       }
     ]
+  },
+  {
+    "productCode": "s5.x6.c9.large",
+    "locationAvailabilityDetails": []
+  },
+  {
+    "productCode": "s5.x6.c8.large",
+    "locationAvailabilityDetails": []
+  },
+  {
+    "productCode": "d3.c5.medium",
+    "locationAvailabilityDetails": []
+  },
+  {
+    "productCode": "d3.c6.medium",
+    "locationAvailabilityDetails": []
+  },
+  {
+    "productCode": "d3.c4.medium",
+    "locationAvailabilityDetails": []
   },
   {
     "productCode": "s3.c3.large",
@@ -421,7 +409,12 @@
   },
   {
     "productCode": "d1.c4.small",
-    "locationAvailabilityDetails": []
+    "locationAvailabilityDetails": [
+      {
+        "location": "PHX",
+        "minQuantityAvailable": true
+      }
+    ]
   },
   {
     "productCode": "d1.c4.large",
@@ -525,10 +518,6 @@
         "minQuantityAvailable": true
       },
       {
-        "location": "ASH",
-        "minQuantityAvailable": true
-      },
-      {
         "location": "CHI",
         "minQuantityAvailable": true
       },
@@ -542,7 +531,7 @@
     "productCode": "s2.c2.small",
     "locationAvailabilityDetails": [
       {
-        "location": "PHX",
+        "location": "ASH",
         "minQuantityAvailable": true
       },
       {
@@ -597,7 +586,12 @@
   },
   {
     "productCode": "d3.s5.xlarge",
-    "locationAvailabilityDetails": []
+    "locationAvailabilityDetails": [
+      {
+        "location": "ASH",
+        "minQuantityAvailable": true
+      }
+    ]
   },
   {
     "productCode": "d3.m5.xxlarge",
@@ -677,6 +671,10 @@
     "locationAvailabilityDetails": [
       {
         "location": "PHX",
+        "minQuantityAvailable": true
+      },
+      {
+        "location": "ASH",
         "minQuantityAvailable": true
       }
     ]
