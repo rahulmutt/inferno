@@ -1,6 +1,6 @@
 {
   "name": "inferno",
-  "image": "ghcr.io/rahulmutt/dev:sha-4bb4d6c",
+  "image": "ghcr.io/rahulmutt/dev:sha-e8413f8",
   "workspaceFolder": "/workspace",
   "remoteUser": "dev",
   "containerEnv": {
