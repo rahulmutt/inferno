@@ -71,6 +71,14 @@ Each gate runs standalone (same env vars the orchestrator sets —
 `QHW_OUT` for the output dir; `QHW_SMOKE=1` for a stamped plumbing
 check — there is no per-gate `--smoke` flag):
 
+**Socket-pinned sessions:** If using `QHW_NUMA_NODE=N` for a socket-pinned
+run, set it only on individual gate invocations of `gate-decode-cap.sh` and
+`gate-bw-curve.sh` — do not export it across a `verify.sh` pass. Those two
+gates pin their runs with CPU and memory binding; the other gates (notably
+`gate-bench-protocol.sh`) read `phys_cores` but do not pin, so a global
+export gives them a node-sized thread count on an unpinned (whole-machine)
+CPU set, silently corrupting the M4a data point.
+
     bash scripts/quiet-hw/preflight.sh
     bash scripts/quiet-hw/gate-prefill-scaling.sh "$MODEL"
     bash scripts/quiet-hw/gate-decode-cap.sh "$MODEL"
