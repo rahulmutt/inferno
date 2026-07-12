@@ -1,5 +1,5 @@
-//! Persistent fork-join thread pool + the `inferno_par_gemv` dispatcher
-//! that M4b.1 generated code calls by symbol. Kernels stay single-threaded
+//! Persistent fork-join thread pool + the three `inferno_par_{gemv,gemm,attention}`
+//! dispatchers that M4b.1+ generated code calls by symbol. Kernels stay single-threaded
 //! (spec boundary rule: parallelism is the caller's job — this crate IS
 //! that caller): the dispatcher splits a GEMV's row range into 8-row-aligned
 //! shards, so each output row is computed entirely by one thread with the
@@ -11,8 +11,8 @@ pub mod pool;
 pub mod shard;
 
 pub use error::PoolError;
-pub use pool::{GemmFn, GemvFn, Pool};
-pub use shard::{SHARD_ALIGN, shard_table};
+pub use pool::{AttnFn, AttnJob, GemmFn, GemvFn, Pool};
+pub use shard::{SHARD_ALIGN, shard_table, shard_table_aligned};
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -173,5 +173,89 @@ pub unsafe extern "C" fn inferno_par_gemm(
         }
         // SAFETY: forwarding the caller's contract for the full range.
         None => unsafe { kernel(y, xq, w, k, m, rows, 0, rows) },
+    }
+}
+
+/// Host dispatcher for tiled prefill attention (M4b.8). Same
+/// single-dispatcher guard + serial fallback as [`inferno_par_gemv`];
+/// shares `DISPATCH_CLAIMED` deliberately — within one forward pass GEMV,
+/// GEMM and attention dispatches are issued serially and never overlap,
+/// so one guard suffices. `m <= 1` (decode-shaped calls, T=1 prefill
+/// tiles) takes a direct serial path with no CAS and no job publish
+/// (decode itself never calls this dispatcher — its codegen invokes the
+/// kernel directly; the guard covers T=1 prefill tiles). On the CAS-loss (or
+/// uninitialized-pool) path this runs the serial full-range token loop,
+/// bit-identical to the pooled path since each token's out row is
+/// computed by a single kernel invocation either way.
+///
+/// A panic inside the dispatcher or kernel aborts the process at this
+/// `extern "C"` boundary — there is no unwind across FFI.
+///
+/// # Safety
+/// Same contract as [`Pool::par_attention`] over tokens `0..m`;
+/// additionally `kernel` must be a valid non-null function pointer with
+/// the M4b.3 attention ABI, and the KV cache must already contain every
+/// position `< pos0 + m` (the tile's append loop runs before this call).
+/// Generated code guarantees all of this by construction (M3 trust model).
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_par_attention(
+    kernel: AttnFn,
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    pos0: usize,
+    m: usize,
+    kv_base: usize,
+    v_off: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
+) {
+    if m == 0 {
+        return;
+    }
+    let job = pool::AttnJob {
+        kernel,
+        out,
+        q,
+        kv,
+        pos0,
+        kv_base,
+        v_off,
+        kv_dim,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+        q_stride,
+        out_stride,
+    };
+    if m == 1 {
+        // SAFETY: forwarding the caller's contract for the single token.
+        unsafe { pool::run_attn_span(&job, 0, 1) };
+        return;
+    }
+    match GLOBAL.get() {
+        Some(p) => {
+            if DISPATCH_CLAIMED
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                // SAFETY: forwarding the caller's contract unchanged.
+                unsafe { p.par_attention(&job, m) };
+                DISPATCH_CLAIMED.store(false, Ordering::Release);
+            } else {
+                // Lost the race for the pool's single dispatcher slot: run
+                // serially over the full token range instead of overlapping
+                // another thread's in-flight pool dispatch.
+                // SAFETY: forwarding the caller's contract for the full range.
+                unsafe { pool::run_attn_span(&job, 0, m) };
+            }
+        }
+        // SAFETY: forwarding the caller's contract for the full range.
+        None => unsafe { pool::run_attn_span(&job, 0, m) },
     }
 }

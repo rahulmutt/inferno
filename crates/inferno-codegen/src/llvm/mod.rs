@@ -161,6 +161,38 @@ impl<'c> LlvmModule<'c> {
         );
         self.module
             .add_function("inferno_par_gemm", par_gemm_ty, Some(Linkage::External));
+
+        // void inferno_par_attention(ptr kernel, ptr out, ptr q, ptr kv,
+        //     i64 pos0, i64 m, i64 kv_base, i64 v_off, i64 kv_dim,
+        //     i64 n_heads, i64 n_kv_heads, i64 head_dim,
+        //     i64 q_stride, i64 out_stride)
+        // — the M4b.8 prefill-attention dispatcher; the attention kernel
+        // chosen by `attention_symbol` is passed as a function pointer, so
+        // the ISA selection logic is unchanged.
+        let par_attn_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
+        self.module.add_function(
+            "inferno_par_attention",
+            par_attn_ty,
+            Some(Linkage::External),
+        );
     }
 
     /// Emit the profiler counter global `inferno_prof_counters : [n x i64]`
@@ -335,6 +367,7 @@ mod tests {
         assert!(ir.contains("inferno_gemm_"));
         assert!(ir.contains("inferno_par_gemv"));
         assert!(ir.contains("inferno_par_gemm"));
+        assert!(ir.contains("inferno_par_attention"));
         assert!(ir.contains("inferno_attention_f32_scalar"));
         assert!(ir.contains("inferno_attention_f32_avx2"));
     }

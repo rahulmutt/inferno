@@ -701,9 +701,15 @@ impl<'c, 'a> Codegen<'c, 'a> {
 
     /// One tile's forward pass over rows `tile_start..tile_start+m`: iterate the
     /// program's steps once, batching each matmul into a single `inferno_par_gemm`
-    /// and looping every other op over the tile's `m` rows. Step order (and, for
-    /// attention, per-token KV-append order within the m-loop) is identical to
-    /// the old per-token body, so output is bit-identical and T-invariant.
+    /// and looping every other op over the tile's `m` rows. Step order is
+    /// identical to the old per-token body. Attention is the one step that
+    /// doesn't use the per-row m-loop directly: it appends the whole tile's k/v
+    /// in token order, then dispatches a single parallel `inferno_par_attention`
+    /// call over the tile. That is bit-identical and T-invariant because each
+    /// token's result is still computed by exactly one lane with the unchanged
+    /// per-token kernel, and that token's causal read never reaches KV rows
+    /// past its own position, so appending the whole tile before the parallel
+    /// read changes nothing observable.
     ///
     /// Profiling attributes per op-kind: the matmul is timed once per tile; each
     /// elementwise/attention op is timed once per tile across its whole m-loop.
@@ -728,6 +734,11 @@ impl<'c, 'a> Codegen<'c, 'a> {
                     // would just be a dead m-loop plus a spurious ~0-cycle
                     // "quantize" profiler accumulation. Skip it entirely.
                     Step::Quantize { .. } => {}
+                    Step::Attention { .. } => {
+                        self.profiled(&label, |cg| {
+                            cg.lower_tile_attention(env, step, tile_start, m)
+                        });
+                    }
                     _ => {
                         self.profiled(&label, |cg| {
                             cg.range_loop(m, |cg, ti| {
@@ -834,6 +845,77 @@ impl<'c, 'a> Codegen<'c, 'a> {
             )
             .unwrap();
         // Bias (if any) is a separate Step handled in the elementwise m-loop.
+    }
+
+    /// Tiled prefill attention (M4b.8): append the whole tile's k/v
+    /// serially (same per-token order as before), then ONE
+    /// `inferno_par_attention` call shards the tile's `m` tokens across
+    /// pool lanes. Each token's out row is computed entirely by one lane
+    /// with the unchanged per-token kernel, so thread count never changes
+    /// output bits, and token i's causal read never reaches KV rows past
+    /// `pos_i`, so appending the whole tile first is bit-neutral.
+    fn lower_tile_attention(
+        &self,
+        env: &TileEnv<'c>,
+        step: &Step,
+        tile_start: IntValue<'c>,
+        m: IntValue<'c>,
+    ) {
+        let Step::Attention {
+            q,
+            k,
+            v,
+            layer,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+            out,
+        } = step
+        else {
+            unreachable!("lower_tile_attention called on non-Attention step")
+        };
+        self.range_loop(m, |cg, ti| {
+            let row = cg.add(tile_start, ti);
+            let frame = cg.tile_frame(env, row);
+            cg.lower_kv_append(&frame, *k, *v, *layer);
+        });
+        let kv_dim = self.plan.kv.kv_dim as u64;
+        let seq_len = self.plan.max_seq_len as u64;
+        let kv_base = *layer as u64 * seq_len * kv_dim * 2;
+        let q_ptr = self.arena_row_ptr_at(env.arena, *q, tile_start);
+        let out_ptr = self.arena_row_ptr_at(env.arena, *out, tile_start);
+        let pos0 = self.add(env.pos_off, tile_start);
+        let sym = crate::loopir::attention_symbol(self.module_isa());
+        let afn = self
+            .module
+            .get_function(&sym)
+            .expect("attention kernel declared (Task 6)");
+        let pfn = self
+            .module
+            .get_function("inferno_par_attention")
+            .expect("par attention dispatcher declared");
+        self.builder
+            .build_call(
+                pfn,
+                &[
+                    afn.as_global_value().as_pointer_value().into(),
+                    out_ptr.into(),
+                    q_ptr.into(),
+                    env.kv.into(),
+                    pos0.into(),
+                    m.into(),
+                    self.const_i64(kv_base).into(),
+                    self.const_i64(seq_len * kv_dim).into(),
+                    self.const_i64(kv_dim).into(),
+                    self.const_i64(*n_heads as u64).into(),
+                    self.const_i64(*n_kv_heads as u64).into(),
+                    self.const_i64(*head_dim as u64).into(),
+                    self.const_i64(self.row_len(*q)).into(),
+                    self.const_i64(self.row_len(*out)).into(),
+                ],
+                "par_attention",
+            )
+            .unwrap();
     }
 
     // ---- per-op lowering ----------------------------------------------------
@@ -1192,6 +1274,46 @@ impl<'c, 'a> Codegen<'c, 'a> {
         });
     }
 
+    /// Append this token's k/v rows into the f32 KV cache at `frame.pos` —
+    /// the write half of `Step::Attention`. Called per token by the decode
+    /// path (`lower_attention`) and by the prefill tile arm
+    /// (`lower_tile_attention`), which appends the WHOLE tile before its
+    /// parallel attention read. That reordering is bit-safe: token i's
+    /// causal read never reaches rows past `pos_i`.
+    fn lower_kv_append(&self, frame: &Frame<'c>, k: usize, v: usize, layer: usize) {
+        let kv_dim = self.plan.kv.kv_dim as u64;
+        let seq_len = self.plan.max_seq_len as u64;
+        let kv_base = layer as u64 * seq_len * kv_dim * 2;
+        let k_region = kv_base;
+        let v_region = kv_base + seq_len * kv_dim;
+        let kv_dim_c = self.const_i64(kv_dim);
+        let pos_kv = self
+            .builder
+            .build_int_mul(frame.pos, kv_dim_c, "poskv")
+            .unwrap();
+        let k_row = self.row_base(frame, k);
+        let v_row = self.row_base(frame, v);
+        let k_dst = self.add(self.const_i64(k_region), pos_kv);
+        let v_dst = self.add(self.const_i64(v_region), pos_kv);
+        self.range_loop(kv_dim_c, |cg, c| {
+            let kval = cg.load_f32(cg.arena_ptr(frame, k_row, c));
+            cg.store_f32(cg.elem_ptr(frame.kv, cg.add(k_dst, c)), kval);
+            let vval = cg.load_f32(cg.arena_ptr(frame, v_row, c));
+            cg.store_f32(cg.elem_ptr(frame.kv, cg.add(v_dst, c)), vval);
+        });
+    }
+
+    /// Every PackedWeight carries the same target-derived ISA; use it as
+    /// the module ISA (attention has no PackedWeight of its own).
+    fn module_isa(&self) -> inferno_kernels::KernelIsa {
+        self.plan
+            .weights
+            .weights
+            .first()
+            .map(|w| w.isa)
+            .unwrap_or(inferno_kernels::KernelIsa::Scalar)
+    }
+
     /// Causal GQA attention for the current token, mirroring
     /// `inferno_graph::ops::attention`. First appends this token's k/v vectors
     /// into the f32 KV cache at position `pos`, then reads: for each head `h`
@@ -1217,25 +1339,9 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let seq_len = self.plan.max_seq_len as u64;
         // Per-layer KV region base (f32 elements); K then V, each [seq_len × kv_dim].
         let kv_base = layer as u64 * seq_len * kv_dim * 2;
-        let k_region = kv_base;
-        let v_region = kv_base + seq_len * kv_dim;
-        let kv_dim_c = self.const_i64(kv_dim);
 
         // --- KV append: write this token's k/v vectors at position `pos`. ---
-        let pos_kv = self
-            .builder
-            .build_int_mul(frame.pos, kv_dim_c, "poskv")
-            .unwrap();
-        let k_row = self.row_base(frame, k);
-        let v_row = self.row_base(frame, v);
-        let k_dst = self.add(self.const_i64(k_region), pos_kv);
-        let v_dst = self.add(self.const_i64(v_region), pos_kv);
-        self.range_loop(kv_dim_c, |cg, c| {
-            let kval = cg.load_f32(cg.arena_ptr(frame, k_row, c));
-            cg.store_f32(cg.elem_ptr(frame.kv, cg.add(k_dst, c)), kval);
-            let vval = cg.load_f32(cg.arena_ptr(frame, v_row, c));
-            cg.store_f32(cg.elem_ptr(frame.kv, cg.add(v_dst, c)), vval);
-        });
+        self.lower_kv_append(frame, k, v, layer);
 
         // --- Single-token attention read via the kernel (M4b.3). q is this
         // token's query row; k/v for this token were appended above, so the
@@ -1243,20 +1349,13 @@ impl<'c, 'a> Codegen<'c, 'a> {
         let scores = self.entry_alloca(self.f32_t.array_type(seq_len as u32), "scores");
         let q_ptr = self.arena_row_ptr(frame, q);
         let out_ptr = self.arena_row_ptr(frame, out);
-        // Every PackedWeight carries the same target-derived ISA; use it as the
-        // module ISA (attention has no PackedWeight of its own).
-        let isa = self
-            .plan
-            .weights
-            .weights
-            .first()
-            .map(|w| w.isa)
-            .unwrap_or(inferno_kernels::KernelIsa::Scalar);
+        let isa = self.module_isa();
         let sym = crate::loopir::attention_symbol(isa);
         let f = self
             .module
             .get_function(&sym)
             .expect("attention kernel declared (Task 6)");
+        let kv_dim_c = self.const_i64(kv_dim);
         let v_off = self.const_i64(seq_len * kv_dim);
         let kv_base_c = self.const_i64(kv_base);
         self.builder

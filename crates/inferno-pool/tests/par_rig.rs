@@ -80,6 +80,10 @@ fn assert_bit_identical(dtype: &DType, kernel: GemvFn, rows: usize, k: usize) {
 #[test]
 fn shard_align_matches_kernel_strip() {
     assert_eq!(inferno_pool::SHARD_ALIGN, inferno_kernels::STRIP);
+    // AttnFn must match the real attention kernel ABI — a drift is a compile
+    // error here, same trick as the GemvFn/GemmFn coercions.
+    let _: inferno_pool::AttnFn = inferno_kernels::inferno_attention_f32_scalar;
+    let _: inferno_pool::AttnFn = inferno_kernels::inferno_attention_f32_avx2;
 }
 
 #[test]

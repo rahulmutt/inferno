@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::{JoinHandle, Thread};
 
-use crate::shard::shard_table;
+use crate::shard::{shard_table, shard_table_aligned};
 
 /// The M2 GEMV kernel ABI: `(y, xq, w, k, row_start, row_end)`. Must match
 /// `inferno-kernels`' `#[unsafe(no_mangle)]` symbols exactly (the rig in
@@ -27,6 +27,43 @@ pub type GemvFn = unsafe extern "C" fn(*mut f32, *const u8, *const u8, usize, us
 pub type GemmFn =
     unsafe extern "C" fn(*mut f32, *const u8, *const u8, usize, usize, usize, usize, usize);
 
+/// The M4b.3 attention kernel ABI: `(out, q, kv, scores, kv_base, v_off,
+/// pos, kv_dim, n_heads, n_kv_heads, head_dim)`. Must match
+/// `inferno-kernels`' `inferno_attention_f32_*` symbols exactly.
+pub type AttnFn = unsafe extern "C" fn(
+    *mut f32,
+    *const f32,
+    *mut f32,
+    *mut f32,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+);
+
+/// Per-tile invariants of one parallel-attention dispatch (M4b.8). The
+/// token index `t in 0..m` is the sharded axis; per-token args derive as
+/// `out + t*out_stride`, `q + t*q_stride`, `pos0 + t`.
+#[derive(Clone, Copy)]
+pub struct AttnJob {
+    pub kernel: AttnFn,
+    pub out: *mut f32,
+    pub q: *const f32,
+    pub kv: *mut f32,
+    pub pos0: usize,
+    pub kv_base: usize,
+    pub v_off: usize,
+    pub kv_dim: usize,
+    pub n_heads: usize,
+    pub n_kv_heads: usize,
+    pub head_dim: usize,
+    pub q_stride: usize,
+    pub out_stride: usize,
+}
+
 /// The kind of kernel a published [`Job`] carries. A `Copy` enum of `Copy`
 /// fields so a worker reads it out of the shared job exactly like the old
 /// bare `GemvFn` payload — no change to the epoch/remaining SAFETY protocol.
@@ -40,12 +77,14 @@ enum JobKind {
         m: usize,
         rows: usize,
     },
+    Attention(AttnJob),
 }
 
 /// Run one shard's slice `[start, end)` of the current job. For `Gemm` the
 /// kernel writes `y[t * rows + r]` for every token `t in 0..m`; those writes
 /// are disjoint across shards because shards partition the row range and
-/// every token reuses the same partition.
+/// every token reuses the same partition. For `Attention` the shard's range
+/// is a span of tokens rather than rows; see [`run_attn_span`].
 ///
 /// # Safety
 /// The dispatcher's caller contract must cover `[start, end)` (all `m`
@@ -65,6 +104,43 @@ unsafe fn run_shard(
         JobKind::Gemv { kernel } => unsafe { kernel(y, xq, w, k, start, end) },
         // SAFETY: forwarding the caller's contract; all m tokens, disjoint rows.
         JobKind::Gemm { kernel, m, rows } => unsafe { kernel(y, xq, w, k, m, rows, start, end) },
+        // SAFETY: forwarding the caller's contract for the disjoint token span.
+        JobKind::Attention(job) => unsafe { run_attn_span(&job, start, end) },
+    }
+}
+
+/// Run attention for tokens `[start, end)` of a dispatch: one serial
+/// per-token kernel call per token, with one lane-local `scores` scratch
+/// sized for the span's largest `pos + 1`. Heap-allocating here (one Vec
+/// per lane per tile per layer) is noise next to the attention math; it
+/// keeps the kernel ABI scratch-free of threading concerns.
+///
+/// # Safety
+/// The dispatcher's caller contract must cover tokens `[start, end)`:
+/// `out`/`q` valid for `m` rows of their strides (out rows disjoint per
+/// token — each token is computed by exactly one lane), `kv` fully
+/// appended for positions `< pos0 + end` and read-only for the duration,
+/// `kernel` a valid `AttnFn`.
+pub(crate) unsafe fn run_attn_span(j: &AttnJob, start: usize, end: usize) {
+    let mut scores = vec![0f32; j.pos0 + end];
+    for t in start..end {
+        // SAFETY: forwarding the caller's contract for token t; scores is
+        // sized pos0 + end >= (pos0 + t) + 1.
+        unsafe {
+            (j.kernel)(
+                j.out.add(t * j.out_stride),
+                j.q.add(t * j.q_stride),
+                j.kv,
+                scores.as_mut_ptr(),
+                j.kv_base,
+                j.v_off,
+                j.pos0 + t,
+                j.kv_dim,
+                j.n_heads,
+                j.n_kv_heads,
+                j.head_dim,
+            );
+        }
     }
 }
 
@@ -387,6 +463,74 @@ impl Pool {
             }
         }
     }
+
+    /// Tiled prefill attention across up to `active_threads()` lanes
+    /// (M4b.8): splits the tile's `m` tokens into align-1 contiguous
+    /// shards. Each token's out row is computed entirely by one lane with
+    /// the unchanged per-token kernel, so thread count never changes
+    /// output bits. The M4b.5 decode cap does NOT apply — attention here
+    /// is prefill work.
+    ///
+    /// # Safety
+    /// As [`run_attn_span`] over `0..m`; calls must not overlap (one job
+    /// at a time).
+    pub unsafe fn par_attention(&self, job: &AttnJob, m: usize) {
+        if m == 0 {
+            return;
+        }
+        let active = self.active_threads();
+        let shards = shard_table_aligned(m, active, 1);
+        if shards.len() == 1 {
+            // SAFETY: caller contract covers the full token range.
+            unsafe { run_attn_span(job, 0, m) };
+            return;
+        }
+        let n_worker = shards.len() - 1;
+        let (s0, e0) = shards[0];
+        let kind = JobKind::Attention(*job);
+        // SAFETY (job write): the previous dispatch ended with
+        // `remaining == 0`, and shardless workers never read `job`
+        // (packed-epoch protocol) — no reader exists here.
+        unsafe {
+            *self.shared.job.get() = Job {
+                kind: Some(kind),
+                y: std::ptr::null_mut(),
+                xq: std::ptr::null(),
+                w: std::ptr::null(),
+                k: 0,
+                shards,
+            };
+        }
+        self.shared.remaining.store(n_worker, Ordering::SeqCst);
+        let counter =
+            (self.shared.epoch.load(Ordering::SeqCst) >> PACKED_SHARD_BITS).wrapping_add(1);
+        self.shared.epoch.store(
+            (counter << PACKED_SHARD_BITS) | (n_worker + 1),
+            Ordering::SeqCst,
+        );
+        // Wake exactly the workers that hold a shard (same handshake as
+        // par_gemv; see there for the lost-wakeup argument).
+        for slot in &self.shared.slots[..n_worker] {
+            if slot.parked.load(Ordering::SeqCst) {
+                slot.thread
+                    .get()
+                    .expect("worker registered in Pool::new")
+                    .unpark();
+            }
+        }
+        // SAFETY: caller contract; shard 0's tokens are disjoint from
+        // worker shards.
+        unsafe { run_attn_span(job, s0, e0) };
+        let mut spins = 0u32;
+        while self.shared.remaining.load(Ordering::Acquire) != 0 {
+            if spins < SPIN_ITERS {
+                spins += 1;
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    }
 }
 
 impl Drop for Pool {
@@ -591,5 +735,101 @@ mod tests {
         let pool = Pool::new(4);
         assert_eq!(dispatch(&pool, 64, 0), expected(64, 0));
         drop(pool); // must not hang or panic
+    }
+
+    /// Fake attention kernel with the real ABI: deterministic function of
+    /// (q row, pos), writes the whole out row, and touches `scores[pos]`
+    /// to prove each lane's scratch really covers `pos + 1` entries.
+    unsafe extern "C" fn stamp_attn(
+        out: *mut f32,
+        q: *const f32,
+        _kv: *mut f32,
+        scores: *mut f32,
+        _kv_base: usize,
+        _v_off: usize,
+        pos: usize,
+        _kv_dim: usize,
+        n_heads: usize,
+        _n_kv_heads: usize,
+        head_dim: usize,
+    ) {
+        // SAFETY: run_attn_span sizes scores to max pos + 1 for its span.
+        unsafe { *scores.add(pos) = pos as f32 };
+        for i in 0..n_heads * head_dim {
+            // SAFETY: out/q rows are n_heads*head_dim per the AttnFn contract.
+            unsafe { *out.add(i) = *q.add(i) + (pos * 31 + i) as f32 };
+        }
+    }
+
+    const ATTN_NH: usize = 3;
+    const ATTN_HD: usize = 4;
+    const ATTN_STRIDE: usize = ATTN_NH * ATTN_HD;
+
+    fn attn_dispatch(pool: &Pool, m: usize, pos0: usize) -> Vec<f32> {
+        let q: Vec<f32> = (0..m * ATTN_STRIDE).map(|i| i as f32).collect();
+        let mut out = vec![f32::NAN; m * ATTN_STRIDE];
+        let mut kv = [0f32; 1];
+        let job = AttnJob {
+            kernel: stamp_attn,
+            out: out.as_mut_ptr(),
+            q: q.as_ptr(),
+            kv: kv.as_mut_ptr(),
+            pos0,
+            kv_base: 0,
+            v_off: 0,
+            kv_dim: 0,
+            n_heads: ATTN_NH,
+            n_kv_heads: 1,
+            head_dim: ATTN_HD,
+            q_stride: ATTN_STRIDE,
+            out_stride: ATTN_STRIDE,
+        };
+        // SAFETY: buffers sized per stamp_attn's expectations, live for the call.
+        unsafe { pool.par_attention(&job, m) };
+        out
+    }
+
+    fn attn_expected(m: usize, pos0: usize) -> Vec<f32> {
+        (0..m * ATTN_STRIDE)
+            .map(|j| {
+                let (t, i) = (j / ATTN_STRIDE, j % ATTN_STRIDE);
+                j as f32 + ((pos0 + t) * 31 + i) as f32
+            })
+            .collect()
+    }
+
+    #[test]
+    fn attention_parallel_matches_serial_expectation() {
+        let pool = Pool::new(4);
+        for m in [1, 2, 7, 63, 64, 100] {
+            assert_eq!(attn_dispatch(&pool, m, 5), attn_expected(m, 5), "m={m}");
+        }
+    }
+
+    #[test]
+    fn attention_threads_exceeding_tokens_collapses() {
+        let pool = Pool::new(16);
+        assert_eq!(attn_dispatch(&pool, 3, 0), attn_expected(3, 0));
+    }
+
+    #[test]
+    fn attention_capacity_one_runs_inline() {
+        let pool = Pool::new(1);
+        assert_eq!(attn_dispatch(&pool, 64, 9), attn_expected(64, 9));
+    }
+
+    #[test]
+    fn attention_ignores_decode_cap() {
+        // The decode cap applies to par_gemv only; attention (prefill work)
+        // shards over full active. Result must be identical either way.
+        let pool = Pool::new(8);
+        pool.set_decode_threads(1);
+        assert_eq!(attn_dispatch(&pool, 64, 0), attn_expected(64, 0));
+    }
+
+    #[test]
+    fn attention_zero_tokens_is_a_noop() {
+        let pool = Pool::new(4);
+        assert!(attn_dispatch(&pool, 0, 0).is_empty());
     }
 }
