@@ -131,6 +131,8 @@ struct Codegen<'c, 'a> {
     weight_globals: RefCell<HashMap<usize, PointerValue<'c>>>,
     /// (theta bits, head_dim) -> `[half x float]` rope frequency table.
     rope_freqs: RefCell<HashMap<(u32, u64), PointerValue<'c>>>,
+    /// Monotonic counter naming outlined `tok_body.*` functions uniquely.
+    outlined: RefCell<usize>,
 
     /// Profiler counter array base (`[N x i64]`), or None when not profiling.
     prof_counters: Option<PointerValue<'c>>,
@@ -174,6 +176,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
             sqrt_fn: decl("llvm.sqrt"),
             weight_globals: RefCell::new(HashMap::new()),
             rope_freqs: RefCell::new(HashMap::new()),
+            outlined: RefCell::new(0),
             readcyc_fn: Intrinsic::find("llvm.readcyclecounter")
                 .expect("readcyclecounter intrinsic")
                 .get_declaration(module, &[])
@@ -571,6 +574,119 @@ impl<'c, 'a> Codegen<'c, 'a> {
         self.builder.position_at_end(exit);
     }
 
+    /// Outline `per_token` into a private `void tok_body.<label>.<n>(ptr
+    /// ctx, i64 t0, i64 t1)` function and emit ONE
+    /// `inferno_par_token_loop(body, ctx, m)` dispatch sharding the tile's
+    /// `m` tokens across pool lanes (M4b.9). The ctx pack is 6 i64 words on
+    /// the caller's stack — ptrtoint(tokens), pos_off, ptrtoint(weights),
+    /// ptrtoint(kv), ptrtoint(arena), tile_start — rebuilt per dispatch;
+    /// the pool treats ctx as opaque, only this emitter knows the layout.
+    ///
+    /// `per_token(cg, env, ti, row)` is emitted POSITIONED INSIDE the
+    /// outlined function, once, looped over the span: `ti` is the
+    /// tile-local token index, `row = tile_start + ti` the arena row. It
+    /// must derive every runtime value from the rebuilt `env`/`ti`/`row`,
+    /// module-level globals/functions, or constants — referencing an SSA
+    /// value from the calling function is malformed IR (module
+    /// verification fails). Never call `profiled` inside `per_token`: the
+    /// counter accumulation is non-atomic and belongs to the dispatcher
+    /// thread; brackets wrap the dispatch call in the caller instead.
+    ///
+    /// Bit-neutrality: each token's writes are disjoint rows produced by
+    /// the identical loop-body IR the serial `range_loop(m)` emitted, and
+    /// exactly one lane runs each token — thread count and shard layout
+    /// cannot change output bits (M4b.8 argument, verbatim).
+    fn par_token_loop(
+        &self,
+        env: &TileEnv<'c>,
+        tile_start: IntValue<'c>,
+        m: IntValue<'c>,
+        label: &str,
+        per_token: impl FnOnce(&Self, &TileEnv<'c>, IntValue<'c>, IntValue<'c>),
+    ) {
+        // Caller side: pack ctx on the stack (6 stores per dispatch).
+        let ctx = self.entry_alloca(self.i64_t.array_type(6), "tokctx");
+        let p2i =
+            |p: PointerValue<'c>| self.builder.build_ptr_to_int(p, self.i64_t, "p2i").unwrap();
+        let fields = [
+            p2i(env.tokens),
+            env.pos_off,
+            p2i(env.weights),
+            p2i(env.kv),
+            p2i(env.arena),
+            tile_start,
+        ];
+        for (i, v) in fields.iter().enumerate() {
+            let slot = self.byte_ptr(ctx, self.const_i64((i * 8) as u64));
+            self.builder.build_store(slot, *v).unwrap();
+        }
+
+        // Emit the outlined body function.
+        let n = {
+            let mut c = self.outlined.borrow_mut();
+            *c += 1;
+            *c
+        };
+        let sanitized: String = label
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+            .collect();
+        let fn_ty = self.ctx.void_type().fn_type(
+            &[self.ptr_t.into(), self.i64_t.into(), self.i64_t.into()],
+            false,
+        );
+        let f = self.module.add_function(
+            &format!("tok_body.{sanitized}.{n}"),
+            fn_ty,
+            Some(Linkage::Private),
+        );
+        let saved = self.builder.get_insert_block().unwrap();
+        let entry = self.ctx.append_basic_block(f, "entry");
+        self.builder.position_at_end(entry);
+
+        let ctx_p = f.get_nth_param(0).unwrap().into_pointer_value();
+        let t0 = f.get_nth_param(1).unwrap().into_int_value();
+        let t1 = f.get_nth_param(2).unwrap().into_int_value();
+        let field = |i: usize| {
+            let p = self.byte_ptr(ctx_p, self.const_i64((i * 8) as u64));
+            self.load_i64(p)
+        };
+        let i2p = |v: IntValue<'c>| self.builder.build_int_to_ptr(v, self.ptr_t, "i2p").unwrap();
+        let body_env = TileEnv {
+            tokens: i2p(field(0)),
+            pos_off: field(1),
+            weights: i2p(field(2)),
+            kv: i2p(field(3)),
+            arena: i2p(field(4)),
+        };
+        let ts = field(5);
+        let span = self.builder.build_int_sub(t1, t0, "span").unwrap();
+        self.range_loop(span, |cg, i| {
+            let ti = cg.add(i, t0);
+            let row = cg.add(ts, ti);
+            per_token(cg, &body_env, ti, row);
+        });
+        self.builder.build_return(None).unwrap();
+        self.builder.position_at_end(saved);
+
+        // Caller side: one dispatch over the tile.
+        let pfn = self
+            .module
+            .get_function("inferno_par_token_loop")
+            .expect("par token-loop dispatcher declared");
+        self.builder
+            .build_call(
+                pfn,
+                &[
+                    f.as_global_value().as_pointer_value().into(),
+                    ctx.into(),
+                    m.into(),
+                ],
+                "par_token_loop",
+            )
+            .unwrap();
+    }
+
     // ---- entry points -------------------------------------------------------
 
     fn lower_prefill(&self, func: FunctionValue<'c>, loopir: &LoopIr) {
@@ -741,9 +857,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
                     }
                     _ => {
                         self.profiled(&label, |cg| {
-                            cg.range_loop(m, |cg, ti| {
-                                let row = cg.add(tile_start, ti);
-                                let frame = cg.tile_frame(env, row);
+                            cg.par_token_loop(env, tile_start, m, &label, |cg, benv, _ti, row| {
+                                let frame = cg.tile_frame(benv, row);
                                 cg.lower_step(&frame, step);
                             });
                         });
