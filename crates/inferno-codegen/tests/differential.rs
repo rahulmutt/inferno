@@ -362,4 +362,16 @@ fn prefill_is_bit_invariant_to_thread_count() {
             "logit {i} differs between t=1 and t=8 ({a} vs {b})"
         );
     }
+    // t=2 (tile=4 over a 10-token prompt) yields shard table [(0,2),(2,4)] —
+    // the only run above with an offset shard (t0=2, span=2); the t=8 run
+    // above is all span=1 shards, so this exercises a different shard shape.
+    inferno_pool::set_global_active_threads(2);
+    let l2 = unsafe { run_compiled(&art.dir, &tokens, &meta) };
+    for (i, (a, b)) in l1.iter().zip(&l2).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "logit {i} differs between t=1 and t=2 ({a} vs {b})"
+        );
+    }
 }
