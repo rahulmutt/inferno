@@ -209,3 +209,43 @@ creates one.
   misses with the serial-ops labels near zero, the next fork is
   dispatch consolidation (approach C), not more sharding — recorded
   here so it is an authorized branch, not scope growth.
+
+## Amendments
+
+### 2026-07-12 — quiet-hw verdict: **MET at 10.63x @ t=12**; both named risks did not materialize
+
+Shipped @ 2387266 (PR #15, squash-merged; CI green first run). Verification
+protocol item 2 executed on d2.c1.medium (Xeon Gold 6336Y, PREFLIGHT FIT) —
+the full verdict and the gate table live in the
+[M4b.1 spec](2026-07-06-m4b1-threading-design.md) §Amendments, the verdict
+ledger. Summary as it bears on *this* design:
+
+| | pre-M4b.9 (823437f) | post-M4b.9 (2387266) |
+|---|---|---|
+| prefill scale @ t=12 | 5.67x (NOT MET) | **10.63x (MET)** |
+| pp tok/s @ t=12 | 346.8 | 652.4 (+88%) |
+| pp tok/s @ t=1 | 61.18 | 61.37 (unchanged) |
+| Amdahl residual serial fraction | ≈10.2% | ≈1.2% |
+
+The two Risks this design named were both detectors, and both read negative:
+
+1. **Dispatch-count growth** (≈2.5x the joins per layer per tile). Predicted
+   signature: low-t degradation with high-t recovery. Observed: 2.00x @ t=2
+   and 3.92x @ t=4 — at or within 2% of ideal, i.e. the added joins are not
+   measurable even where they are most costly relative to the work. **Job
+   fusion (approach C) is therefore not exercised and stays a dormant,
+   pre-authorized lever, not a follow-up.**
+2. **Outlining perturbs single-thread codegen.** Predicted detector: the t=1
+   `bench-compiled` gate. Observed: t=1 prefill 61.37 vs 61.18 tok/s — no
+   regression from the call boundary. The nightly still runs as the standing
+   guard, but the quiet-hw number already answers it on quiet silicon.
+
+Verification item 3 (the NOT-MET fork — attribution via the new per-label
+`kv_append`/`quantize` profile brackets) was **not needed**: the gate is met,
+so no residual attribution was taken. The split brackets remain as shipped
+profiling surface.
+
+The M4b.1 exit criterion (**≥6x @ t=12**) is now satisfied, three sessions
+after it was first taken to bare metal. M4b.9's premise — that the serial
+tail, not dispatch overhead or memory bandwidth, was the binding constraint —
+is confirmed by the residual-serial-fraction collapse from ≈10.2% to ≈1.2%.

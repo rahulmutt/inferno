@@ -475,3 +475,51 @@ machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical C
 gate: prefill scale @ t=12 = 5.67x (target ≥6x) -> NOT MET
 note: on a MET=no result, take the M4b.1 spec's attribution fork (serial attention vs memory bandwidth) — see its Amendments.
 ```
+
+### 2026-07-12 — fourth quiet-hw session, post-M4b.9: 10.63x @ t=12 — **MET**. Gate closed.
+
+Same box type as all three prior sessions (d2.c1.medium → Xeon Gold 6336Y,
+16 physical / 32 logical, PREFLIGHT FIT), inferno @ 2387266 — the first
+run with M4b.9's parallel serial tail (rmsnorm/rope/add/swiglu/bias/embed,
+KV-append, activation-quantize all token-sharded through
+`inferno_par_token_loop`). **Prefill scale @ t=12 = 10.63x against the ≥6x
+target — MET**, up from 5.67x (M4b.8) / 4.11x / 4.06x on the same silicon.
+The M4b.1 exit criterion is satisfied; no further lever is authorized or
+needed for this gate.
+
+- **t=1 unchanged: 61.37 pp tok/s** vs 61.18 (M4b.8) and 61.4–61.6 (earlier
+  sessions). The outlining regression risk the M4b.9 spec named
+  (call-boundary opacity costing single-thread codegen quality) **did not
+  materialize** — this is the same measurement the `bench-compiled` t=1
+  nightly guards, taken on quiet hardware.
+- **Absolute t=12 throughput 346.8 → 652.4 pp tok/s (+88%).**
+- **The dispatch-count-growth risk did not materialize either.** M4b.9
+  predicted its detector as low-t degradation with high-t recovery; the
+  observed low-t rows are at or near ideal (2.00x @ t=2, 3.92x @ t=4), so
+  the ≈2.5x growth in joins per layer per tile is not visible even where it
+  would be most costly. Job fusion (approach C) stays unexercised.
+- **Amdahl residual serial fraction ≈ 1.2%**, down from ≈10.2% at M4b.8 —
+  the serial tail was the deficit, exactly as the third session's
+  attribution fork concluded. (The 6x line needed ≈9.1%.)
+- **Scaling slope vs llama.cpp:** the pure-CPU control scales 118.7 →
+  1064.8 = 8.97x @ t=12 on this box; inferno now out-scales it (10.63x),
+  though from a lower t=1 base. Absolute pp gap at t=12 narrowed from 3.12x
+  behind to 1.63x behind (652.4 vs 1064.8).
+- Decode (tg) is untouched by M4b.9 by construction; the tg column moved
+  47.2 → 45.6 tok/s @ t=12, within the cross-session spread and not a
+  code-path change. Decode's own verdict lives in the M4b.5 gate.
+
+```
+# gate-prefill-scaling (M4b.1 ≥6x @ t=12) — 2026-07-12T14:36:00Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-12
+
+| t | pp tok/s | pp scale | tg tok/s | tg scale | llama pp (corrob.) | llama tg (corrob.) |
+|---|---|---|---|---|---|---|
+| 1 | 61.371907264832984 | 1.00x | 22.333697855392508 | 1.00x | 118.720164 | 16.419338 |
+| 2 | 122.81768427088039 | 2.00x | 28.465759382766066 | 1.27x | 230.487011 | 40.107204 |
+| 4 | 240.2871894480028 | 3.92x | 28.19155852084818 | 1.26x | 444.989896 | 46.910133 |
+| 8 | 460.1357171111038 | 7.50x | 28.403966472986003 | 1.27x | 801.32421 | 53.084828 |
+| 12 | 652.3823384803542 | 10.63x | 45.604824021519946 | 2.04x | 1064.793598 | 54.868367 |
+
+gate: prefill scale @ t=12 = 10.63x (target ≥6x) -> MET
+```
