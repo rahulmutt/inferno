@@ -549,4 +549,5 @@ pub fn ensure_kernels_linked() {
     p(inferno_pool::inferno_par_gemv as *const ());
     p(inferno_pool::inferno_par_gemm as *const ());
     p(inferno_pool::inferno_par_attention as *const ());
+    p(inferno_pool::inferno_par_token_loop as *const ());
 }
