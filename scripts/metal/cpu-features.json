@@ -22,13 +22,13 @@
       "source": "https://ark.intel.com/content/www/us/en/ark/products/214805/intel-xeon-e2388g-processor-16m-cache-3-20-ghz.html"
     },
     "d2.c1.medium": {
-      "cpu_model": "Intel Xeon Gold 5315Y",
+      "cpu_model": "Intel Xeon Gold 6336Y",
       "vendor": "GenuineIntel",
       "physical_cores": 16,
       "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
                 "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
                 "avx512_vnni"],
-      "source": "https://ark.intel.com/content/www/us/en/ark/products/215286/intel-xeon-gold-5315y-processor-12m-cache-3-20-ghz.html"
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/215280/intel-xeon-gold-6336y-processor-36m-cache-2-40-ghz.html"
     },
     "d2.m1.xlarge": {
       "cpu_model": "Intel Xeon Gold 5315Y",
