@@ -929,23 +929,29 @@ impl<'c, 'a> Codegen<'c, 'a> {
                 .get_function(&qsym)
                 .expect("quantize kernel declared (Task 8)");
             let kk = *k as u64;
-            self.profiled("quantize", |cg| {
-                cg.par_token_loop(env, tile_start, m, "quantize", |cg, benv, ti, row| {
-                    let src_ptr = cg.arena_row_ptr_at(benv.arena, src, row);
-                    let scratch = cg.act_scratch_ptr_row0(benv.arena);
-                    let off = cg
-                        .builder
-                        .build_int_mul(ti, cg.const_i64(act_row), "actoff")
-                        .unwrap();
-                    let dst = cg.byte_ptr(scratch, off);
-                    cg.builder
-                        .build_call(
-                            qfn,
-                            &[src_ptr.into(), dst.into(), cg.const_i64(kk).into()],
-                            "quantize",
-                        )
-                        .unwrap();
-                });
+            self.profiled(crate::profile::QUANTIZE_LABEL, |cg| {
+                cg.par_token_loop(
+                    env,
+                    tile_start,
+                    m,
+                    crate::profile::QUANTIZE_LABEL,
+                    |cg, benv, ti, row| {
+                        let src_ptr = cg.arena_row_ptr_at(benv.arena, src, row);
+                        let scratch = cg.act_scratch_ptr_row0(benv.arena);
+                        let off = cg
+                            .builder
+                            .build_int_mul(ti, cg.const_i64(act_row), "actoff")
+                            .unwrap();
+                        let dst = cg.byte_ptr(scratch, off);
+                        cg.builder
+                            .build_call(
+                                qfn,
+                                &[src_ptr.into(), dst.into(), cg.const_i64(kk).into()],
+                                "quantize",
+                            )
+                            .unwrap();
+                    },
+                );
             });
             self.act_scratch_ptr_row0(env.arena)
         } else {
@@ -1434,9 +1440,11 @@ impl<'c, 'a> Codegen<'c, 'a> {
     /// Append this token's k/v rows into the f32 KV cache at `frame.pos` —
     /// the write half of `Step::Attention`. Called per token by the decode
     /// path (`lower_attention`) and by the prefill tile arm
-    /// (`lower_tile_attention`), which appends the WHOLE tile before its
-    /// parallel attention read. That reordering is bit-safe: token i's
-    /// causal read never reaches rows past `pos_i`.
+    /// (`lower_tile_kv_append`), which dispatches the WHOLE tile's appends
+    /// across pool lanes via `inferno_par_token_loop` and joins before
+    /// `lower_tile_attention` issues its parallel attention read. That
+    /// reordering is bit-safe: token i's causal read never reaches rows past
+    /// `pos_i`.
     fn lower_kv_append(&self, frame: &Frame<'c>, k: usize, v: usize, layer: usize) {
         let kv_dim = self.plan.kv.kv_dim as u64;
         let seq_len = self.plan.max_seq_len as u64;
