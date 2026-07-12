@@ -1,4 +1,4 @@
-//! Persistent fork-join thread pool + the three `inferno_par_{gemv,gemm,attention}`
+//! Persistent fork-join thread pool + the four `inferno_par_{gemv,gemm,attention,token_loop}`
 //! dispatchers that M4b.1+ generated code calls by symbol. Kernels stay single-threaded
 //! (spec boundary rule: parallelism is the caller's job — this crate IS
 //! that caller): the dispatcher splits a GEMV's row range into 8-row-aligned
@@ -11,7 +11,7 @@ pub mod pool;
 pub mod shard;
 
 pub use error::PoolError;
-pub use pool::{AttnFn, AttnJob, GemmFn, GemvFn, Pool};
+pub use pool::{AttnFn, AttnJob, GemmFn, GemvFn, Pool, TokenBodyFn};
 pub use shard::{SHARD_ALIGN, shard_table, shard_table_aligned};
 
 use std::sync::OnceLock;
@@ -257,5 +257,56 @@ pub unsafe extern "C" fn inferno_par_attention(
         }
         // SAFETY: forwarding the caller's contract for the full range.
         None => unsafe { pool::run_attn_span(&job, 0, m) },
+    }
+}
+
+/// Host dispatcher for outlined serial-tail token loops (M4b.9). Same
+/// single-dispatcher guard + serial fallback as [`inferno_par_gemv`];
+/// shares `DISPATCH_CLAIMED` deliberately — within one forward pass all
+/// pool dispatches are issued serially and never overlap, so one guard
+/// suffices. `m <= 1` (the T=1 prefill tile tail) takes a direct body
+/// call with no CAS and no job publish — decode never calls this
+/// dispatcher at all (its codegen lowers ops inline, single-token). On
+/// the CAS-loss (or uninitialized-pool) path this runs the body once
+/// over the full token range, bit-identical to the pooled path since
+/// each token's rows are written by a single body invocation either way.
+///
+/// A panic inside the dispatcher or body aborts the process at this
+/// `extern "C"` boundary — there is no unwind across FFI.
+///
+/// # Safety
+/// Same contract as [`Pool::par_token_loop`]; additionally `body` must
+/// be a valid non-null function pointer with the M4b.9 token-body ABI
+/// and `ctx` the pack that body expects. Generated code guarantees all
+/// of this by construction (M3 trust model).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_par_token_loop(body: TokenBodyFn, ctx: *const u8, m: usize) {
+    if m == 0 {
+        return;
+    }
+    if m == 1 {
+        // SAFETY: forwarding the caller's contract for the single token.
+        unsafe { body(ctx, 0, 1) };
+        return;
+    }
+    match GLOBAL.get() {
+        Some(p) => {
+            if DISPATCH_CLAIMED
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                // SAFETY: forwarding the caller's contract unchanged.
+                unsafe { p.par_token_loop(body, ctx, m) };
+                DISPATCH_CLAIMED.store(false, Ordering::Release);
+            } else {
+                // Lost the race for the pool's single dispatcher slot: run
+                // the body serially over the full token range instead of
+                // overlapping another thread's in-flight pool dispatch.
+                // SAFETY: forwarding the caller's contract for the full range.
+                unsafe { body(ctx, 0, m) };
+            }
+        }
+        // SAFETY: forwarding the caller's contract for the full range.
+        None => unsafe { body(ctx, 0, m) },
     }
 }
