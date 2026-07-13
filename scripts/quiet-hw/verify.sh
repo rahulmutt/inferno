@@ -69,6 +69,7 @@ run_gate() { # <name> <cmd...>
 
 run_gate prefill-scaling bash "$HERE/gate-prefill-scaling.sh" "$MODEL"
 run_gate decode-cap      bash "$HERE/gate-decode-cap.sh" "$MODEL"
+run_gate bw-curve        bash "$HERE/gate-bw-curve.sh"
 run_gate pf-dist         bash "$HERE/gate-pf-dist.sh"
 run_gate bench-protocol  bash "$HERE/gate-bench-protocol.sh" "$MODEL"
 run_gate intel-ab        bash "$HERE/gate-intel-ab.sh" "${AB_ARGS[@]}"
@@ -82,7 +83,7 @@ run_gate intel-ab        bash "$HERE/gate-intel-ab.sh" "${AB_ARGS[@]}"
   echo "| stage | status |"
   echo "|---|---|"
   echo "| preflight | ${status[preflight]} |"
-  for g in prefill-scaling decode-cap pf-dist bench-protocol intel-ab; do
+  for g in prefill-scaling decode-cap bw-curve pf-dist bench-protocol intel-ab; do
     echo "| $g | ${status[$g]} |"
   done
   echo
@@ -92,7 +93,7 @@ run_gate intel-ab        bash "$HERE/gate-intel-ab.sh" "${AB_ARGS[@]}"
 } | tee "$OUT/summary.md"
 echo "results: $OUT"
 
-for g in prefill-scaling decode-cap pf-dist bench-protocol; do
+for g in prefill-scaling decode-cap bw-curve pf-dist bench-protocol; do
   [ "${status[$g]}" = PASS ] || exit 1
 done
 [ "${status[intel-ab]}" = FAILED ] && exit 1

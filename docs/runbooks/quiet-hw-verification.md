@@ -56,6 +56,7 @@ vendor (or your own hardware); the Intel leg and gate 5 work as shown.
 |---|---|---|
 | `gate-prefill-scaling.out` | [M4b.1 spec](../superpowers/specs/2026-07-06-m4b1-threading-design.md) §Amendments | ≥6x @ t=12 met/not; on a miss, take the spec's attribution fork |
 | `gate-decode-cap.out` | [M4b.5 spec](../superpowers/specs/2026-07-08-m4b5-phase-aware-decode-threading-design.md) §Amendments | cap default keep/change; knee; leg-2 verdict |
+| `gate-bw-curve.out` | [M4b.10 spec](../superpowers/specs/2026-07-12-m4b10-decode-cap-formula-design.md) §Amendments | bandwidth curve; P (95%-of-peak lane count); does P predict the decode knee? |
 | `gate-pf-dist.out` | [M4b.4 spec](../superpowers/specs/2026-07-08-m4b4-decode-gemv-mlp-design.md) §Amendments | PF_DIST keep/revert + distance; Task-3 (interleave) go/no-go |
 | `gate-bench-protocol.out` | [M4a spec](../superpowers/specs/2026-07-06-m4a-bench-sampling-design.md) §Amendments | the v1 win criterion |
 | `gate-intel-ab.out` | [M4b.6 spec](../superpowers/specs/2026-07-09-m4b6-decode-gemv-op-reduction-design.md) §Amendments | op-reduction lever dead cross-vendor, or reopened |
@@ -70,9 +71,18 @@ Each gate runs standalone (same env vars the orchestrator sets —
 `QHW_OUT` for the output dir; `QHW_SMOKE=1` for a stamped plumbing
 check — there is no per-gate `--smoke` flag):
 
+**Socket-pinned sessions:** If using `QHW_NUMA_NODE=N` for a socket-pinned
+run, set it only on individual gate invocations of `gate-decode-cap.sh` and
+`gate-bw-curve.sh` — do not export it across a `verify.sh` pass. Those two
+gates pin their runs with CPU and memory binding; the other gates (notably
+`gate-bench-protocol.sh`) read `phys_cores` but do not pin, so a global
+export gives them a node-sized thread count on an unpinned (whole-machine)
+CPU set, silently corrupting the M4a data point.
+
     bash scripts/quiet-hw/preflight.sh
     bash scripts/quiet-hw/gate-prefill-scaling.sh "$MODEL"
     bash scripts/quiet-hw/gate-decode-cap.sh "$MODEL"
+    bash scripts/quiet-hw/gate-bw-curve.sh
     bash scripts/quiet-hw/gate-pf-dist.sh
     bash scripts/quiet-hw/gate-bench-protocol.sh "$MODEL"
     bash scripts/quiet-hw/gate-intel-ab.sh            # Intel only

@@ -18,12 +18,13 @@ PHYS=$(phys_cores)
 if [ "${QHW_SMOKE:-0}" = 1 ]; then
   CAPS="1 2"; REPS=1; MAXTOK=8
 else
-  CAPS=$(seq 1 "$PHYS" | tr '\n' ' '); REPS=3; MAXTOK=128
+  CAPS=$(cap_grid "$PHYS"); REPS=3; MAXTOK=128
 fi
 
 smoke_header "gate-decode-cap (M4b.5 default-vs-best sweep)"
 machine_block
 echo "sweep: caps={$CAPS} + default + t1 | reps=$REPS (interleaved rounds) | max-tokens=$MAXTOK"
+[ -n "${QHW_NUMA_NODE:-}" ] && echo "numa: pinned to node ${QHW_NUMA_NODE} (cpubind+membind); phys_cores=$PHYS"
 echo
 
 one_run() { # <cap: number|default|t1> -> decode tok/s on stdout
@@ -33,7 +34,9 @@ one_run() { # <cap: number|default|t1> -> decode tok/s on stdout
     t1)      threads=1 ;;             # t=1 decode-unchanged row
     *)       envset=(INFERNO_DECODE_THREADS="$1") ;;
   esac
-  env "${envset[@]}" cargo run --release -q -p inferno -- run "$MODEL" \
+  # numa_wrap is empty unless QHW_NUMA_NODE is set; unquoted on purpose so it
+  # expands to zero words in the common case.
+  env "${envset[@]}" $(numa_wrap) cargo run --release -q -p inferno -- run "$MODEL" \
     -p "$PROMPT" --max-tokens "$MAXTOK" --threads "$threads" 2>&1 \
     | tee -a "$OUT/decode-cap-runs.log" | decode_toks -
 }
