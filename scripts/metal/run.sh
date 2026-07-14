@@ -142,50 +142,9 @@ cleanup() {
 trap 'cleanup "$?"' EXIT
 
 # --- provision ------------------------------------------------------------
-provision() { # prints the new server id
-  local hostname="inferno-metal-${TYPE//./-}-$RUN_ID"
-  local body
-  body=$(jq -n --arg h "$hostname" --arg t "$TYPE" --arg os "$OS" \
-    --arg loc "$LOCATION" --arg tag "$METAL_TAG" --arg key "$(cat "$SSH_KEY")" \
-    '{hostname: $h, description: $tag, os: $os, type: $t, location: $loc, sshKeys: [$key]}')
-  # POST /bmc/v1/servers is not idempotent: a blind retry after a 429/5xx
-  # that actually succeeded server-side would provision a second, orphaned,
-  # billed server (only the retry's id gets tracked/torn down).
-  METAL_NO_RETRY=1 pnap_api POST /bmc/v1/servers "$body" | jq -er '.id'
-}
-
-wait_ready() { # <server-id> — prints IP once powered-on + ssh answers
-  local deadline=$(( $(date +%s) + ${METAL_PROVISION_TIMEOUT:-1800} ))
-  local s status ip lastline
-  while [ "$(date +%s)" -lt "$deadline" ]; do
-    s=$(pnap_api GET "/bmc/v1/servers/$1")
-    status=$(jq -r '.status' <<<"$s")
-    ip=$(jq -r '.publicIpAddresses[0] // empty' <<<"$s")
-    if [ "$status" = "error" ]; then
-      echo "metal: server entered error state" >&2; return 1
-    fi
-    if [ "$status" = "powered-on" ] && [ -n "$ip" ]; then
-      # PhoenixNAP recycles public IPs across servers, so this IP may carry a
-      # stale known_hosts entry from an earlier box. accept-new only adds a
-      # *new* key — against a mismatched stale one it fails "Host key
-      # verification failed" and never recovers. Purge the old entry first,
-      # then accept-new records this host's real key (devpod's own plain `ssh`
-      # later depends on that entry existing and being correct).
-      ssh-keygen -R "$ip" >/dev/null 2>&1 || true
-      if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
-             "$(metal_default_ssh_user)@$ip" true 2>>"$OUT/ssh-probe.log"; then
-        echo "$ip"; return 0
-      fi
-      lastline=$(tail -n1 "$OUT/ssh-probe.log" 2>/dev/null)
-      echo "metal: waiting ($status, ssh: ${lastline:-no output yet})..." >&2
-    else
-      echo "metal: waiting ($status)..." >&2
-    fi
-    sleep 20
-  done
-  echo "metal: not ready after ${METAL_PROVISION_TIMEOUT:-1800}s — deleting via trap" >&2
-  return 1
-}
+# provision + wait_ready live in lib.sh: probe.sh needs exactly the same
+# non-idempotent POST and the same power-on/ssh poll, and the one call in this
+# tool that can double-bill deserves a single implementation.
 
 host_prep() { # <ip> — drift check + docker + governor, BEFORE slow devpod
   local vocab expected vendor
@@ -210,10 +169,11 @@ if [ -n "$REUSE" ]; then
   echo "metal: reusing $SERVER_ID ($SERVER_IP); skipping provision + host-prep"
 else
   echo "metal: provisioning $TYPE..."
-  SERVER_ID=$(provision)
+  SERVER_ID=$(metal_provision "$TYPE" "$OS" "$LOCATION" "$SSH_KEY" \
+    "inferno-metal-${TYPE//./-}-$RUN_ID")
   meta_set server_id "\"$SERVER_ID\""
   echo "metal: server $SERVER_ID created; waiting for power-on + ssh"
-  SERVER_IP=$(wait_ready "$SERVER_ID")
+  SERVER_IP=$(metal_wait_ready "$SERVER_ID" "$OUT/ssh-probe.log")
   meta_set server_ip "\"$SERVER_IP\""
   echo "metal: ready at $SERVER_IP; running host-prep"
   host_prep "$SERVER_IP"

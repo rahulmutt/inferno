@@ -79,6 +79,10 @@ run = "bash scripts/metal/run.sh"
 description = "List PhoenixNAP server types with CPU model, ISA flags (AVX2/AVX-512/...), $/hr, availability"
 run = "bash scripts/metal/catalog.sh"
 
+[tasks.metal-probe]
+description = "Ask a server type what silicon it actually is: provision, read /proc/cpuinfo, print a cpu-features.json entry, deprovision (no devpod — minutes and cents). The products API is not a source of truth; four of its CPU model numbers name no real part: mise run metal-probe -- <type> [--yes]"
+run = "bash scripts/metal/probe.sh"
+
 [tasks.metal-gc]
 description = "List + delete stray inferno-metal servers (run after any interrupted metal session)"
 run = "bash scripts/metal/gc.sh"

@@ -94,6 +94,27 @@ is a hypothesis until a box of that type has actually booted and passed
 the drift check. Flags always come from the vendor spec sheet for the
 claimed part, never from the API, which does not report ISA at all.
 
+## Probing an unknown type (`mise run metal-probe`)
+
+    mise run metal-probe -- <type> [--yes]
+
+Provisions the box, reads `/proc/cpuinfo` and `lscpu`, prints the
+`cpu-features.json` entry that box actually justifies, and deletes it. No
+devpod, no image pull, no devenv — minutes and cents, not an hour and
+dollars. There is deliberately no `--keep`: a probe is a diagnostic, and
+an operator waiting on a one-line answer is exactly who forgets a running
+box.
+
+This is the only way to resolve a type whose advertised CPU names no real
+part, because `run.sh` refuses to provision a type with no table entry —
+so those types are otherwise unreachable. It is also how you confirm an
+entry seeded from the API, which is not a source of truth (see below).
+
+Paste the printed entry into `.types` and **replace the `TODO` source with
+the vendor spec sheet for the model the box reported**. The probe reports
+the flags the silicon exposes; the `source` field records what the vendor
+promises, and only a human can cite that.
+
 Four CPU strings the API reports do not name any real part — no Intel SKU
 exists under these numbers, so their types stay UNMAPPED rather than being
 mapped to a guess. Resolving one means provisioning it and reading
