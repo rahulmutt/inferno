@@ -52,6 +52,44 @@ if out=$(
 expect "no-retry attempt count" "$(cat "$attempts")" "1"
 rm -f "$attempts"
 
+# --- pnap_api: a 409 on DELETE is retried (network still provisioning) -----
+# The teardown path is where 409 actually shows up: a failed provision leaves
+# a server whose network is mid-flight, and giving up there orphans a billed
+# box. Idempotent, so retrying is safe.
+attempts=$(mktemp); echo 0 > "$attempts"
+_pnap_curl() {
+  local n; n=$(cat "$attempts"); echo $((n + 1)) > "$attempts"
+  if [ "$n" -lt 2 ]; then printf 'in-progress\n409\n'; else printf '{}\n200\n'; fi
+}
+PNAP_TOKEN=test METAL_RETRY_SLEEP=0 pnap_api DELETE /bmc/v1/servers/x >/dev/null 2>&1 \
+  || fail "409 on DELETE should retry to success"
+expect "409 DELETE retried" "$(cat "$attempts")" "3"
+rm -f "$attempts"
+
+# --- pnap_api: an unending 409 on DELETE gives up after 5, doesn't hang ----
+attempts=$(mktemp); echo 0 > "$attempts"
+if out=$(
+  _pnap_curl() {
+    local n; n=$(cat "$attempts"); echo $((n + 1)) > "$attempts"
+    printf 'in-progress\n409\n'
+  }
+  PNAP_TOKEN=test METAL_RETRY_SLEEP=0 pnap_api DELETE /bmc/v1/servers/x 2>/dev/null
+); then fail "unending 409 on DELETE should fail"; fi
+expect "409 DELETE bounded" "$(cat "$attempts")" "5"
+rm -f "$attempts"
+
+# --- pnap_api: a 409 on a NON-DELETE is a real conflict — fail fast --------
+attempts=$(mktemp); echo 0 > "$attempts"
+if out=$(
+  _pnap_curl() {
+    local n; n=$(cat "$attempts"); echo $((n + 1)) > "$attempts"
+    printf 'conflict\n409\n'
+  }
+  PNAP_TOKEN=test METAL_RETRY_SLEEP=0 pnap_api POST /bmc/v1/servers '{}' 2>/dev/null
+); then fail "409 on POST should fail"; fi
+expect "409 POST not retried" "$(cat "$attempts")" "1"
+rm -f "$attempts"
+
 # --- require_env ----------------------------------------------------------
 if (unset PNAP_CLIENT_ID PNAP_CLIENT_SECRET 2>/dev/null; require_env 2>/dev/null); then
   fail "require_env should fail without credentials"

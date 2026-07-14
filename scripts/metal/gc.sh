@@ -32,7 +32,31 @@ if [ "$FORCE" != 1 ]; then
   read -r answer
   [ "$answer" = y ] || { echo "metal-gc: aborted"; exit 0; }
 fi
-printf '%s\n' "$list" | cut -f1 | while read -r id; do
-  echo "metal-gc: deleting $id"
-  pnap_api DELETE "/bmc/v1/servers/$id" >/dev/null
+# Keep hammering the ones that refuse to go. A server whose network is still
+# provisioning answers 409 for minutes (pnap_api already retries that for a
+# couple of them), and a single stubborn id must never abort the sweep and
+# leave the rest — or itself — billing. Bounded, then a loud failure naming
+# exactly what is still alive.
+pending=$(printf '%s\n' "$list" | cut -f1 | tr '\n' ' ')
+deadline=$((SECONDS + ${METAL_GC_TIMEOUT:-900}))
+while [ -n "${pending// /}" ]; do
+  still=""
+  for id in $pending; do
+    echo "metal-gc: deleting $id"
+    if pnap_api DELETE "/bmc/v1/servers/$id" >/dev/null; then
+      echo "metal-gc: deleted $id"
+    else
+      still="$still $id"
+    fi
+  done
+  pending="$still"
+  [ -n "${pending// /}" ] || break
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "metal-gc: STILL ALIVE after $((SECONDS))s:$pending" >&2
+    echo "metal-gc: THE METER MAY BE RUNNING — rerun, or delete in the PhoenixNAP portal" >&2
+    exit 1
+  fi
+  echo "metal-gc:$pending not deletable yet — retrying in ${METAL_GC_SLEEP:-30}s"
+  sleep "${METAL_GC_SLEEP:-30}"
 done
+echo "metal-gc: all deleted"
