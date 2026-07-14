@@ -85,6 +85,32 @@ DRIFT`, the curated table disagrees with the silicon. Fix
 and rerun. There is deliberately no skip flag — a wrong entry mislabels
 every result recorded for that type.
 
+**The API's CPU string is not authoritative — the silicon is.** Most of
+the table is seeded from the PhoenixNAP products API (`.metadata.cpu`,
+`cpuCount`, `coresPerCpu`), but that field has been wrong on real
+hardware: `d2.c1.medium` is advertised as a Dual Xeon Gold 5315Y and
+delivers a 6336Y (`f72d67c`, observed twice). So an entry seeded that way
+is a hypothesis until a box of that type has actually booted and passed
+the drift check. Flags always come from the vendor spec sheet for the
+claimed part, never from the API, which does not report ISA at all.
+
+Four CPU strings the API reports do not name any real part — no Intel SKU
+exists under these numbers, so their types stay UNMAPPED rather than being
+mapped to a guess. Resolving one means provisioning it and reading
+`/proc/cpuinfo`; don't re-run the literature search.
+
+| API says | Reality | Types left UNMAPPED |
+|---|---|---|
+| `Dual Xeon Gold 6536` | No 6536 in any Xeon generation | `d3.c1.large`, `d3.m1.xlarge` |
+| `Dual Xeon Gold 6540` | No 6540; Emerald Rapids Gold has no such SKU | `d3.c2.large`, `d3.m2.xlarge` |
+| `Dual Xeon Gold 6436` | No 6436; Sapphire Rapids jumps 6434 → 6438 | `d3.g2.c2.xlarge` |
+| `Intel Xeon 6770P` | No 6770P in the Xeon 6 6700P family | `s5.x6.c9.*`, `s5.x6.m9.xlarge` |
+
+The Ampere types (`a1.c5.*`, `a2.c9.*`) are aarch64 and stay UNMAPPED by
+design: `check_features_table` accepts only `GenuineIntel`/`AuthenticAMD`,
+and the flag vocabulary is x86-only. Mapping them means extending the
+schema, and the kernels are AVX2 anyway.
+
 ## Catalog changes
 
 When PhoenixNAP adds/changes types: re-record fixtures
