@@ -46,12 +46,25 @@ trap 'git -C "$REPO" worktree remove --force "$WT" >/dev/null 2>&1 || true' EXIT
 git -C "$WT" cherry-pick --no-commit "$ARM"
 export CARGO_TARGET_DIR="$REPO/target"   # reuse dep builds across worktrees
 
+# The worktree checks out mise.toml at a path mise has never seen, and a
+# mise-shimmed cargo refuses to start under an untrusted config. Only bites
+# when the gate runs standalone (the runbook's per-gate fallback, and any
+# socket-pinned session); under `mise run` the toolchain is already resolved.
+if command -v mise >/dev/null; then
+  mise trust --yes "$WT/mise.toml" >/dev/null 2>&1 || true
+fi
+
+# Prove the toolchain runs in the worktree BEFORE the pre-check, so that an
+# environment failure can never surface as "the kernels disagree bitwise".
+(cd "$WT" && cargo --version) >/dev/null 2>&1 \
+  || { echo "FATAL: cargo cannot run in the scratch worktree $WT — environment problem, NOT a kernel mismatch. Re-run under 'mise exec -- $0'." >&2; exit 2; }
+
 if [ "${QHW_SMOKE:-0}" = 1 ]; then FILTER='gemv/Q8_0/(inferno-avx2|reduce-unpack)/896x896$'; EXTRA=(--quick); else FILTER='gemv/Q8_0/(inferno-avx2|reduce-unpack)/'; EXTRA=(); fi
 
 echo "bitwise pre-check (arm vs library kernel, --test mode)…"
 (cd "$WT" && cargo bench -p inferno-kernels --bench gemv -- 'gemv/Q8_0' --test) \
   > "$OUT/ab-test-mode.out" 2>&1 \
-  || { echo "FATAL: bitwise pre-check failed — do not measure; see $OUT/ab-test-mode.out" >&2; exit 1; }
+  || { echo "FATAL: bitwise pre-check failed — the arm and the library kernel disagree, or the arm did not build. Do not measure; see $OUT/ab-test-mode.out" >&2; exit 1; }
 
 for rep in $(seq "$REPS"); do
   (cd "$WT" && cargo bench -p inferno-kernels --bench gemv -- "${EXTRA[@]}" "$FILTER") \
