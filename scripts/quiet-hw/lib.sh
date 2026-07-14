@@ -137,3 +137,21 @@ numa_wrap() {
   [ -n "${QHW_NUMA_NODE:-}" ] || return 0
   echo "numactl --cpunodebind=${QHW_NUMA_NODE} --membind=${QHW_NUMA_NODE}"
 }
+
+# numa_require — a pinned session must be able to pin. Call this at gate start,
+# NOT from inside numa_wrap: the gates expand `$(numa_wrap)` unquoted into the
+# command line, so a numa_wrap that failed would expand to nothing and the gate
+# would measure UNPINNED while still printing "numa: pinned to node N" — a
+# silently mislabeled data point, which is worse than a crash. Fail before a
+# single token is measured instead.
+numa_require() {
+  [ -n "${QHW_NUMA_NODE:-}" ] || return 0
+  command -v numactl >/dev/null 2>&1 || {
+    echo "FATAL: QHW_NUMA_NODE=$QHW_NUMA_NODE but numactl is not on PATH — run inside 'devenv shell'. A pinned session must never fall back to an unpinned run." >&2
+    exit 2
+  }
+  numactl --hardware 2>/dev/null | grep -q "^node ${QHW_NUMA_NODE} cpus:" || {
+    echo "FATAL: QHW_NUMA_NODE=$QHW_NUMA_NODE but this box has no NUMA node ${QHW_NUMA_NODE} (see 'numactl --hardware')" >&2
+    exit 2
+  }
+}

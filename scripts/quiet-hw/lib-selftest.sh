@@ -149,4 +149,34 @@ expect "numa_wrap unset" "$(numa_wrap)" ""
 expect "numa_wrap set"   "$(QHW_NUMA_NODE=0 numa_wrap)" "numactl --cpunodebind=0 --membind=0"
 expect "numa_wrap node1" "$(QHW_NUMA_NODE=1 numa_wrap)" "numactl --cpunodebind=1 --membind=1"
 
+# numa_require — the check that was missing. numa_wrap only ever built a
+# STRING; nothing asserted numactl existed, so the first socket-pinned session
+# died with exit 127 on a box that had already been paid for (M4b.10 session C,
+# 2026-07-14). Worse, because the gates expand $(numa_wrap) unquoted, a silent
+# failure there would have measured unpinned under a "numa: pinned" header.
+numadir=$(mktemp -d)
+cat > "$numadir/numactl" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = --hardware ] && { echo "available: 2 nodes (0-1)"; echo "node 0 cpus: 0 1"; echo "node 1 cpus: 2 3"; exit 0; }
+exec "$@"
+STUB
+chmod +x "$numadir/numactl"
+
+# No QHW_NUMA_NODE: numactl is irrelevant, must not fail even when absent.
+(PATH=/usr/bin:/bin numa_require) || fail "numa_require must be a no-op when unpinned"
+
+# Pinned, numactl present, node exists: proceed.
+(PATH="$numadir:$PATH" QHW_NUMA_NODE=0 numa_require)   || fail "numa_require must pass when numactl has the node"
+
+# Pinned, numactl MISSING: die. This is the Session C failure.
+if (PATH="$numadir/nonexistent" QHW_NUMA_NODE=0 numa_require 2>/dev/null); then
+  fail "numa_require must fail when numactl is absent — an unpinned run must never masquerade as pinned"
+fi
+
+# Pinned to a node the box does not have: die rather than mislabel.
+if (PATH="$numadir:$PATH" QHW_NUMA_NODE=7 numa_require 2>/dev/null); then
+  fail "numa_require must fail when the NUMA node does not exist"
+fi
+rm -rf "$numadir"
+
 echo "lib-selftest: OK"
