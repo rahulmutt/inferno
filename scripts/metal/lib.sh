@@ -73,6 +73,20 @@ pnap_api() {
           return 1
         fi
         sleep "${METAL_RETRY_SLEEP:-$((attempt * 5))}" ;;
+      409)
+        # "The resource is in an incompatible state": PhoenixNAP refuses to
+        # modify a server whose network is still provisioning — precisely the
+        # state a FAILED provision leaves behind, so the 409 lands on the
+        # teardown path when a stray server is most likely. It clears on its
+        # own once the network settles. DELETE is idempotent, so retrying is
+        # safe; this is the cost-leak backstop and giving up here orphans a
+        # billed server. Every other method keeps the fail-fast behaviour —
+        # a 409 on create/update is a real conflict, not a transient one.
+        if [ "$method" != DELETE ]; then
+          echo "metal: API $code on $method $path: $out" >&2; return 1
+        fi
+        echo "metal: API 409 on DELETE $path (network still provisioning?) — retrying" >&2
+        sleep "${METAL_RETRY_SLEEP:-30}" ;;
       *) echo "metal: API $code on $method $path: $out" >&2; return 1 ;;
     esac
   done
