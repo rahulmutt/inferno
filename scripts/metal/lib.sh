@@ -183,3 +183,78 @@ catalog_join() {
         (($stock[.productCode] // "") | if . == "" then "-" else . end) ]
     | @tsv' "$1"
 }
+
+# metal_provision <type> <os> <location> <ssh-pub-path> <hostname>
+#   Prints the new server id. Shared by run.sh and probe.sh so the one
+#   non-idempotent call in the whole tool has exactly one implementation.
+metal_provision() {
+  local type="$1" os="$2" location="$3" ssh_key="$4" hostname="$5" body
+  body=$(jq -n --arg h "$hostname" --arg t "$type" --arg os "$os" \
+    --arg loc "$location" --arg tag "$METAL_TAG" --arg key "$(cat "$ssh_key")" \
+    '{hostname: $h, description: $tag, os: $os, type: $t, location: $loc, sshKeys: [$key]}')
+  # POST /bmc/v1/servers is not idempotent: a blind retry after a 429/5xx that
+  # actually succeeded server-side would provision a second, orphaned, billed
+  # server (only the retry's id gets tracked/torn down).
+  METAL_NO_RETRY=1 pnap_api POST /bmc/v1/servers "$body" | jq -er '.id'
+}
+
+# metal_wait_ready <server-id> <ssh-probe-log> — prints the IP once the box is
+#   powered on and answering ssh. Non-zero on error state or timeout; the
+#   caller's EXIT trap is what deletes the server.
+metal_wait_ready() {
+  local id="$1" log="$2"
+  local deadline=$(( $(date +%s) + ${METAL_PROVISION_TIMEOUT:-1800} ))
+  local s status ip lastline
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    s=$(pnap_api GET "/bmc/v1/servers/$id")
+    status=$(jq -r '.status' <<<"$s")
+    ip=$(jq -r '.publicIpAddresses[0] // empty' <<<"$s")
+    if [ "$status" = "error" ]; then
+      echo "metal: server entered error state" >&2; return 1
+    fi
+    if [ "$status" = "powered-on" ] && [ -n "$ip" ]; then
+      # PhoenixNAP recycles public IPs across servers, so this IP may carry a
+      # stale known_hosts entry from an earlier box. accept-new only adds a
+      # *new* key — against a mismatched stale one it fails "Host key
+      # verification failed" and never recovers. Purge the old entry first,
+      # then accept-new records this host's real key (devpod's own plain `ssh`
+      # later depends on that entry existing and being correct).
+      ssh-keygen -R "$ip" >/dev/null 2>&1 || true
+      if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o BatchMode=yes \
+             "$(metal_default_ssh_user)@$ip" true 2>>"$log"; then
+        echo "$ip"; return 0
+      fi
+      lastline=$(tail -n1 "$log" 2>/dev/null)
+      echo "metal: waiting ($status, ssh: ${lastline:-no output yet})..." >&2
+    else
+      echo "metal: waiting ($status)..." >&2
+    fi
+    sleep "${METAL_POLL_SLEEP:-20}"
+  done
+  echo "metal: not ready after ${METAL_PROVISION_TIMEOUT:-1800}s — deleting via trap" >&2
+  return 1
+}
+
+# metal_probe_entry <type> <cpuinfo> <lscpu-p> — the cpu-features.json entry a
+#   box actually justifies. Pure: reads two captured files, no network, so the
+#   parsing is testable offline. `source` is deliberately left as a TODO — only
+#   a human can cite a vendor spec sheet, and AGENTS.md requires one.
+metal_probe_entry() {
+  local type="$1" cpuinfo="$2" lscpu_p="$3"
+  local model vendor cores present=()
+  model=$(awk -F': *' '/^model name/ { print $2; exit }' "$cpuinfo")
+  vendor=$(awk -F': *' '/^vendor_id/ { print $2; exit }' "$cpuinfo")
+  # Unique (core,socket) pairs — physical cores, not SMT siblings.
+  cores=$(grep -v '^#' "$lscpu_p" | cut -d, -f1,2 | sort -u | grep -c .)
+  local flags
+  flags=$(awk -F': *' '/^flags/ { print $2; exit }' "$cpuinfo")
+  local f
+  for f in $(jq -r '.flag_vocabulary[]' "$(features_table)"); do
+    case " $flags " in *" $f "*) present+=("$f") ;; esac
+  done
+  jq -n --arg t "$type" --arg m "$model" --arg v "$vendor" \
+        --argjson c "${cores:-0}" --args '
+    { ($t): { cpu_model: $m, vendor: $v, physical_cores: $c,
+              flags: $ARGS.positional,
+              source: "TODO: vendor spec sheet for \($m)" } }' "${present[@]}"
+}
