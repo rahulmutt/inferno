@@ -485,3 +485,68 @@ projected_decode_win = 3.98% (weights .270/.211/.407/.087 per M4b.6 amendment)
 WARNING: a shape's w_r straddles 0 — if it is a deciding shape, re-run with --reps 6 before recording.
 verdict (human, to M4b.6 Amendments): SHIP iff condition 1 MET and condition 2 PASS.
 ```
+
+### 2026-07-15 — fourth & fifth quiet-hw sessions: NO-SHIP is now definitive — the --reps 6 tie-breaker fails, and a second Intel microarch fails condition 2
+
+The prior three same-type sessions tallied MET / FAILED / MET, and the standing
+verdict was NO-SHIP on the "reopening bar not met" reasoning. Two more sessions
+from the M4b.10 sweep now settle it affirmatively, not just on the tie-break
+rule.
+
+- **6336Y, `--reps 6` (the extension the gate itself mandates for a straddle):
+  condition 1 = 0 of 3 → FAILED.** Doubling the reps collapses the MET/FAILED/
+  MET oscillation to a clean fail — the "win" was rep-count noise. condition 2
+  PASS, projected 2.12%.
+- **E-2388G (second Intel microarch), `--reps 3`: condition 2 = FAIL** (896x4864
+  median −4.15%, past the −3% floor), condition 1 = 1 of 3, **projected
+  −1.30% — an outright loss**, not a wash.
+
+`SHIP iff condition 1 MET and condition 2 PASS` is unreachable on both. The
+op-reduction lever is **dead cross-vendor**: a loss on the original Zen 2 box, a
+6-rep wash on the 6336Y, and a loss on the E-2388G. NO-SHIP is final.
+
+```
+# gate-intel-ab (M4b.6 reduce-unpack cross-vendor A/B) — 2026-07-14T14:21:49Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+From https://github.com/rahulmutt/inferno
+ * branch            refs/pull/11/head -> FETCH_HEAD
+Preparing worktree (detached HEAD 72677d7)
+bitwise pre-check (arm vs library kernel, --test mode)…
+
+| shape | w per rep (%) | median w (%) | (w = 1 − t_unpack/t_base; positive = arm wins) |
+|---|---|---|---|
+| 896x896 | 4.07 6.74 2.35 2.60 6.74 -0.03 | 3.335 | |
+| 4864x896 | 1.12 -2.48 1.17 1.18 1.48 3.25 | 1.175 | |
+| 896x4864 | 1.47 -1.32 -0.39 3.63 1.38 1.43 | 1.405 | |
+| 151936x896 | 2.68 1.49 4.01 5.58 3.82 4.08 | 3.915 | |
+| 4096x4096 | 0.90 -0.73 1.08 5.20 2.90 1.15 | 1.115 | |
+| 14336x4096 | 4.76 7.56 7.70 2.50 2.14 6.91 | 5.835 | |
+
+condition 1 (w_r>0 every rep on >=2 of 3 mid shapes): 0 of 3 -> FAILED
+condition 2 (no shape median w < -3%): PASS
+projected_decode_win = 2.12% (weights .270/.211/.407/.087 per M4b.6 amendment)
+WARNING: a shape's w_r straddles 0 — if it is a deciding shape, re-run with --reps 6 before recording.
+verdict (human, to M4b.6 Amendments): SHIP iff condition 1 MET and condition 2 PASS.
+
+# gate-intel-ab (M4b.6 reduce-unpack cross-vendor A/B) — 2026-07-14T18:40:43Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+From https://github.com/rahulmutt/inferno
+ * branch            refs/pull/11/head -> FETCH_HEAD
+Preparing worktree (detached HEAD 25bade4)
+bitwise pre-check (arm vs library kernel, --test mode)…
+
+| shape | w per rep (%) | median w (%) | (w = 1 − t_unpack/t_base; positive = arm wins) |
+|---|---|---|---|
+| 896x896 | 0.12 7.07 1.97 | 1.97 | |
+| 4864x896 | -2.91 -1.99 1.63 | -1.99 | |
+| 896x4864 | -1.35 -4.15 -4.67 | -4.15 | |
+| 151936x896 | 0.49 1.10 0.79 | 0.79 | |
+| 4096x4096 | 1.59 3.27 0.44 | 1.59 | |
+| 14336x4096 | 8.46 1.65 0.96 | 1.65 | |
+
+condition 1 (w_r>0 every rep on >=2 of 3 mid shapes): 1 of 3 -> FAILED
+condition 2 (no shape median w < -3%): FAIL
+projected_decode_win = -1.30% (weights .270/.211/.407/.087 per M4b.6 amendment)
+WARNING: a shape's w_r straddles 0 — if it is a deciding shape, re-run with --reps 6 before recording.
+verdict (human, to M4b.6 Amendments): SHIP iff condition 1 MET and condition 2 PASS.
+```
