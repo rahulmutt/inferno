@@ -157,7 +157,15 @@ expect "numa_wrap node1" "$(QHW_NUMA_NODE=1 numa_wrap)" "numactl --cpunodebind=1
 numadir=$(mktemp -d)
 cat > "$numadir/numactl" <<'STUB'
 #!/usr/bin/env bash
-[ "$1" = --hardware ] && { echo "available: 2 nodes (0-1)"; echo "node 0 cpus: 0 1"; echo "node 1 cpus: 2 3"; exit 0; }
+if [ "$1" = --hardware ]; then
+  echo "available: 2 nodes (0-1)"; echo "node 0 cpus: 0 1"; echo "node 1 cpus: 2 3"; exit 0
+fi
+# Mirror a container without CAP_SYS_NICE: --membind trips set_mempolicy EPERM.
+if [ -n "${STUB_MEMBIND_DENY:-}" ]; then
+  case " $* " in *" --membind="*) echo "set_mempolicy: Operation not permitted" >&2; exit 1 ;; esac
+fi
+# Strip numactl's own flags, then exec the trailing command (e.g. `true`).
+while [ $# -gt 0 ]; do case "$1" in --*) shift ;; *) break ;; esac; done
 exec "$@"
 STUB
 chmod +x "$numadir/numactl"
@@ -165,10 +173,10 @@ chmod +x "$numadir/numactl"
 # No QHW_NUMA_NODE: numactl is irrelevant, must not fail even when absent.
 (PATH=/usr/bin:/bin numa_require) || fail "numa_require must be a no-op when unpinned"
 
-# Pinned, numactl present, node exists: proceed.
-(PATH="$numadir:$PATH" QHW_NUMA_NODE=0 numa_require)   || fail "numa_require must pass when numactl has the node"
+# Pinned, numactl present, node exists, membind works: proceed.
+(PATH="$numadir:$PATH" QHW_NUMA_NODE=0 numa_require)   || fail "numa_require must pass when numactl has the node and membind works"
 
-# Pinned, numactl MISSING: die. This is the Session C failure.
+# Pinned, numactl MISSING: die. This is the first Session C failure (exit 127).
 if (PATH="$numadir/nonexistent" QHW_NUMA_NODE=0 numa_require 2>/dev/null); then
   fail "numa_require must fail when numactl is absent — an unpinned run must never masquerade as pinned"
 fi
@@ -176,6 +184,13 @@ fi
 # Pinned to a node the box does not have: die rather than mislabel.
 if (PATH="$numadir:$PATH" QHW_NUMA_NODE=7 numa_require 2>/dev/null); then
   fail "numa_require must fail when the NUMA node does not exist"
+fi
+
+# Pinned, numactl present, but membind DENIED (no CAP_SYS_NICE): die before the
+# sweep rather than mid-run under a "numa: pinned" header. Second Session C
+# failure (exit 1, set_mempolicy EPERM).
+if (PATH="$numadir:$PATH" STUB_MEMBIND_DENY=1 QHW_NUMA_NODE=0 numa_require 2>/dev/null); then
+  fail "numa_require must fail when membind is denied — a pinned session must not silently drop membind"
 fi
 rm -rf "$numadir"
 

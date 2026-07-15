@@ -3,6 +3,7 @@
   "image": "ghcr.io/rahulmutt/dev:sha-a44ce0e",
   "workspaceFolder": "/workspace",
   "remoteUser": "dev",
+  "runArgs": ["--cap-add=SYS_NICE"],
   "containerEnv": {
     "INSTALL_DEVENV": "true"
   },

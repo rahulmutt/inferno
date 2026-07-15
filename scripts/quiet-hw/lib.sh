@@ -154,4 +154,12 @@ numa_require() {
     echo "FATAL: QHW_NUMA_NODE=$QHW_NUMA_NODE but this box has no NUMA node ${QHW_NUMA_NODE} (see 'numactl --hardware')" >&2
     exit 2
   }
+  # membind is a capability, not just a binary: set_mempolicy is gated behind
+  # CAP_SYS_NICE under Docker's default seccomp, so in a container without it
+  # --membind dies mid-sweep with "set_mempolicy: Operation not permitted"
+  # (M4b.10 session C, 2026-07-15) — after the box is paid for. Prove it here.
+  numactl --membind="${QHW_NUMA_NODE}" true 2>/dev/null || {
+    echo "FATAL: QHW_NUMA_NODE=$QHW_NUMA_NODE but 'numactl --membind' is denied — set_mempolicy needs CAP_SYS_NICE (add '\"runArgs\": [\"--cap-add=SYS_NICE\"]' to .devcontainer/devcontainer.json). A pinned session must not silently drop membind." >&2
+    exit 2
+  }
 }
