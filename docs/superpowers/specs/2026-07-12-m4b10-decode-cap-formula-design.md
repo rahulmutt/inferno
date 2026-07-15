@@ -299,4 +299,278 @@ The `INFERNO_DECODE_THREADS` override keeps precedence in all three shapes.
 
 ## Amendments
 
-*(none yet — sweeps pending)*
+### 2026-07-15 — the three quiet-hw sessions (Task 5)
+
+Three sessions on quiet PhoenixNAP bare metal, each pairing the decode-cap
+sweep with a bandwidth curve. All preflight-FIT, unquota'd, `psi_some_avg10 =
+0.00`, `throttled_delta = 0`. Session C is socket-pinned to node 0
+(`cpubind+membind`, `phys_cores=32`) on a dual-socket box; its delivered part
+is a dual Platinum 8352Y (`d2.c5.medium` — the plan named `d2.c5.large`, same
+silicon, which was out of stock; substitution recorded per the rule's
+hardware-agnostic pre-registration). Pasted verbatim; never edited (M4b
+discipline).
+
+Getting the pinned session to run surfaced three latent bugs in the quiet-hw
+path, each caught only on paid hardware and fixed before the recordable run:
+gate-intel-ab's scratch worktree was untrusted by mise (#17); `numactl` was
+absent from devenv (#21); and the container lacked `CAP_SYS_NICE`, so
+`--membind` tripped `set_mempolicy: Operation not permitted` (#22). The pinned
+path had never been exercised end to end before this milestone. Sessions A and
+B are single-socket and used no pinning.
+
+Session A is the authoritative 6336Y run for the rule (the only one carrying a
+paired bandwidth curve); its three prior knee-only sessions are corroboration.
+
+**Session A — Intel Xeon Gold 6336Y, 16 physical cores (d2.c1.medium), 2026-07-14.**
+
+```
+# gate-decode-cap (M4b.5 default-vs-best sweep) — 2026-07-14T12:38:25Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+sweep: caps={1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16} + default + t1 | reps=3 (interleaved rounds) | max-tokens=128
+
+| cap | decode tok/s (median of 3) | per-rep |
+|---|---|---|
+| 1 | 17.04 | 24.08 17.04 16.88 |
+| 2 | 30.99 | 36.69 29.97 30.99 |
+| 3 | 42.03 | 42.17 42.03 41.71 |
+| 4 | 51.37 | 50.74 51.43 51.37 |
+| 5 | 55.22 | 55.72 55.22 54.33 |
+| 6 | 57.91 | 57.91 57.65 59.33 |
+| 7 | 59.52 | 59.52 59.03 61.16 |
+| 8 | 59.98 | 59.98 59.36 62.27 |
+| 9 | 60.41 | 60.41 60.13 62.44 |
+| 10 | 60.87 | 60.87 60.17 62.93 |
+| 11 | 60.96 | 60.93 60.96 63.07 |
+| 12 | 63.23 | 63.68 61.26 63.23 |
+| 13 | 63.08 | 63.08 61.12 63.51 |
+| 14 | 63.41 | 63.96 60.62 63.41 |
+| 15 | 63.19 | 63.33 59.05 63.19 |
+| 16 | 60.79 | 63.38 58.94 60.79 |
+| default | 56.15 | 56.15 56.17 55.98 |
+| t1 | 16.81 | 16.81 16.85 16.70 |
+
+knee (best fixed cap): 14 (63.41 tok/s median)
+default clamp(active/3,2,active): 56.15 tok/s median -> -11.72% vs best fixed (median of per-rep ratios)
+gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats
+best-fixed? high-thread regression gone (compare cap=16 row vs knee)?
+t=1 decode unchanged (t1 row vs prior recorded t=1)?
+
+# gate-bw-curve (M4b.10 bandwidth saturation) — 2026-07-14T12:44:07Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+
+shape: 32768 rows x 4096 k, Q8_0, Avx2 | weight image 144.0 MiB | reps=5 (median)
+
+| lanes | GB/s | speedup vs 1 lane |
+|---|---|---|
+| 1 | 14.32 | 1.00x |
+| 2 | 27.16 | 1.90x |
+| 3 | 32.36 | 2.26x |
+| 4 | 37.41 | 2.61x |
+| 5 | 46.57 | 3.25x |
+| 6 | 47.76 | 3.33x |
+| 7 | 51.45 | 3.59x |
+| 8 | 54.39 | 3.80x |
+| 9 | 54.28 | 3.79x |
+| 10 | 53.15 | 3.71x |
+| 11 | 53.52 | 3.74x |
+| 12 | 52.09 | 3.64x |
+| 13 | 53.25 | 3.72x |
+| 14 | 51.98 | 3.63x |
+| 15 | 52.62 | 3.67x |
+| 16 | 50.71 | 3.54x |
+
+P (smallest lanes at >= 95% of peak): 8
+gate input (human verdict to the M4b.10 spec): does P match the
+decode knee from gate-decode-cap on this same box?
+```
+
+**Session B — Intel Xeon E-2388G, 8 physical cores (s2.c2.medium), 2026-07-14.**
+
+```
+# gate-decode-cap (M4b.5 default-vs-best sweep) — 2026-07-14T18:12:41Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+sweep: caps={1 2 3 4 5 6 7 8} + default + t1 | reps=3 (interleaved rounds) | max-tokens=128
+
+| cap | decode tok/s (median of 3) | per-rep |
+|---|---|---|
+| 1 | 40 | 40.01 40.00 39.95 |
+| 2 | 65.22 | 65.31 65.01 65.22 |
+| 3 | 69.18 | 66.65 69.27 69.18 |
+| 4 | 69.28 | 69.28 69.07 69.31 |
+| 5 | 68.75 | 68.75 68.98 68.58 |
+| 6 | 69.92 | 69.92 69.92 70.03 |
+| 7 | 69.46 | 69.84 69.46 69.13 |
+| 8 | 69.26 | 69.26 69.33 68.18 |
+| default | 64.95 | 64.95 65.01 64.72 |
+| t1 | 39.66 | 39.74 39.66 39.53 |
+
+knee (best fixed cap): 6 (69.92 tok/s median)
+default clamp(active/3,2,active): 64.95 tok/s median -> -7.11% vs best fixed (median of per-rep ratios)
+gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats
+best-fixed? high-thread regression gone (compare cap=8 row vs knee)?
+t=1 decode unchanged (t1 row vs prior recorded t=1)?
+
+# gate-bw-curve (M4b.10 bandwidth saturation) — 2026-07-14T18:14:55Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+
+shape: 32768 rows x 4096 k, Q8_0, Avx2 | weight image 144.0 MiB | reps=5 (median)
+
+| lanes | GB/s | speedup vs 1 lane |
+|---|---|---|
+| 1 | 23.64 | 1.00x |
+| 2 | 40.62 | 1.72x |
+| 3 | 44.86 | 1.90x |
+| 4 | 45.05 | 1.91x |
+| 5 | 44.93 | 1.90x |
+| 6 | 45.95 | 1.94x |
+| 7 | 45.52 | 1.93x |
+| 8 | 45.29 | 1.92x |
+
+P (smallest lanes at >= 95% of peak): 3
+gate input (human verdict to the M4b.10 spec): does P match the
+decode knee from gate-decode-cap on this same box?
+```
+
+**Session C — Intel Xeon Platinum 8352Y, 32 physical cores, socket-pinned node 0 (d2.c5.medium), 2026-07-15.**
+
+```
+# gate-decode-cap (M4b.5 default-vs-best sweep) — 2026-07-15T09:42:16Z
+machine: Intel(R) Xeon(R) Platinum 8352Y CPU @ 2.20GHz (GenuineIntel) | 128 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-15
+sweep: caps={1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 20 24 28 32} + default + t1 | reps=3 (interleaved rounds) | max-tokens=128
+numa: pinned to node 0 (cpubind+membind); phys_cores=32
+
+| cap | decode tok/s (median of 3) | per-rep |
+|---|---|---|
+| 1 | 25.08 | 25.08 25.00 25.69 |
+| 2 | 43.79 | 43.65 43.82 43.79 |
+| 3 | 55.91 | 55.65 55.91 56.18 |
+| 4 | 61.34 | 61.45 61.34 61.28 |
+| 5 | 63.75 | 62.82 63.75 63.93 |
+| 6 | 64.08 | 64.04 64.30 64.08 |
+| 7 | 64.33 | 64.33 64.39 64.27 |
+| 8 | 64.73 | 64.73 64.73 64.28 |
+| 9 | 64.88 | 64.90 64.87 64.88 |
+| 10 | 64.95 | 64.32 64.95 65.17 |
+| 11 | 65.15 | 65.36 65.15 64.91 |
+| 12 | 65.15 | 65.15 64.68 65.30 |
+| 13 | 64.92 | 65.52 64.78 64.92 |
+| 14 | 65.12 | 64.75 65.12 65.19 |
+| 15 | 64.64 | 64.34 64.64 65.12 |
+| 16 | 64.83 | 64.83 64.40 64.91 |
+| 20 | 64.13 | 64.13 64.01 64.15 |
+| 24 | 63.36 | 63.60 63.18 63.36 |
+| 28 | 62.75 | 62.75 62.80 61.86 |
+| 32 | 62.88 | 62.87 63.05 62.88 |
+| default | 64.05 | 64.30 64.05 64.02 |
+| t1 | 25.21 | 24.85 25.21 25.41 |
+
+knee (best fixed cap): 11 (65.15 tok/s median)
+default clamp(active/3,2,active): 64.05 tok/s median -> -1.62% vs best fixed (median of per-rep ratios)
+gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats
+best-fixed? high-thread regression gone (compare cap=32 row vs knee)?
+t=1 decode unchanged (t1 row vs prior recorded t=1)?
+
+# gate-bw-curve (M4b.10 bandwidth saturation) — 2026-07-15T09:48:52Z
+machine: Intel(R) Xeon(R) Platinum 8352Y CPU @ 2.20GHz (GenuineIntel) | 128 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-15
+numa: pinned to node 0 (cpubind+membind); phys_cores=32
+
+shape: 32768 rows x 4096 k, Q8_0, Avx2 | weight image 144.0 MiB | reps=5 (median)
+
+| lanes | GB/s | speedup vs 1 lane |
+|---|---|---|
+| 1 | 14.39 | 1.00x |
+| 2 | 28.06 | 1.95x |
+| 3 | 40.19 | 2.79x |
+| 4 | 46.16 | 3.21x |
+| 5 | 50.43 | 3.50x |
+| 6 | 52.43 | 3.64x |
+| 7 | 53.75 | 3.74x |
+| 8 | 54.19 | 3.77x |
+| 9 | 55.38 | 3.85x |
+| 10 | 55.66 | 3.87x |
+| 11 | 56.56 | 3.93x |
+| 12 | 56.65 | 3.94x |
+| 13 | 57.34 | 3.99x |
+| 14 | 57.74 | 4.01x |
+| 15 | 58.39 | 4.06x |
+| 16 | 58.98 | 4.10x |
+| 17 | 59.35 | 4.12x |
+| 18 | 59.32 | 4.12x |
+| 19 | 59.92 | 4.16x |
+| 20 | 59.88 | 4.16x |
+| 21 | 60.43 | 4.20x |
+| 22 | 60.83 | 4.23x |
+| 23 | 60.83 | 4.23x |
+| 24 | 61.08 | 4.24x |
+| 25 | 61.51 | 4.28x |
+| 26 | 61.80 | 4.30x |
+| 27 | 61.93 | 4.30x |
+| 28 | 62.39 | 4.34x |
+| 29 | 62.66 | 4.35x |
+| 30 | 62.76 | 4.36x |
+| 31 | 63.44 | 4.41x |
+| 32 | 63.40 | 4.41x |
+
+P (smallest lanes at >= 95% of peak): 21
+gate input (human verdict to the M4b.10 spec): does P match the
+decode knee from gate-decode-cap on this same box?
+```
+
+The knee is a **plateau, not a point**, on every machine: caps 12–15 span 0.4%
+on A, caps 3–8 span 1.6% on B, caps 5–16 span 1.7% on C. "Knee = argmax of
+medians" picks a winner out of noise across a flat region — which is itself the
+finding, and the reason uncapped costs so little.
+
+### 2026-07-15 — decision-rule verdict (Task 6): REMOVE THE CAP
+
+Regret computed **within-session from per-rep ratios, round-matched** against
+each machine's `best_fixed` (standing M4b discipline; medians would fold in
+turbo drift). `regret(c) = median over the three interleaved rounds of
+(T_best,r − T_c,r) / T_best,r`.
+
+**regret(U) — uncapped-equivalent vs the knee:**
+
+| machine | best_fixed | U | per-round regret(U) | median |
+|---|---|---|---|---|
+| A — 6336Y, 16c | cap 14 | cap 16 | 0.91% / 2.77% / 4.13% | **2.77%** |
+| B — E-2388G, 8c | cap 6 | cap 8 | 0.94% / 0.84% / 2.64% | **0.94%** |
+| C — 8352Y, 32c | cap 11 | cap 32 | 3.81% / 3.22% / 3.13% | **3.22%** |
+
+**Rule 1 fires: `regret(U) ≤ 5%` on all three machines → remove the cap.**
+No machine is near the rule-4 cliff (15%); the worst is C at 3.22%. The rule
+short-circuits at step 1, so the static `K_k` and probe `P` regrets are not
+consulted for the decision. **Selected candidate: U — delete the cap and its
+heuristic.**
+
+Corroboration gate (spec §"One session per machine is authoritative"): Session
+A's regret(U) = 2.77% lands inside the three prior 6336Y sessions' recorded
+spread of 0.64–4.61%, and its default regret of −11.72% is inside the recorded
+−9.8…−11.8% band. No measurement anomaly; the session is admissible.
+
+**The bandwidth model is REFUTED (Verification protocol item 6).** P was
+required to predict the decode knee. It does not, and it mispredicts in
+*inconsistent directions*:
+
+| machine | P (bw ≥95% peak) | decode knee | verdict |
+|---|---|---|---|
+| A — 6336Y | 8 | 14 | P **below** knee — bandwidth saturates before decode |
+| B — E-2388G | 3 | 6 | P **below** knee (half) |
+| C — 8352Y | 21 | 11 | P **above** knee (nearly double) |
+
+A model that errs low on two machines and high on the third does not describe
+the mechanism it claimed to. Approach P is retired permanently; a real finding,
+not a null result. (P had already failed rule 2's `regret(P) ≤ 5% on all three`
+precondition on Session A independently.)
+
+**Interpretation.** Across three microarchitectures spanning 8→32 cores, the
+best fixed cap beats uncapped by at most 3.2%, and the decode curve is a flat
+plateau above ~cap 5 on every box. The cliff the M4b.5 cap was built to avoid
+did not reproduce on any quiet bare-metal machine — consistent with the
+motivating hypothesis that it only ever existed inside the quota'd devpod that
+first measured it. The shipped `clamp(active/3)` default missed a fourth, fifth
+and sixth time (−11.72% / −7.11% / −1.62%).
+
+**Task 7 (not yet done):** implement candidate **U** — remove `decode_cap` and
+its heuristic from `crates/inferno-core/src/lib.rs`, keeping
+`INFERNO_DECODE_THREADS` as the only override, under the inherited invariants
+(no `HOST_ABI_VERSION` bump, no tolerance edits, cap-invariance guard intact).
