@@ -22,7 +22,11 @@ in
     pkgs.zlib
     # Pinned benchmark opponent for `mise run bench` (M4) — pure-CPU build.
     llama-cpp-cpu
-  ];
+  ]
+  # Socket pinning for the quiet-hw gates (numa_wrap). A dual-socket box must
+  # take its point on one socket or NUMA effects contaminate it, and without
+  # this the pinned gates die with exit 127 — after the box is paid for.
+  ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.numactl ];
 
   env.LLVM_SYS_181_PREFIX = "${pkgs.llvmPackages_18.llvm.dev}";
   # ggml CPU backend for `mise run bench-kernels` (--features ggml-compare).

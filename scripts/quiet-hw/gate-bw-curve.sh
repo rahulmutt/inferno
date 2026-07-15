@@ -23,6 +23,7 @@ fi
 
 smoke_header "gate-bw-curve (M4b.10 bandwidth saturation)"
 machine_block
+numa_require   # a pinned session that cannot pin must die, not measure unpinned
 [ -n "${QHW_NUMA_NODE:-}" ] && echo "numa: pinned to node ${QHW_NUMA_NODE} (cpubind+membind); phys_cores=$PHYS"
 echo
 

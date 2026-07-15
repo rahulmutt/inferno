@@ -24,6 +24,7 @@ fi
 smoke_header "gate-decode-cap (M4b.5 default-vs-best sweep)"
 machine_block
 echo "sweep: caps={$CAPS} + default + t1 | reps=$REPS (interleaved rounds) | max-tokens=$MAXTOK"
+numa_require   # a pinned session that cannot pin must die, not measure unpinned
 [ -n "${QHW_NUMA_NODE:-}" ] && echo "numa: pinned to node ${QHW_NUMA_NODE} (cpubind+membind); phys_cores=$PHYS"
 echo
 
