@@ -73,13 +73,15 @@ for the v1 design.
   compiled-vs-interpreter correctness gate) and
   `cargo test -p inferno-core --test artifact` (the artifact-level
   differential); never loosen `logits_abs_tol` to make either green.
-- **Decode threading is phase-capped (M4b.5):** the compiled decode path
-  (`inferno_par_gemv`) shards over `min(active_threads, decode_cap)`, not
-  full cores — decode is bandwidth-bound and regresses past its knee.
-  Prefill (`inferno_par_gemm`) is uncapped. Default `clamp(active/3, 2,
-  active)`, override with `INFERNO_DECODE_THREADS=N`. The cap is
-  bit-neutral (`shard_table` keeps each row on one lane); never treat a
-  cap change as a numeric change. Prefill attention (M4b.8) dispatches per
+- **Decode threading is uncapped (M4b.10, was phase-capped in M4b.5):** the
+  compiled decode path (`inferno_par_gemv`) shards over the full
+  `active_threads`, same as prefill (`inferno_par_gemm`). Override with
+  `INFERNO_DECODE_THREADS=N`. M4b.5 had capped decode at `clamp(active/3, 2,
+  active)` on a bandwidth-knee hypothesis; three quiet-hw sessions (6336Y,
+  E-2388G, socket-pinned 8352Y) found no cliff — uncapped within 0.9–3.2% of
+  the best fixed cap — so M4b.10 removed the cap (see its design's Amendments).
+  Row-sharding stays bit-neutral regardless of lane count (`shard_table` keeps
+  each row on one lane); never treat a thread-count change as a numeric change. Prefill attention (M4b.8) dispatches per
   tile through `inferno_par_attention`, sharding the tile's tokens with
   align-1 shards at full `active` — the decode cap never applies to it,
   and `m <= 1` calls bypass the pool entirely. Since M4b.9 the serial tail
