@@ -35,21 +35,22 @@ pub struct Engine {
     opts: inferno_codegen::CompileOptions,
 }
 
-/// Resolve the decode-phase thread cap. An explicit `INFERNO_DECODE_THREADS`
+/// Resolve the decode-phase thread count. An explicit `INFERNO_DECODE_THREADS`
 /// override wins when it parses to a positive integer (the pool re-clamps it
-/// to `[1, capacity]`); otherwise the bandwidth-knee heuristic
-/// `clamp(active/3, 2, active)` — written `.max(2).min(active)` so `active==1`
-/// yields `1` instead of panicking. `active` is the engine's resolved thread
-/// count (physical cores by default). Final default is deferred to the
-/// M4b.5 quiet-hardware sweep; this is the reversible starting hypothesis.
-fn decode_cap(active: usize, override_env: Option<&str>) -> usize {
-    if let Some(v) = override_env
+/// to `[1, capacity]`); otherwise decode uses the full active thread count.
+/// `active` is the engine's resolved thread count (physical cores by default).
+///
+/// M4b.10 removed the `clamp(active/3, 2, active)` cap M4b.5 had shipped as a
+/// reversible hypothesis. Three quiet bare-metal sessions (6336Y/16c,
+/// E-2388G/8c, socket-pinned 8352Y/32c) put uncapped within 0.9–3.2% of the
+/// best fixed cap with no high-thread cliff on any box — the cliff the cap was
+/// built against existed only inside the quota'd devpod that first measured it.
+/// See the M4b.10 design's Amendments.
+fn resolve_decode_threads(active: usize, override_env: Option<&str>) -> usize {
+    override_env
         .and_then(|s| s.trim().parse::<usize>().ok())
         .filter(|&v| v >= 1)
-    {
-        return v;
-    }
-    (active / 3).max(2).min(active)
+        .unwrap_or(active)
 }
 
 impl Engine {
@@ -96,20 +97,24 @@ impl Engine {
     /// [`CompiledBackend`] over it. Also sizes the process-global
     /// `inferno-pool` thread pool to `self.threads` (initializing it on
     /// first use, loud error on a mismatched re-init), caps active
-    /// parallelism to that count, and caps decode-phase (`par_gemv`)
-    /// parallelism to the `INFERNO_DECODE_THREADS` override or the
-    /// bandwidth-knee heuristic, before the backend runs any GEMVs.
+    /// parallelism to that count, and sets decode-phase (`par_gemv`)
+    /// parallelism to the `INFERNO_DECODE_THREADS` override or the full
+    /// active count (M4b.10 removed the cap), before the backend runs any
+    /// GEMVs.
     pub fn compiled_backend(&self) -> Result<CompiledBackend> {
         // Size the process-global pool once (loud error on a mismatched
         // re-init — spec), then cap active parallelism to this engine's
         // count so bench's t=1 diagnostics can vary it per run.
         inferno_pool::init_global(self.threads)?;
         inferno_pool::set_global_active_threads(self.threads);
-        // M4b.5: decode is bandwidth-bound — cap its row-sharding below full
-        // cores so it stops at its knee; prefill keeps every core. Env
-        // `INFERNO_DECODE_THREADS` overrides the heuristic.
+        // M4b.10: decode uses every active thread — the M4b.5 bandwidth-knee
+        // cap was removed after three quiet-hw sessions showed no cliff. Env
+        // `INFERNO_DECODE_THREADS` still overrides.
         let env = std::env::var("INFERNO_DECODE_THREADS").ok();
-        inferno_pool::set_global_decode_threads(decode_cap(self.threads, env.as_deref()));
+        inferno_pool::set_global_decode_threads(resolve_decode_threads(
+            self.threads,
+            env.as_deref(),
+        ));
         let artifact =
             Artifact::load_or_compile(&self.model, &self.target, self.max_seq_len, &self.opts)?;
         Ok(CompiledBackend::new(artifact))
@@ -176,28 +181,28 @@ impl Engine {
 }
 
 #[cfg(test)]
-mod decode_cap_tests {
-    use super::decode_cap;
+mod decode_threads_tests {
+    use super::resolve_decode_threads;
 
     #[test]
-    fn heuristic_is_third_clamped_to_2_and_active() {
-        assert_eq!(decode_cap(12, None), 4); // 12/3 = 4
-        assert_eq!(decode_cap(32, None), 10); // 32/3 = 10
-        assert_eq!(decode_cap(2, None), 2); // 2/3=0 -> max(2) -> min(2) = 2
-        assert_eq!(decode_cap(1, None), 1); // 1/3=0 -> max(2) -> min(1) = 1
+    fn defaults_to_full_active_when_no_override() {
+        // M4b.10: the cap is gone — decode uses every active thread.
+        assert_eq!(resolve_decode_threads(12, None), 12);
+        assert_eq!(resolve_decode_threads(32, None), 32);
+        assert_eq!(resolve_decode_threads(1, None), 1); // invariant: active==1 -> 1
     }
 
     #[test]
     fn env_override_wins_when_a_positive_integer() {
-        assert_eq!(decode_cap(12, Some("1")), 1);
-        assert_eq!(decode_cap(12, Some("8")), 8);
-        assert_eq!(decode_cap(12, Some(" 6 ")), 6); // trimmed
+        assert_eq!(resolve_decode_threads(12, Some("1")), 1);
+        assert_eq!(resolve_decode_threads(12, Some("8")), 8);
+        assert_eq!(resolve_decode_threads(12, Some(" 6 ")), 6); // trimmed
     }
 
     #[test]
-    fn env_override_falls_back_to_heuristic_when_invalid() {
-        assert_eq!(decode_cap(12, Some("garbage")), 4);
-        assert_eq!(decode_cap(12, Some("0")), 4); // 0 rejected
-        assert_eq!(decode_cap(12, Some("")), 4);
+    fn env_override_falls_back_to_full_active_when_invalid() {
+        assert_eq!(resolve_decode_threads(12, Some("garbage")), 12);
+        assert_eq!(resolve_decode_threads(12, Some("0")), 12); // 0 rejected
+        assert_eq!(resolve_decode_threads(12, Some("")), 12);
     }
 }
