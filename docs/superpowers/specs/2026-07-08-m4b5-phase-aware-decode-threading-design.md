@@ -458,3 +458,21 @@ gate inputs (human verdict to M4b.5 Amendments): default meets-or-beats
 best-fixed? high-thread regression gone (compare cap=16 row vs knee)?
 t=1 decode unchanged (t1 row vs prior recorded t=1)?
 ```
+
+### 2026-07-15 — deferred exit-criterion leg 2 CLOSED by M4b.10: the cap is removed
+
+The decode-cap performance leg this spec carried as DEFERRED since 2026-07-08
+is now resolved. M4b.10 re-ran the `gate-decode-cap` sweep across three quiet
+machines (6336Y/16c, E-2388G/8c, socket-pinned 8352Y/32c) and applied a
+pre-registered decision rule. The shipped `clamp(active/3, 2, active)` default
+missed a **fourth, fifth and sixth time** (−11.72% / −7.11% / −1.62% vs the
+best fixed cap), and uncapped-equivalent landed within 0.9–3.2% of the knee on
+every box with no high-thread cliff.
+
+**Verdict: the cap was removed entirely** (candidate U). Decode now uses the
+full active thread count, same as prefill; `INFERNO_DECODE_THREADS` remains the
+only override. The full sweeps, the within-session regret computation, and the
+refutation of the bandwidth-probe model are recorded in the
+[M4b.10 design](2026-07-12-m4b10-decode-cap-formula-design.md) §Amendments and
+shipped in that milestone's Task 7 — not duplicated here. This closes M4b.5's
+deferred leg 2.

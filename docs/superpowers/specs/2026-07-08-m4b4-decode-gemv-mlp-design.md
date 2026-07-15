@@ -668,3 +668,65 @@ keep/revert (v=0 faster => revert prefetch); best of {2,4,8} decides the
 distance; a >=5%-class win on any DRAM-bound shape is the signal that
 would authorize M4b.4 Task 3 (interleave).
 ```
+
+### 2026-07-15 — third & fourth quiet-hw sessions (M4b.10 by-product): format-split reproduced cross-vendor; Task 3 still NOT authorized
+
+Two more machines (pf-dist is a by-product of the M4b.10 `verify.sh` runs). The
+2026-07-11 split verdict — **keep prefetch@4 for Q8_0, revert for Q4_K** —
+reproduces on both, now across three microarchitectures.
+
+- **Keep/revert (v=0 column):** on **both** boxes Q8_0 has v=0 *slower* than
+  v=4 on 5–6/6 shapes (up to +8.27% on B's 14336x4096) → **KEEP Q8_0**; Q4_K
+  has v=0 *faster* on 3–4/4 shapes (to −6.62% on B) → **REVERT Q4_K**. The
+  format split is stable cross-vendor.
+- **Distance / Task 3 (interleave) — still NOT authorized.** `v=8` is a global
+  loss on the compute-bound shapes (+20–28%), and `v=2 ≈ v=4`. The one
+  ≥5%-class (2, 4, 8) win — A's `v=8 = −5.66%` on Q4_K/14336x4096 — is a single
+  shape in a single session and is *not* reproduced on B (same shape, `v=8 =
+  +1.87%`), so it does not clear the bar. No robust distance beats v=4.
+
+```
+# gate-pf-dist (M4b.4 keep/revert + {2,4,8} sweep) — 2026-07-14T12:44:12Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+values={0 2 4 8} reps=3 (interleaved; per-rep ratios vs v=4) filter=gemv/(Q8_0|Q4_K)/inferno-avx2/
+
+| bench id | v=0 vs 4 (median %) | v=2 vs 4 | v=8 vs 4 | (negative = faster than shipped v=4) |
+|---|---|---|---|---|
+| gemv/Q8_0/inferno-avx2/896x896 | 0.72% | 1.28% | 1.72% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4864x896 | 3.66% | 5.46% | 20.67% | (n/a) |
+| gemv/Q8_0/inferno-avx2/896x4864 | 2.02% | 4.32% | 24.78% | (n/a) |
+| gemv/Q8_0/inferno-avx2/151936x896 | -0.4% | 0.58% | 10.53% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4096x4096 | 0.26% | -0.32% | 20.22% | (n/a) |
+| gemv/Q8_0/inferno-avx2/14336x4096 | 5.32% | 5.73% | 25.71% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x4096 | -3.45% | 10.65% | 0.01% | (n/a) |
+| gemv/Q4_K/inferno-avx2/14336x4096 | -5.42% | 11.22% | -5.66% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x14336 | 4.6% | 12.8% | -1.11% | (n/a) |
+| gemv/Q4_K/inferno-avx2/128256x4096 | -2.25% | 20.75% | -1.48% | (n/a) |
+
+gate inputs (human verdict to M4b.4 Amendments): v=0 column decides
+keep/revert (v=0 faster => revert prefetch); best of {2,4,8} decides the
+distance; a >=5%-class win on any DRAM-bound shape is the signal that
+would authorize M4b.4 Task 3 (interleave).
+
+# gate-pf-dist (M4b.4 keep/revert + {2,4,8} sweep) — 2026-07-14T18:14:59Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+values={0 2 4 8} reps=3 (interleaved; per-rep ratios vs v=4) filter=gemv/(Q8_0|Q4_K)/inferno-avx2/
+
+| bench id | v=0 vs 4 (median %) | v=2 vs 4 | v=8 vs 4 | (negative = faster than shipped v=4) |
+|---|---|---|---|---|
+| gemv/Q8_0/inferno-avx2/896x896 | 5.51% | 1.78% | 6.87% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4864x896 | 1.18% | 1.09% | 5.04% | (n/a) |
+| gemv/Q8_0/inferno-avx2/896x4864 | 1.77% | 7.82% | 10.96% | (n/a) |
+| gemv/Q8_0/inferno-avx2/151936x896 | 2.88% | 2.4% | 28.24% | (n/a) |
+| gemv/Q8_0/inferno-avx2/4096x4096 | 3.84% | 4.11% | 15.18% | (n/a) |
+| gemv/Q8_0/inferno-avx2/14336x4096 | 8.27% | 9.32% | 22.93% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x4096 | -1.47% | 3.5% | 0.75% | (n/a) |
+| gemv/Q4_K/inferno-avx2/14336x4096 | -4.42% | 17.7% | 1.87% | (n/a) |
+| gemv/Q4_K/inferno-avx2/4096x14336 | -5.16% | 17.62% | 1.41% | (n/a) |
+| gemv/Q4_K/inferno-avx2/128256x4096 | -6.62% | 17.22% | 3.29% | (n/a) |
+
+gate inputs (human verdict to M4b.4 Amendments): v=0 column decides
+keep/revert (v=0 faster => revert prefetch); best of {2,4,8} decides the
+distance; a >=5%-class win on any DRAM-bound shape is the signal that
+would authorize M4b.4 Task 3 (interleave).
+```

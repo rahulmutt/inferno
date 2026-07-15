@@ -523,3 +523,49 @@ machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical C
 
 gate: prefill scale @ t=12 = 10.63x (target ≥6x) -> MET
 ```
+
+### 2026-07-15 — fifth & sixth quiet-hw sessions (M4b.10 by-product): gate stays MET, confirmed on a second machine; N/A on 8 cores
+
+Two more machines from the M4b.10 sweep (their prefill gate is a by-product of
+the full `verify.sh` run). The gate closed on 2026-07-12 (10.63x, fourth
+session); these corroborate it and add a second microarchitecture.
+
+- **6336Y, 16 physical cores — MET at 10.57x @ t=12.** Same silicon as all four
+  prior sessions; reproduces the closed gate (10.63x) within cross-session
+  spread. No fork.
+- **E-2388G, 8 physical cores — 5.38x @ t=12, gate N/A (not a fork trigger).**
+  The gate's ≥6x @ t=12 target presumes ≥12 physical cores; on an 8-core box
+  t=12 oversubscribes. Scaling is healthy to the core count (2.04x/3.98x/**7.36x**
+  at t=2/4/8) and only falls at t=12 (5.38x) as SMT contention sets in — the
+  M4b.1 attribution fork (serial fraction vs bandwidth) addresses a genuine
+  under-scaling on adequate cores, which this is not. Recorded as gate-not-
+  applicable, not NOT-MET.
+
+```
+# gate-prefill-scaling (M4b.1 ≥6x @ t=12) — 2026-07-14T12:21:35Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+
+| t | pp tok/s | pp scale | tg tok/s | tg scale | llama pp (corrob.) | llama tg (corrob.) |
+|---|---|---|---|---|---|---|
+| 1 | 61.47186133130401 | 1.00x | 22.088427145805518 | 1.00x | 118.025897 | 16.595123 |
+| 2 | 124.41651602023822 | 2.02x | 37.57969033474715 | 1.70x | 232.50285 | 28.794399 |
+| 4 | 243.05447787162353 | 3.95x | 37.026902442958736 | 1.68x | 448.073861 | 42.859846 |
+| 8 | 459.1438162032414 | 7.47x | 37.01324029002262 | 1.68x | 811.314392 | 53.738964 |
+| 12 | 649.9135976315985 | 10.57x | 45.17959477624267 | 2.05x | 1140.552971 | 55.973733 |
+
+gate: prefill scale @ t=12 = 10.57x (target ≥6x) -> MET
+
+# gate-prefill-scaling (M4b.1 ≥6x @ t=12) — 2026-07-14T18:01:49Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-14
+
+| t | pp tok/s | pp scale | tg tok/s | tg scale | llama pp (corrob.) | llama tg (corrob.) |
+|---|---|---|---|---|---|---|
+| 1 | 87.19096374799594 | 1.00x | 35.626484056585056 | 1.00x | 165.014279 | 35.185792 |
+| 2 | 178.0799269038692 | 2.04x | 56.855418305036984 | 1.60x | 323.610705 | 59.918089 |
+| 4 | 346.83434869222765 | 3.98x | 56.728651592712154 | 1.59x | 619.414818 | 76.730321 |
+| 8 | 641.392210772198 | 7.36x | 57.1521562438365 | 1.60x | 1063.288049 | 77.26012 |
+| 12 | 469.02789399730193 | 5.38x | 60.28577668173436 | 1.69x | 855.183518 | 74.711902 |
+
+gate: prefill scale @ t=12 = 5.38x (target ≥6x) -> NOT MET
+note: on a MET=no result, take the M4b.1 spec's attribution fork (serial attention vs memory bandwidth) — see its Amendments.
+```
