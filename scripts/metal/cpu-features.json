@@ -77,6 +77,26 @@
                 "amx_tile", "amx_int8", "amx_bf16"],
       "source": "https://ark.intel.com/content/www/us/en/ark/products/231737/intel-xeon-gold-6430-processor-60m-cache-2-10-ghz.html"
     },
+    "d3.c1.large": {
+      "cpu_model": "Intel Xeon Gold 6542Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 32,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/237559/intel-xeon-gold-6542y-processor-60m-cache-2-90-ghz.html"
+    },
+    "d3.c2.large": {
+      "cpu_model": "Intel Xeon Gold 6542Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 40,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/237559/intel-xeon-gold-6542y-processor-60m-cache-2-90-ghz.html"
+    },
     "d3.c3.large": {
       "cpu_model": "Intel Xeon Gold 6542Y",
       "vendor": "GenuineIntel",
@@ -113,6 +133,16 @@
                 "avx512_vnni", "avx512_bf16", "avx512_fp16",
                 "amx_tile", "amx_int8", "amx_bf16"],
       "source": "https://ark.intel.com/content/www/us/en/ark/products/232377/intel-xeon-gold-6426y-processor-37-5m-cache-2-50-ghz.html"
+    },
+    "d3.g2.c2.xlarge": {
+      "cpu_model": "Intel Xeon Gold 6442Y",
+      "vendor": "GenuineIntel",
+      "physical_cores": 40,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/232380/intel-xeon-gold-6442y-processor-60m-cache-2-60-ghz.html"
     },
     "d3.g2.c3.xlarge": {
       "cpu_model": "Intel Xeon Gold 6442Y",
@@ -579,6 +609,16 @@
       "source": "https://www.intel.com/content/www/us/en/products/sku/242642/intel-xeon-6527p-processor-144m-cache-3-00-ghz/specifications.html"
     },
     "s5.x6.c8.large": {
+      "cpu_model": "Intel Xeon 6767P",
+      "vendor": "GenuineIntel",
+      "physical_cores": 64,
+      "flags": ["sse4_2", "avx", "avx2", "fma", "f16c",
+                "avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl",
+                "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                "amx_tile", "amx_int8", "amx_bf16"],
+      "source": "https://ark.intel.com/content/www/us/en/ark/products/241845/intel-xeon-6767p-processor-336m-cache-2-40-ghz.html"
+    },
+    "s5.x6.c9.medium": {
       "cpu_model": "Intel Xeon 6767P",
       "vendor": "GenuineIntel",
       "physical_cores": 64,
