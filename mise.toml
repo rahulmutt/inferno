@@ -18,7 +18,10 @@ CARGO_TERM_COLOR = "always"
 
 [tasks.test]
 description = "Blocking-tier tests (fast; what PR CI runs)"
-run = "cargo nextest run --workspace --no-tests=pass"
+run = [
+  "cargo nextest run --workspace --no-tests=pass",
+  "cargo nextest run -p inferno-pool --features pool-profile --no-tests=pass",
+]
 
 [tasks.test-full]
 description = "Full test suite incl. ignored/slow tests"
@@ -29,6 +32,7 @@ description = "Format check + clippy (deny warnings)"
 run = [
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets -- -D warnings",
+  "cargo clippy -p inferno-pool --features pool-profile --all-targets -- -D warnings",
 ]
 
 [tasks.fmt]
