@@ -851,3 +851,25 @@ pp at 512 moved ×1.0338 (16c) / ×1.0966 (8c); prefill lowering is untouched
 by the lever, and the parent-arm pp stddevs (35.1 and 69.2 tok/s
 respectively) put both movements within run-to-run spread — recorded as
 context, not as a prefill effect.
+
+### 2026-07-16 — closing verdict (Task 9): headroom-set target NOT MET on either machine; milestone closes with Lever 1 landed
+
+Closing protocol outputs recorded verbatim in the M4a spec §Amendments
+(2026-07-16, ninth & tenth sessions; protocol home). Judged against the
+Task 3 headroom-set targets:
+
+- 16c 6336Y: tg **57.20 ± 0.55** vs target **81.2** → **NOT MET** (70% of target)
+- 8c E-2388G: tg **62.49 ± 0.30** vs target **79.9** → **NOT MET** (78% of target)
+
+The targets were set from P1's ceiling; the Lever-1 data point (above)
+realized an 11–12% decode-wall reduction against that 41–52% ceiling, so
+the closing miss is the same finding restated at the milestone bar: the
+serial-attention share was correctly measured, but head-sharding recovered
+only a quarter of it. v1 context: tg vs llama best-of 0.96x (16c) / 0.86x
+(8c), both improved from the Task 2 baselines (0.89x / 0.79x), still NOT
+MET. Exit-criteria state: attribution recorded (1 ✓); Lever 1 landed with
+its data point, Lever 2 STOP recorded (2 ✓); closing data point recorded
+against the headroom target, target not reached (3 — recorded, not
+reached); short-context diagnostic recorded (4 ✓). The milestone closes
+with the lever kept and the headroom gap recorded as the finding for any
+successor decode-attention work.
