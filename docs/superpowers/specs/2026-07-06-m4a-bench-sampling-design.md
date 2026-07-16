@@ -550,3 +550,37 @@ llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 628.79 | tg 61.51
 ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.73x | tg 0.89x
 gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
 ```
+
+### 2026-07-16 — eighth quiet-hw session (M4b.11 session B): the deferred uncapped tg re-bench (s2.c2.medium, 8c)
+
+Second half of the uncapped re-bench the 2026-07-15 forward note deferred
+(E-2388G; cap removed in M4b.10 `4425e1f`; inferno @ `d5175c7`). Read with
+care: this is a **different physical instance** (CHI) than the 2026-07-15
+session's box (PHX), and the whole box runs slower — llama.cpp tg dropped
+77.35 → 72.82 (−5.9%) on identical engine code. Raw inferno tg is flat
+across the two boxes (56.94 → 56.74), so the forecast +7% from cap removal
+is not directly observable cross-instance; the within-run tg ratio vs llama
+best-of, which cancels box speed, moved 0.74x → 0.79x, consistent with the
+forecast's direction and size. v1 win criterion still NOT MET.
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-16T16:39:24Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-16
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (8 physical / 16 logical cores)
+inferno 0.1.0 (d5175c7) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      637.75 ± 3.33        56.74 ± 0.08 
+inferno (t=1 diag)           1       90.44 ± 0.24        34.85 ± 0.16 
+llama.cpp                    8     1042.23 ± 22.30       72.82 ± 0.02 
+llama.cpp (t=1 diag)         1      163.93 ± 0.16        33.15 ± 0.14 
+
+ratio (inferno/llama.cpp): pp 0.61x | tg 0.78x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 657.33 | tg 72.67 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.61x | tg 0.79x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
