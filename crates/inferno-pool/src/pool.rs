@@ -316,6 +316,22 @@ pub struct Pool {
     handles: Vec<JoinHandle<()>>,
 }
 
+/// M4b.12 probe-only override: `INFERNO_ATTN_SHARDS=N` forces the
+/// decode-attention lane count, so the attribution shard sweep can move
+/// attention parallelism without touching the GEMV decode cap
+/// (`INFERNO_DECODE_THREADS` would confound the curve). Read once; unset
+/// or unparsable = no effect. Measurement scripts only — never a tuning
+/// surface (spec §Explicitly out of scope: no shard-count cap).
+fn attn_shards_override() -> Option<usize> {
+    static V: OnceLock<Option<usize>> = OnceLock::new();
+    *V.get_or_init(|| parse_attn_shards(std::env::var("INFERNO_ATTN_SHARDS").ok().as_deref()))
+}
+
+fn parse_attn_shards(v: Option<&str>) -> Option<usize> {
+    v.and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n >= 1)
+}
+
 impl Pool {
     /// Spawn a pool with `threads.max(1)` total lanes (calling thread
     /// included). Blocks until every worker has registered, so `unpark` is
@@ -647,11 +663,27 @@ impl Pool {
     /// the `INFERNO_DECODE_THREADS` override applies like `par_gemv`.
     /// Each head's out row is computed entirely by one lane with the
     /// per-head math unchanged, so thread count never changes output bits.
+    /// `INFERNO_ATTN_SHARDS` (M4b.12, probe-only) forces the lane count.
     ///
     /// # Safety
     /// As [`run_attn_heads_span`] over `0..job.n_heads`; calls must not
     /// overlap (one job at a time).
     pub unsafe fn par_attention_heads(&self, job: &AttnHeadsJob) {
+        let active = self.active_threads().min(self.decode_threads());
+        let active = attn_shards_override()
+            .map(|n| n.min(self.capacity))
+            .unwrap_or(active);
+        // SAFETY: forwarding the caller's contract.
+        unsafe { self.par_attention_heads_at(job, active) };
+    }
+
+    /// [`Self::par_attention_heads`] with an explicit lane count — the
+    /// testable seam under the env override (env is process-global, so
+    /// tests force counts here instead).
+    ///
+    /// # Safety
+    /// As [`Self::par_attention_heads`]; `active >= 1`.
+    pub(crate) unsafe fn par_attention_heads_at(&self, job: &AttnHeadsJob, active: usize) {
         let n_heads = job.n_heads;
         if n_heads == 0 {
             return;
@@ -660,7 +692,6 @@ impl Pool {
         let rec = crate::prof::enabled();
         #[cfg(feature = "pool-profile")]
         let t0 = if rec { crate::prof::now() } else { 0 };
-        let active = self.active_threads().min(self.decode_threads());
         let shards = shard_table_aligned(n_heads, active, 1);
         if shards.len() == 1 {
             // SAFETY: caller contract covers the full head range.
@@ -1295,6 +1326,46 @@ mod tests {
     fn attn_heads_threads_exceeding_heads_collapses() {
         let pool = Pool::new(16); // 16 lanes > 14 heads
         assert_eq!(attn_heads_dispatch(&pool, 3), attn_heads_expected(3));
+    }
+
+    #[test]
+    fn parse_attn_shards_accepts_positive_ints_only() {
+        assert_eq!(parse_attn_shards(None), None);
+        assert_eq!(parse_attn_shards(Some("")), None);
+        assert_eq!(parse_attn_shards(Some("0")), None);
+        assert_eq!(parse_attn_shards(Some("abc")), None);
+        assert_eq!(parse_attn_shards(Some("-3")), None);
+        assert_eq!(parse_attn_shards(Some("7")), Some(7));
+        assert_eq!(parse_attn_shards(Some(" 14 ")), Some(14));
+    }
+
+    #[test]
+    fn forced_shard_counts_reproduce_unsharded_output() {
+        // The probe can only regroup heads: any forced count is bit-identical.
+        let pool = Pool::new(16);
+        for forced in [1, 2, 4, 7, 14, 16, 99] {
+            for pos in [0, 9, 100] {
+                let q: Vec<f32> = (0..AH_NH * AH_HD).map(|i| i as f32).collect();
+                let mut out = vec![f32::NAN; AH_NH * AH_HD];
+                let mut kv = [0f32; 1];
+                let job = AttnHeadsJob {
+                    kernel: stamp_attn_heads,
+                    out: out.as_mut_ptr(),
+                    q: q.as_ptr(),
+                    kv: kv.as_mut_ptr(),
+                    pos,
+                    kv_base: 0,
+                    v_off: 0,
+                    kv_dim: 0,
+                    n_heads: AH_NH,
+                    n_kv_heads: 2,
+                    head_dim: AH_HD,
+                };
+                // SAFETY: buffers sized per stamp_attn_heads' expectations.
+                unsafe { pool.par_attention_heads_at(&job, forced.min(pool.capacity())) };
+                assert_eq!(out, attn_heads_expected(pos), "forced={forced} pos={pos}");
+            }
+        }
     }
 
     #[cfg(feature = "pool-profile")]
