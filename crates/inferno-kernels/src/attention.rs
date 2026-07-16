@@ -46,6 +46,8 @@ pub unsafe extern "C" fn inferno_attention_f32_scalar(
 
 #[allow(clippy::too_many_arguments)]
 fn attn_core_scalar(
+    // `out`/`q` are span-local: extent `(h_end-h_start)*head_dim`, indexed
+    // below via `h - h_start` so no lane's slice overlaps another's.
     out: &mut [f32],
     q: &[f32],
     kv: &[f32],
@@ -67,7 +69,8 @@ fn attn_core_scalar(
     let visible = pos + 1;
     for h in h_start..h_end {
         let g = h / group;
-        let qh = &q[h * head_dim..][..head_dim];
+        let hl = h - h_start; // local index into the span-local out/q slices
+        let qh = &q[hl * head_dim..][..head_dim];
         // scores[t] = dot(qh, kcache[t,g]) * scale, in the SAME 8-lane
         // partitioned order the AVX2 kernel reduces (see `dot8`/`reduce8`).
         for (t, sc) in scores.iter_mut().enumerate().take(visible) {
@@ -98,7 +101,7 @@ fn attn_core_scalar(
             denom += e;
             t += 1;
         }
-        let oh = &mut out[h * head_dim..][..head_dim];
+        let oh = &mut out[hl * head_dim..][..head_dim];
         oh.fill(0.0);
         for (t, &w) in scores[..visible].iter().enumerate() {
             let vbase = vreg + t * kv_dim + g * head_dim;
@@ -134,10 +137,19 @@ pub unsafe extern "C" fn inferno_attention_f32_scalar_hspan(
     h_start: usize,
     h_end: usize,
 ) {
-    // SAFETY: contract above; same slice bounds as the whole-call wrapper.
+    // SAFETY: contract above, restricted to this lane's head span. `out`/`q`
+    // are sliced to ONLY `[h_start*head_dim, h_end*head_dim)` (not the full
+    // `n_heads*head_dim` extent), so concurrent lanes calling this function
+    // with the same `out`/`q` base pointers over disjoint `[h_start, h_end)`
+    // ranges never construct overlapping `&mut`/`&` slices — each lane's
+    // slice is backed by disjoint memory. `kv` remains a shared read-only
+    // slice over the full region (unchanged): the whole-call contract holds
+    // KV read-only for the call's duration, so sharing it across lanes is
+    // sound as long as no `&mut` to it is ever created, which we don't do.
     unsafe {
-        let q = std::slice::from_raw_parts(q, n_heads * head_dim);
-        let out = std::slice::from_raw_parts_mut(out, n_heads * head_dim);
+        let span = h_end - h_start;
+        let q = std::slice::from_raw_parts(q.add(h_start * head_dim), span * head_dim);
+        let out = std::slice::from_raw_parts_mut(out.add(h_start * head_dim), span * head_dim);
         let scores = std::slice::from_raw_parts_mut(scores, pos + 1);
         let kv = std::slice::from_raw_parts(kv, kv_base + 2 * v_off);
         attn_core_scalar(
