@@ -21,9 +21,10 @@ threading. It cannot take the fork.
 
 What has not gone stale is the structural fact behind it: **decode
 attention is the only serial op left in a decode step whose GEMVs now shard
-across the full `active_threads`** ([M4b.8](2026-07-11-m4b8-parallel-attention-design.md)'s
-`m == 1` guard deliberately keeps decode-shaped calls out of the pool, and
-KV is still f32 per the M3 note). Its Amdahl share of decode wall time
+across the full `active_threads`** (decode codegen invokes the attention
+kernel directly — it never reaches the pool at all; [M4b.8](2026-07-11-m4b8-parallel-attention-design.md)'s
+`m == 1` guard covers T=1 prefill tiles only — and KV is still f32 per the
+M3 note). Its Amdahl share of decode wall time
 therefore *grows* with every core the uncap freed. Meanwhile the v1 win
 criterion needs tg > 1x vs llama.cpp best-of, and the last recorded tg
 ratios are 0.74x–0.85x — on the capped baseline, with M4b.10 measuring the
@@ -41,7 +42,7 @@ with a recorded finding is a successful outcome (M4b.4/M4b.6 precedent).
 |---|---|
 | Phase | **Decode only.** Prefill is closed (M4b.1 gate MET at 10.63x @ t=12, M4b.9) |
 | Structure | **Attribution-first, gated.** Task 1 = fresh quiet-hw decode profile (t=1 + best-t) on the uncapped baseline; each lever ships only if its pre-registered gate fires |
-| Lever 1 (gated) | **Head-sharded decode attention** — pool + kernels side only; no codegen edit, no `HOST_ABI_VERSION` bump, no recompile; bit-identical by construction |
+| Lever 1 (gated) | **Head-sharded decode attention** — head-span kernels + a new pool dispatcher + a one-call codegen edit (decode `lower_attention` calls the dispatcher instead of the kernel). `HOST_ABI_VERSION` bump + recompile; bit-identical by construction |
 | Lever 2 (gated) | **F16 KV** — interpreter and compiled path switch together; `HOST_ABI_VERSION` bump + cache-key change; documented tolerance re-derivation. Retires the M3 "KV stays f32" note deliberately |
 | Fork arity | **Independent gates**, not M4b.2's "exactly one lever": the levers compose (F16 halves the bytes the attention loop streams; sharding divides its wall time) and each has its own governing measurement |
 | Machines | 16c `d2.c1.medium` (primary — deepest recorded history) + 8c `s2.c2.medium` (check). Structural levers, not tuning constants; two microarchitectures showing the same shape suffice |
@@ -102,9 +103,9 @@ decode-wall reduction:
 P1 = S × (1 − 1 / min(t_best, 14))
 ```
 
-An upper bound: it ignores dispatch overhead (which the current `m == 1`
-bypass keeps at exactly zero — the data point, not the projection, pays
-that cost).
+An upper bound: it ignores dispatch overhead (currently exactly zero —
+decode codegen calls the kernel directly, no pool involved; the data
+point, not the projection, pays that cost).
 
 **Gate 2 — F16 KV.** Ceiling projection:
 
@@ -147,22 +148,26 @@ output element is computed entirely within one lane.**
   kernels become `hspan(0, n_heads)` delegates to the same core, so
   nothing forks. Per-head math is unchanged, so hspan output is
   bit-identical to the serial whole call by construction.
-- **Pool:** the `m == 1` arm of `inferno_par_attention`
-  (`inferno-pool/src/lib.rs`) stops bypassing and publishes a
-  head-sharded job: `AttnJob` grows a head axis, `shard_table` partitions
-  `0..n_heads`, each lane runs the hspan kernel with lane-local scores
-  scratch. The `m > 1` (prefill) token-span path is untouched.
-- **Kernel resolution:** the pool resolves the hspan variant from the
-  kernel registry by its own detected ISA. This is safe even if it
-  mismatches the caller's passed `AttnFn`: the scalar and AVX2 attention
-  kernels are bit-identical to each other (M4b.3's shared exp polynomial
-  and reduction order), so lane ISA cannot change bits. The passed
-  pointer still serves every serial fallback path (pool absent, dispatch
-  race lost) exactly as today.
-- **Deployment class:** pool + kernels crates only — no codegen edit, no
-  `HOST_ABI_VERSION` bump, no recompile; an existing cached `model.so`
-  benefits immediately (M4b.5/M4b.10 precedent). `INFERNO_DECODE_THREADS`
-  continues to bound the lanes as the only override.
+- **Pool:** a new host dispatcher symbol,
+  `inferno_par_attention_heads(kernel_hspan, …)` (`inferno-pool/src/lib.rs`),
+  with the same single-dispatcher CAS guard and serial-fallback structure
+  as its three siblings: `shard_table` partitions `0..n_heads`, each lane
+  runs the hspan kernel over its head span with lane-local scores
+  scratch. The pool stays kernel-agnostic — the hspan kernel arrives as a
+  fn pointer from generated code, like every other kernel; the pool never
+  links `inferno-kernels`. The existing `inferno_par_attention` (prefill
+  token-span) path is untouched, including its `m == 1` serial arm (T=1
+  prefill tiles).
+- **Codegen:** decode `lower_attention` replaces its direct kernel call
+  with one call to the new dispatcher, passing the hspan kernel symbol
+  for the module ISA. The KV-append half and all other lowerings are
+  untouched.
+- **Deployment class:** new host symbol + generated-code change →
+  `HOST_ABI_VERSION` bump ("6" → "7") and cache-key change; existing
+  cached artifacts recompile on first use (the M4b.8/M4b.9 dispatcher
+  precedent, *not* the M4b.5/M4b.10 pool-only class).
+  `INFERNO_DECODE_THREADS` continues to bound the lanes as the only
+  override.
 
 ## Lever 2 — F16 KV
 
@@ -238,8 +243,9 @@ it does not error.
 
 - **Dispatch overhead at `m == 1` may eat the projected win**, especially
   on the 8c box: `P1` is a ceiling that ignores it. Mitigation: the
-  lever's data point decides; reverting is restoring one guard arm. No
-  threshold heuristic will be added to mask it.
+  lever's data point decides; reverting is restoring the direct kernel
+  call in `lower_attention` (one codegen call site). No threshold
+  heuristic will be added to mask it.
 - **The F16 scalar↔F16C conversion identity is subtle** (RNE ties,
   subnormals). Mitigation: dedicated rig coverage before any adoption;
   the bar is exact bit-identity, same as every kernel pair.
