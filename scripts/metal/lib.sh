@@ -205,6 +205,14 @@ metal_wait_ready() {
   local id="$1" log="$2"
   local deadline=$(( $(date +%s) + ${METAL_PROVISION_TIMEOUT:-1800} ))
   local s status ip lastline
+  # Mint the token in THIS shell before polling. Each pnap_api call below runs in
+  # a $(...) command-substitution subshell, and pnap_token caches into a plain
+  # variable that dies with the subshell — so without this, every poll
+  # re-authenticates from scratch and a single transient auth hiccup surfaces as
+  # a spurious "no access_token" mid-wait. Subshells inherit the parent's
+  # PNAP_TOKEN, so one token here covers the whole wait: PhoenixNAP tokens live
+  # ~1h, comfortably longer than METAL_PROVISION_TIMEOUT (default 1800s).
+  pnap_token
   while [ "$(date +%s)" -lt "$deadline" ]; do
     s=$(pnap_api GET "/bmc/v1/servers/$id")
     status=$(jq -r '.status' <<<"$s")
