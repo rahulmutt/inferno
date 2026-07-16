@@ -520,3 +520,118 @@ llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 654.35 | tg 77.29
 ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.60x | tg 0.74x
 gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
 ```
+
+### 2026-07-16 — seventh quiet-hw session (M4b.11 session A): the deferred uncapped tg re-bench (d2.c1.medium, 16c)
+
+This is the uncapped tg re-bench the 2026-07-15 forward note deferred: first
+bench-protocol run on the 6336Y with the decode-thread cap removed (M4b.10,
+`4425e1f`; inferno @ `1f579ce`). tg rose 49.31 → 53.48 tok/s (+8.5%), inside
+the forecast 7–12% band; tg ratio vs llama best-of moved 0.85x → 0.89x. pp
+unchanged within noise, as predicted. v1 win criterion still NOT MET.
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-16T15:23:25Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-16
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (16 physical / 32 logical cores)
+inferno 0.1.0 (1f579ce) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      849.09 ± 0.44        53.48 ± 0.09 
+inferno (t=1 diag)           1       63.39 ± 0.05        22.39 ± 0.02 
+llama.cpp                   16     1180.92 ± 290.11       60.45 ± 0.19 
+llama.cpp (t=1 diag)         1      117.54 ± 0.26        16.39 ± 0.02 
+
+ratio (inferno/llama.cpp): pp 0.72x | tg 0.88x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 628.79 | tg 61.51 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.73x | tg 0.89x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
+
+### 2026-07-16 — eighth quiet-hw session (M4b.11 session B): the deferred uncapped tg re-bench (s2.c2.medium, 8c)
+
+Second half of the uncapped re-bench the 2026-07-15 forward note deferred
+(E-2388G; cap removed in M4b.10 `4425e1f`; inferno @ `d5175c7`). Read with
+care: this is a **different physical instance** (CHI) than the 2026-07-15
+session's box (PHX), and the whole box runs slower — llama.cpp tg dropped
+77.35 → 72.82 (−5.9%) on identical engine code. Raw inferno tg is flat
+across the two boxes (56.94 → 56.74), so the forecast +7% from cap removal
+is not directly observable cross-instance; the within-run tg ratio vs llama
+best-of, which cancels box speed, moved 0.74x → 0.79x, consistent with the
+forecast's direction and size. v1 win criterion still NOT MET.
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-16T16:39:24Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-16
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (8 physical / 16 logical cores)
+inferno 0.1.0 (d5175c7) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      637.75 ± 3.33        56.74 ± 0.08 
+inferno (t=1 diag)           1       90.44 ± 0.24        34.85 ± 0.16 
+llama.cpp                    8     1042.23 ± 22.30       72.82 ± 0.02 
+llama.cpp (t=1 diag)         1      163.93 ± 0.16        33.15 ± 0.14 
+
+ratio (inferno/llama.cpp): pp 0.61x | tg 0.78x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 657.33 | tg 72.67 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.61x | tg 0.79x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
+
+### 2026-07-16 — ninth & tenth quiet-hw sessions: M4b.11 closing data point (both machines)
+
+The M4b.11 closing protocol run at the milestone's final commit (`332130b`,
+Lever 1 = head-sharded decode attention landed; preflight FIT on both, CHI
+instances). Judged in the M4b.11 spec against its headroom-set targets; the
+v1 criterion lines below are context, never the gate (M4b.11 discipline).
+Versus the same-day Task 2 baselines, the within-run tg ratio vs llama
+best-of moved 0.89x → 0.96x (16c) and 0.79x → 0.86x (8c).
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-16T19:14:49Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-16
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (16 physical / 32 logical cores)
+inferno 0.1.0 (332130b) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      793.71 ± 76.42       57.20 ± 0.55 
+inferno (t=1 diag)           1       61.59 ± 0.12        22.22 ± 0.00 
+llama.cpp                   16     1290.07 ± 241.84       61.00 ± 0.31 
+llama.cpp (t=1 diag)         1      117.72 ± 0.06        16.64 ± 0.03 
+
+ratio (inferno/llama.cpp): pp 0.62x | tg 0.94x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 570.39 | tg 60.88 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.74x | tg 0.96x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-16T19:42:57Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-16
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (8 physical / 16 logical cores)
+inferno 0.1.0 (332130b) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      592.11 ± 55.55       62.49 ± 0.30 
+inferno (t=1 diag)           1       88.98 ± 0.05        34.21 ± 0.29 
+llama.cpp                    8     1053.28 ± 1.69        72.69 ± 0.12 
+llama.cpp (t=1 diag)         1      165.10 ± 0.19        33.42 ± 0.01 
+
+ratio (inferno/llama.cpp): pp 0.56x | tg 0.86x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 648.69 | tg 72.68 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.60x | tg 0.86x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```

@@ -1186,3 +1186,216 @@ proptest! {
         prop_assert!(kv_s.iter().zip(&kv_a).all(|(x, y)| x.to_bits() == y.to_bits()));
     }
 }
+
+mod attention_hspan {
+    //! M4b.11: the head-span kernels must be bitwise-identical to the
+    //! whole-call kernels — per head, under any tiling of the head range —
+    //! and scalar↔AVX2 bit-identity must extend to hspan.
+    #[cfg(target_arch = "x86_64")]
+    use inferno_kernels::{inferno_attention_f32_avx2, inferno_attention_f32_avx2_hspan};
+    use inferno_kernels::{inferno_attention_f32_scalar, inferno_attention_f32_scalar_hspan};
+
+    struct Case {
+        n_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        pos: usize,
+    }
+
+    // Bench-model GQA shape (14/2), MHA, and a small odd-group shape.
+    const CASES: &[Case] = &[
+        Case {
+            n_heads: 14,
+            n_kv_heads: 2,
+            head_dim: 8,
+            pos: 0,
+        },
+        Case {
+            n_heads: 14,
+            n_kv_heads: 2,
+            head_dim: 8,
+            pos: 37,
+        },
+        Case {
+            n_heads: 8,
+            n_kv_heads: 8,
+            head_dim: 16,
+            pos: 100,
+        },
+        Case {
+            n_heads: 6,
+            n_kv_heads: 3,
+            head_dim: 8,
+            pos: 5,
+        },
+    ];
+
+    fn lcg_fill(mut seed: u64, buf: &mut [f32]) {
+        for v in buf.iter_mut() {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            *v = ((seed >> 40) as f32 / (1u64 << 23) as f32) - 1.0;
+        }
+    }
+
+    /// Head-range tilings to check: whole, per-head, and a ragged 3-way
+    /// split that crosses GQA group boundaries for every CASES shape.
+    fn tilings(n: usize) -> Vec<Vec<(usize, usize)>> {
+        vec![
+            vec![(0, n)],
+            (0..n).map(|h| (h, h + 1)).collect(),
+            vec![(0, 1), (1, 5.min(n - 1)), (5.min(n - 1), n)],
+        ]
+    }
+
+    fn buffers(c: &Case) -> (Vec<f32>, Vec<f32>, usize, usize) {
+        let kv_dim = c.n_kv_heads * c.head_dim;
+        let seq = c.pos + 1;
+        let v_off = seq * kv_dim;
+        let mut q = vec![0f32; c.n_heads * c.head_dim];
+        let mut kv = vec![0f32; 2 * v_off];
+        lcg_fill(0x5eed_0001, &mut q);
+        lcg_fill(0x5eed_0002, &mut kv);
+        (q, kv, kv_dim, v_off)
+    }
+
+    fn whole_scalar(c: &Case) -> Vec<f32> {
+        let (q, mut kv, kv_dim, v_off) = buffers(c);
+        let mut out = vec![0f32; c.n_heads * c.head_dim];
+        let mut scores = vec![0f32; c.pos + 1];
+        // SAFETY: buffers sized per the AttnFn contract above.
+        unsafe {
+            inferno_attention_f32_scalar(
+                out.as_mut_ptr(),
+                q.as_ptr(),
+                kv.as_mut_ptr(),
+                scores.as_mut_ptr(),
+                0,
+                v_off,
+                c.pos,
+                kv_dim,
+                c.n_heads,
+                c.n_kv_heads,
+                c.head_dim,
+            );
+        }
+        out
+    }
+
+    fn hspan_scalar(c: &Case, spans: &[(usize, usize)]) -> Vec<f32> {
+        let (q, mut kv, kv_dim, v_off) = buffers(c);
+        let mut out = vec![0f32; c.n_heads * c.head_dim];
+        for &(h0, h1) in spans {
+            // Fresh scratch per span, mimicking lane-local scratch.
+            let mut scores = vec![0f32; c.pos + 1];
+            // SAFETY: buffers sized per the hspan contract; spans tile 0..n_heads.
+            unsafe {
+                inferno_attention_f32_scalar_hspan(
+                    out.as_mut_ptr(),
+                    q.as_ptr(),
+                    kv.as_mut_ptr(),
+                    scores.as_mut_ptr(),
+                    0,
+                    v_off,
+                    c.pos,
+                    kv_dim,
+                    c.n_heads,
+                    c.n_kv_heads,
+                    c.head_dim,
+                    h0,
+                    h1,
+                );
+            }
+        }
+        out
+    }
+
+    fn assert_bits_eq(a: &[f32], b: &[f32], ctx: &str) {
+        assert_eq!(a.len(), b.len(), "{ctx}: length");
+        for (i, (x, y)) in a.iter().zip(b).enumerate() {
+            assert_eq!(x.to_bits(), y.to_bits(), "{ctx}: element {i}: {x} vs {y}");
+        }
+    }
+
+    #[test]
+    fn hspan_scalar_bitwise_matches_whole_call_under_any_tiling() {
+        for (ci, c) in CASES.iter().enumerate() {
+            let whole = whole_scalar(c);
+            for (ti, spans) in tilings(c.n_heads).iter().enumerate() {
+                let tiled = hspan_scalar(c, spans);
+                assert_bits_eq(&whole, &tiled, &format!("case {ci} tiling {ti}"));
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn whole_avx2(c: &Case) -> Vec<f32> {
+        let (q, mut kv, kv_dim, v_off) = buffers(c);
+        let mut out = vec![0f32; c.n_heads * c.head_dim];
+        let mut scores = vec![0f32; c.pos + 1];
+        // SAFETY: contract as scalar, plus the avx2 guard in the test below.
+        unsafe {
+            inferno_attention_f32_avx2(
+                out.as_mut_ptr(),
+                q.as_ptr(),
+                kv.as_mut_ptr(),
+                scores.as_mut_ptr(),
+                0,
+                v_off,
+                c.pos,
+                kv_dim,
+                c.n_heads,
+                c.n_kv_heads,
+                c.head_dim,
+            );
+        }
+        out
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn hspan_avx2(c: &Case, spans: &[(usize, usize)]) -> Vec<f32> {
+        let (q, mut kv, kv_dim, v_off) = buffers(c);
+        let mut out = vec![0f32; c.n_heads * c.head_dim];
+        for &(h0, h1) in spans {
+            let mut scores = vec![0f32; c.pos + 1];
+            // SAFETY: contract as scalar hspan, plus the avx2 guard below.
+            unsafe {
+                inferno_attention_f32_avx2_hspan(
+                    out.as_mut_ptr(),
+                    q.as_ptr(),
+                    kv.as_mut_ptr(),
+                    scores.as_mut_ptr(),
+                    0,
+                    v_off,
+                    c.pos,
+                    kv_dim,
+                    c.n_heads,
+                    c.n_kv_heads,
+                    c.head_dim,
+                    h0,
+                    h1,
+                );
+            }
+        }
+        out
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn hspan_avx2_bitwise_matches_whole_call_and_scalar() {
+        if !std::arch::is_x86_feature_detected!("avx2") {
+            eprintln!("skipping: no avx2");
+            return;
+        }
+        for (ci, c) in CASES.iter().enumerate() {
+            let whole = whole_avx2(c);
+            // scalar↔AVX2 bit-identity (M4b.3) must extend to hspan.
+            assert_bits_eq(&whole, &whole_scalar(c), &format!("case {ci} isa"));
+            for (ti, spans) in tilings(c.n_heads).iter().enumerate() {
+                let tiled = hspan_avx2(c, spans);
+                assert_bits_eq(&whole, &tiled, &format!("case {ci} avx2 tiling {ti}"));
+            }
+        }
+    }
+}

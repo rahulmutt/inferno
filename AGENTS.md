@@ -91,6 +91,10 @@ for the v1 design.
   (opaque-ctx ABI, align-1 shards, `m <= 1` direct) — outlined bodies must
   never reference caller SSA values or call the profiler, and the
   `kv_append` dispatch always joins before the attention read is issued.
+  Decode attention is head-sharded through `inferno_par_attention_heads`
+  (M4b.11) under the same `INFERNO_DECODE_THREADS` bound; the head-span
+  kernels must stay bit-identical to the whole-call kernels (the rig's
+  hspan tiling tests are the guard).
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
   operator-driven only, never CI. After any interrupted session run
   `mise run metal-gc` — EXIT traps don't survive killed terminals. The

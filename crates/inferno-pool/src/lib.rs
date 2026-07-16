@@ -1,4 +1,4 @@
-//! Persistent fork-join thread pool + the four `inferno_par_{gemv,gemm,attention,token_loop}`
+//! Persistent fork-join thread pool + the five `inferno_par_{gemv,gemm,attention,attention_heads,token_loop}`
 //! dispatchers that M4b.1+ generated code calls by symbol. Kernels stay single-threaded
 //! (spec boundary rule: parallelism is the caller's job — this crate IS
 //! that caller): the dispatcher splits a GEMV's row range into 8-row-aligned
@@ -12,7 +12,7 @@ pub mod probe;
 pub mod shard;
 
 pub use error::PoolError;
-pub use pool::{AttnFn, AttnJob, GemmFn, GemvFn, Pool, TokenBodyFn};
+pub use pool::{AttnFn, AttnHeadsJob, AttnHspanFn, AttnJob, GemmFn, GemvFn, Pool, TokenBodyFn};
 pub use probe::{bandwidth_curve, knee_at_fraction};
 pub use shard::{SHARD_ALIGN, shard_table, shard_table_aligned};
 
@@ -184,8 +184,9 @@ pub unsafe extern "C" fn inferno_par_gemm(
 /// GEMM and attention dispatches are issued serially and never overlap,
 /// so one guard suffices. `m <= 1` (decode-shaped calls, T=1 prefill
 /// tiles) takes a direct serial path with no CAS and no job publish
-/// (decode itself never calls this dispatcher — its codegen invokes the
-/// kernel directly; the guard covers T=1 prefill tiles). On the CAS-loss (or
+/// (decode does not call this dispatcher — since M4b.11 its codegen calls
+/// inferno_par_attention_heads; the m <= 1 arm here covers T=1 prefill
+/// tiles). On the CAS-loss (or
 /// uninitialized-pool) path this runs the serial full-range token loop,
 /// bit-identical to the pooled path since each token's out row is
 /// computed by a single kernel invocation either way.
@@ -259,6 +260,79 @@ pub unsafe extern "C" fn inferno_par_attention(
         }
         // SAFETY: forwarding the caller's contract for the full range.
         None => unsafe { pool::run_attn_span(&job, 0, m) },
+    }
+}
+
+/// Host dispatcher for head-sharded decode attention (M4b.11): ONE query
+/// token, the head range `0..n_heads` sharded align-1 across up to
+/// `min(active_threads, decode_threads)` lanes (decode work — the
+/// `INFERNO_DECODE_THREADS` override applies, like `inferno_par_gemv`).
+/// Same single-dispatcher guard + serial fallback as its four siblings;
+/// shares `DISPATCH_CLAIMED` deliberately — within one forward pass all
+/// pool dispatches are issued serially and never overlap. On the CAS-loss
+/// (or uninitialized-pool) path this runs one serial hspan call over the
+/// full head range, bit-identical to the pooled path since each head is
+/// computed by unchanged per-head math either way.
+///
+/// A panic inside the dispatcher or kernel aborts the process at this
+/// `extern "C"` boundary — there is no unwind across FFI.
+///
+/// # Safety
+/// Same contract as [`Pool::par_attention_heads`]; additionally `kernel`
+/// must be a valid non-null function pointer with the M4b.11 head-span
+/// attention ABI, and the KV cache must already contain every position
+/// `<= pos` (decode codegen appends this token's k/v first). Generated
+/// code guarantees all of this by construction (M3 trust model).
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_par_attention_heads(
+    kernel: AttnHspanFn,
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    pos: usize,
+    kv_base: usize,
+    v_off: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) {
+    if n_heads == 0 {
+        return;
+    }
+    let job = pool::AttnHeadsJob {
+        kernel,
+        out,
+        q,
+        kv,
+        pos,
+        kv_base,
+        v_off,
+        kv_dim,
+        n_heads,
+        n_kv_heads,
+        head_dim,
+    };
+    match GLOBAL.get() {
+        Some(p) => {
+            if DISPATCH_CLAIMED
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                // SAFETY: forwarding the caller's contract unchanged.
+                unsafe { p.par_attention_heads(&job) };
+                DISPATCH_CLAIMED.store(false, Ordering::Release);
+            } else {
+                // Lost the race for the pool's single dispatcher slot: run
+                // serially over the full head range instead of overlapping
+                // another thread's in-flight pool dispatch.
+                // SAFETY: forwarding the caller's contract for the full range.
+                unsafe { pool::run_attn_heads_span(&job, 0, n_heads) };
+            }
+        }
+        // SAFETY: forwarding the caller's contract for the full range.
+        None => unsafe { pool::run_attn_heads_span(&job, 0, n_heads) },
     }
 }
 

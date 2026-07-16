@@ -60,6 +60,7 @@ vendor (or your own hardware); the Intel leg and gate 5 work as shown.
 | `gate-pf-dist.out` | [M4b.4 spec](../superpowers/specs/2026-07-08-m4b4-decode-gemv-mlp-design.md) §Amendments | PF_DIST keep/revert + distance; Task-3 (interleave) go/no-go |
 | `gate-bench-protocol.out` | [M4a spec](../superpowers/specs/2026-07-06-m4a-bench-sampling-design.md) §Amendments | the v1 win criterion |
 | `gate-intel-ab.out` | [M4b.6 spec](../superpowers/specs/2026-07-09-m4b6-decode-gemv-op-reduction-design.md) §Amendments | op-reduction lever dead cross-vendor, or reopened |
+| `gate-decode-attr.out` | [M4b.11 spec](../superpowers/specs/2026-07-16-m4b11-decode-attention-f16kv-design.md) §Amendments | S (attention decode share, t=1 + best-t); in-situ GB/s; Gate 1 (P1) and Gate 2 (P2) arithmetic and verdicts |
 
 Never edit a recorded data point. If a deciding shape straddles 0 in gate
 5, re-run it with `--reps 6` before recording

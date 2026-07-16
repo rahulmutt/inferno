@@ -1481,7 +1481,9 @@ impl<'c, 'a> Codegen<'c, 'a> {
 
     /// Causal GQA attention for the current token, mirroring
     /// `inferno_graph::ops::attention`. First appends this token's k/v vectors
-    /// into the f32 KV cache at position `pos`, then reads: for each head `h`
+    /// into the f32 KV cache at position `pos`, then reads via
+    /// `inferno_par_attention_heads` (M4b.11, heads sharded across the pool):
+    /// for each head `h`
     /// (kv group `g = h / (n_heads/n_kv_heads)`) computes
     /// `scores[t] = dot(q_head, kcache[t,g]) * (1/sqrt(head_dim))` for
     /// `t in 0..=pos`, softmaxes with max-subtraction, and accumulates
@@ -1508,38 +1510,43 @@ impl<'c, 'a> Codegen<'c, 'a> {
         // --- KV append: write this token's k/v vectors at position `pos`. ---
         self.lower_kv_append(frame, k, v, layer);
 
-        // --- Single-token attention read via the kernel (M4b.3). q is this
-        // token's query row; k/v for this token were appended above, so the
-        // kernel only reads the KV cache. `scores` is per-call scratch. ---
-        let scores = self.entry_alloca(self.f32_t.array_type(seq_len as u32), "scores");
+        // --- Single-token attention read, head-sharded across the pool
+        // (M4b.11): the hspan kernel goes in as a function pointer and the
+        // dispatcher owns lane-local scores scratch (the entry alloca is
+        // gone). The dispatcher's serial fallbacks keep the pool-absent
+        // path equivalent to the former direct kernel call. ---
         let q_ptr = self.arena_row_ptr(frame, q);
         let out_ptr = self.arena_row_ptr(frame, out);
         let isa = self.module_isa();
-        let sym = crate::loopir::attention_symbol(isa);
-        let f = self
+        let sym = crate::loopir::attention_hspan_symbol(isa);
+        let afn = self
             .module
             .get_function(&sym)
-            .expect("attention kernel declared (Task 6)");
+            .expect("hspan attention kernel declared");
+        let pfn = self
+            .module
+            .get_function("inferno_par_attention_heads")
+            .expect("decode attention dispatcher declared");
         let kv_dim_c = self.const_i64(kv_dim);
         let v_off = self.const_i64(seq_len * kv_dim);
         let kv_base_c = self.const_i64(kv_base);
         self.builder
             .build_call(
-                f,
+                pfn,
                 &[
+                    afn.as_global_value().as_pointer_value().into(),
                     out_ptr.into(),
                     q_ptr.into(),
                     frame.kv.into(),
-                    scores.into(),
+                    frame.pos.into(),
                     kv_base_c.into(),
                     v_off.into(),
-                    frame.pos.into(),
                     kv_dim_c.into(),
                     self.const_i64(n_heads as u64).into(),
                     self.const_i64(n_kv_heads as u64).into(),
                     self.const_i64(hd).into(),
                 ],
-                "attention",
+                "par_attention_heads",
             )
             .unwrap();
     }

@@ -546,8 +546,11 @@ pub fn ensure_kernels_linked() {
     p(inferno_kernels::inferno_gemm_q4_k_rs8_avx2 as *const ());
     p(inferno_kernels::inferno_attention_f32_scalar as *const ());
     p(inferno_kernels::inferno_attention_f32_avx2 as *const ());
+    p(inferno_kernels::inferno_attention_f32_scalar_hspan as *const ());
+    p(inferno_kernels::inferno_attention_f32_avx2_hspan as *const ());
     p(inferno_pool::inferno_par_gemv as *const ());
     p(inferno_pool::inferno_par_gemm as *const ());
     p(inferno_pool::inferno_par_attention as *const ());
     p(inferno_pool::inferno_par_token_loop as *const ());
+    p(inferno_pool::inferno_par_attention_heads as *const ());
 }
