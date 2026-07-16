@@ -3,7 +3,9 @@
 //! `exp` is the shared polynomial (`crate::expf`), so the compiled path is
 //! bounded against the std-exp interpreter by `attn_rel_tol`, and the
 //! scalar and AVX2 kernels are bit-identical to each other (shared poly +
-//! reduction order). One call = one query token.
+//! reduction order). One call = one query token; the *_hspan variants
+//! (M4b.11) run the same per-head math over a caller-chosen head range for
+//! the pool's decode head-sharding.
 
 use crate::expf::expf_scalar;
 
@@ -36,7 +38,8 @@ pub unsafe extern "C" fn inferno_attention_f32_scalar(
         // KV regions (single flat buffer; kv_base/v_off pick this layer).
         let kv = std::slice::from_raw_parts(kv, kv_base + 2 * v_off);
         attn_core_scalar(
-            out, q, kv, scores, kv_base, v_off, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            out, q, kv, scores, kv_base, v_off, pos, kv_dim, n_heads, n_kv_heads, head_dim, 0,
+            n_heads,
         );
     }
 }
@@ -54,13 +57,15 @@ fn attn_core_scalar(
     n_heads: usize,
     n_kv_heads: usize,
     head_dim: usize,
+    h_start: usize,
+    h_end: usize,
 ) {
     let scale = 1.0 / (head_dim as f32).sqrt();
     let group = n_heads / n_kv_heads;
     let kreg = kv_base;
     let vreg = kv_base + v_off;
     let visible = pos + 1;
-    for h in 0..n_heads {
+    for h in h_start..h_end {
         let g = h / group;
         let qh = &q[h * head_dim..][..head_dim];
         // scores[t] = dot(qh, kcache[t,g]) * scale, in the SAME 8-lane
@@ -102,6 +107,43 @@ fn attn_core_scalar(
                 oh[d] = wn.mul_add(kv[vbase + d], oh[d]);
             }
         }
+    }
+}
+
+/// Head-span variant (M4b.11): identical per-head math to
+/// [`inferno_attention_f32_scalar`] restricted to heads `[h_start, h_end)`,
+/// so any tiling of `0..n_heads` reproduces the whole call bit-for-bit.
+/// `n_heads` stays the FULL head count (the GQA group divisor).
+///
+/// # Safety
+/// As [`inferno_attention_f32_scalar`], plus `h_start <= h_end <= n_heads`.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_attention_f32_scalar_hspan(
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    scores: *mut f32,
+    kv_base: usize,
+    v_off: usize,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    h_start: usize,
+    h_end: usize,
+) {
+    // SAFETY: contract above; same slice bounds as the whole-call wrapper.
+    unsafe {
+        let q = std::slice::from_raw_parts(q, n_heads * head_dim);
+        let out = std::slice::from_raw_parts_mut(out, n_heads * head_dim);
+        let scores = std::slice::from_raw_parts_mut(scores, pos + 1);
+        let kv = std::slice::from_raw_parts(kv, kv_base + 2 * v_off);
+        attn_core_scalar(
+            out, q, kv, scores, kv_base, v_off, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            h_start, h_end,
+        );
     }
 }
 
@@ -150,7 +192,69 @@ pub unsafe extern "C" fn inferno_attention_f32_avx2(
     n_kv_heads: usize,
     head_dim: usize,
 ) {
-    // SAFETY: contract as scalar; head_dim on target models is a mult of 8.
+    // SAFETY: forwarding the contract for the full head range.
+    unsafe {
+        attn_core_avx2(
+            out, q, kv, scores, kv_base, v_off, pos, kv_dim, n_heads, n_kv_heads, head_dim, 0,
+            n_heads,
+        );
+    }
+}
+
+/// Head-span variant (M4b.11); see [`inferno_attention_f32_scalar_hspan`].
+///
+/// # Safety
+/// As [`inferno_attention_f32_avx2`], plus `h_start <= h_end <= n_heads`.
+#[allow(clippy::too_many_arguments)]
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_attention_f32_avx2_hspan(
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    scores: *mut f32,
+    kv_base: usize,
+    v_off: usize,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    h_start: usize,
+    h_end: usize,
+) {
+    // SAFETY: forwarding the contract for the caller's head range.
+    unsafe {
+        attn_core_avx2(
+            out, q, kv, scores, kv_base, v_off, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            h_start, h_end,
+        );
+    }
+}
+
+/// The AVX2 per-head loop, bounds-parameterized (M4b.11). Body is the
+/// former `inferno_attention_f32_avx2` verbatim except `for h in
+/// h_start..h_end`.
+#[allow(clippy::too_many_arguments)]
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn attn_core_avx2(
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    scores: *mut f32,
+    kv_base: usize,
+    v_off: usize,
+    pos: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    h_start: usize,
+    h_end: usize,
+) {
+    // SAFETY: contract as the public symbols; head_dim is a mult of 8.
     unsafe {
         let scale = 1.0 / (head_dim as f32).sqrt();
         let group = n_heads / n_kv_heads;
@@ -158,7 +262,7 @@ pub unsafe extern "C" fn inferno_attention_f32_avx2(
         let vreg = kv_base + v_off;
         // Read-only: caller already appended this token's k/v at `pos`.
         let visible = pos + 1;
-        for h in 0..n_heads {
+        for h in h_start..h_end {
             let g = h / group;
             let qh = q.add(h * head_dim);
             // scores[t] = reduce8(sum_d qh[d]*kcache) * scale

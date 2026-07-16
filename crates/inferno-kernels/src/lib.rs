@@ -29,7 +29,10 @@ pub mod registry;
 
 #[cfg(target_arch = "x86_64")]
 pub use attention::inferno_attention_f32_avx2;
+#[cfg(target_arch = "x86_64")]
+pub use attention::inferno_attention_f32_avx2_hspan;
 pub use attention::inferno_attention_f32_scalar;
+pub use attention::inferno_attention_f32_scalar_hspan;
 pub use buf::AlignedBuf;
 pub use error::{KernelError, Result};
 pub use f32k::{
