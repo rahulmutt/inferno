@@ -44,6 +44,25 @@ pub type AttnFn = unsafe extern "C" fn(
     usize,
 );
 
+/// The M4b.11 head-span attention kernel ABI: [`AttnFn`] plus
+/// `(h_start, h_end)`. Must match `inferno-kernels`'
+/// `inferno_attention_f32_*_hspan` symbols exactly.
+pub type AttnHspanFn = unsafe extern "C" fn(
+    *mut f32,
+    *const f32,
+    *mut f32,
+    *mut f32,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+);
+
 /// Per-tile invariants of one parallel-attention dispatch (M4b.8). The
 /// token index `t in 0..m` is the sharded axis; per-token args derive as
 /// `out + t*out_stride`, `q + t*q_stride`, `pos0 + t`.
@@ -62,6 +81,25 @@ pub struct AttnJob {
     pub head_dim: usize,
     pub q_stride: usize,
     pub out_stride: usize,
+}
+
+/// Per-dispatch invariants of one head-sharded decode-attention dispatch
+/// (M4b.11): ONE query token at `pos`; the head index `h in 0..n_heads`
+/// is the sharded axis. `n_heads` is the full head count — shards narrow
+/// the kernel's loop range, never its GQA group divisor.
+#[derive(Clone, Copy)]
+pub struct AttnHeadsJob {
+    pub kernel: AttnHspanFn,
+    pub out: *mut f32,
+    pub q: *const f32,
+    pub kv: *mut f32,
+    pub pos: usize,
+    pub kv_base: usize,
+    pub v_off: usize,
+    pub kv_dim: usize,
+    pub n_heads: usize,
+    pub n_kv_heads: usize,
+    pub head_dim: usize,
 }
 
 /// The M4b.9 outlined token-body ABI: `(ctx, t0, t1)` runs tokens
@@ -85,6 +123,7 @@ enum JobKind {
         rows: usize,
     },
     Attention(AttnJob),
+    AttnHeads(AttnHeadsJob),
     TokenLoop {
         body: TokenBodyFn,
         ctx: *const u8,
@@ -117,6 +156,8 @@ unsafe fn run_shard(
         JobKind::Gemm { kernel, m, rows } => unsafe { kernel(y, xq, w, k, m, rows, start, end) },
         // SAFETY: forwarding the caller's contract for the disjoint token span.
         JobKind::Attention(job) => unsafe { run_attn_span(&job, start, end) },
+        // SAFETY: forwarding the caller's contract for the disjoint head span.
+        JobKind::AttnHeads(job) => unsafe { run_attn_heads_span(&job, start, end) },
         // SAFETY: forwarding the caller's contract for the disjoint token span.
         JobKind::TokenLoop { body, ctx } => unsafe { body(ctx, start, end) },
     }
@@ -154,6 +195,39 @@ pub(crate) unsafe fn run_attn_span(j: &AttnJob, start: usize, end: usize) {
                 j.head_dim,
             );
         }
+    }
+}
+
+/// Run heads `[start, end)` of one decode-attention dispatch: a single
+/// head-span kernel call with a lane-local `scores` scratch (`pos + 1`
+/// entries — same Vec-per-lane reasoning as [`run_attn_span`]). The
+/// kernel computes each head exactly as the whole-call kernel does, so
+/// sharding never changes output bits.
+///
+/// # Safety
+/// The dispatcher's caller contract must cover heads `[start, end)`:
+/// `out`/`q` valid for `n_heads * head_dim` f32 (out head rows disjoint
+/// per shard), `kv` fully appended for positions `<= pos` and read-only
+/// for the duration, `kernel` a valid `AttnHspanFn`.
+pub(crate) unsafe fn run_attn_heads_span(j: &AttnHeadsJob, start: usize, end: usize) {
+    let mut scores = vec![0f32; j.pos + 1];
+    // SAFETY: forwarding the caller's contract for the head span.
+    unsafe {
+        (j.kernel)(
+            j.out,
+            j.q,
+            j.kv,
+            scores.as_mut_ptr(),
+            j.kv_base,
+            j.v_off,
+            j.pos,
+            j.kv_dim,
+            j.n_heads,
+            j.n_kv_heads,
+            j.head_dim,
+            start,
+            end,
+        );
     }
 }
 
@@ -534,6 +608,75 @@ impl Pool {
         // SAFETY: caller contract; shard 0's tokens are disjoint from
         // worker shards.
         unsafe { run_attn_span(job, s0, e0) };
+        let mut spins = 0u32;
+        while self.shared.remaining.load(Ordering::Acquire) != 0 {
+            if spins < SPIN_ITERS {
+                spins += 1;
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    /// Head-sharded decode attention (M4b.11): splits `0..job.n_heads`
+    /// into align-1 contiguous shards across up to
+    /// `min(active_threads(), decode_threads())` lanes — decode work, so
+    /// the `INFERNO_DECODE_THREADS` override applies like `par_gemv`.
+    /// Each head's out row is computed entirely by one lane with the
+    /// per-head math unchanged, so thread count never changes output bits.
+    ///
+    /// # Safety
+    /// As [`run_attn_heads_span`] over `0..job.n_heads`; calls must not
+    /// overlap (one job at a time).
+    pub unsafe fn par_attention_heads(&self, job: &AttnHeadsJob) {
+        let n_heads = job.n_heads;
+        if n_heads == 0 {
+            return;
+        }
+        let active = self.active_threads().min(self.decode_threads());
+        let shards = shard_table_aligned(n_heads, active, 1);
+        if shards.len() == 1 {
+            // SAFETY: caller contract covers the full head range.
+            unsafe { run_attn_heads_span(job, 0, n_heads) };
+            return;
+        }
+        let n_worker = shards.len() - 1;
+        let (s0, e0) = shards[0];
+        let kind = JobKind::AttnHeads(*job);
+        // SAFETY (job write): the previous dispatch ended with
+        // `remaining == 0`, and shardless workers never read `job`
+        // (packed-epoch protocol) — no reader exists here.
+        unsafe {
+            *self.shared.job.get() = Job {
+                kind: Some(kind),
+                y: std::ptr::null_mut(),
+                xq: std::ptr::null(),
+                w: std::ptr::null(),
+                k: 0,
+                shards,
+            };
+        }
+        self.shared.remaining.store(n_worker, Ordering::SeqCst);
+        let counter =
+            (self.shared.epoch.load(Ordering::SeqCst) >> PACKED_SHARD_BITS).wrapping_add(1);
+        self.shared.epoch.store(
+            (counter << PACKED_SHARD_BITS) | (n_worker + 1),
+            Ordering::SeqCst,
+        );
+        // Wake exactly the workers that hold a shard (same handshake as
+        // par_gemv; see there for the lost-wakeup argument).
+        for slot in &self.shared.slots[..n_worker] {
+            if slot.parked.load(Ordering::SeqCst) {
+                slot.thread
+                    .get()
+                    .expect("worker registered in Pool::new")
+                    .unpark();
+            }
+        }
+        // SAFETY: caller contract; shard 0's heads are disjoint from
+        // worker shards.
+        unsafe { run_attn_heads_span(job, s0, e0) };
         let mut spins = 0u32;
         while self.shared.remaining.load(Ordering::Acquire) != 0 {
             if spins < SPIN_ITERS {
@@ -983,5 +1126,98 @@ mod tests {
     fn token_loop_zero_tokens_is_a_noop() {
         let pool = Pool::new(4);
         assert!(tok_dispatch(&pool, 0).is_empty());
+    }
+
+    /// Fake head-span attention kernel with the real M4b.11 ABI:
+    /// deterministic function of (h, d, pos), writes only its span's rows,
+    /// touches scores[pos] to prove each lane's scratch covers pos + 1.
+    unsafe extern "C" fn stamp_attn_heads(
+        out: *mut f32,
+        q: *const f32,
+        _kv: *mut f32,
+        scores: *mut f32,
+        _kv_base: usize,
+        _v_off: usize,
+        pos: usize,
+        _kv_dim: usize,
+        _n_heads: usize,
+        _n_kv_heads: usize,
+        head_dim: usize,
+        h_start: usize,
+        h_end: usize,
+    ) {
+        // SAFETY: run_attn_heads_span sizes scores to pos + 1.
+        unsafe { *scores.add(pos) = pos as f32 };
+        for h in h_start..h_end {
+            for d in 0..head_dim {
+                let i = h * head_dim + d;
+                // SAFETY: out/q rows are n_heads*head_dim per the contract.
+                unsafe { *out.add(i) = *q.add(i) + (h * 31 + d + pos) as f32 };
+            }
+        }
+    }
+
+    const AH_NH: usize = 14; // bench-model head count
+    const AH_HD: usize = 4;
+
+    fn attn_heads_dispatch(pool: &Pool, pos: usize) -> Vec<f32> {
+        let q: Vec<f32> = (0..AH_NH * AH_HD).map(|i| i as f32).collect();
+        let mut out = vec![f32::NAN; AH_NH * AH_HD];
+        let mut kv = [0f32; 1];
+        let job = AttnHeadsJob {
+            kernel: stamp_attn_heads,
+            out: out.as_mut_ptr(),
+            q: q.as_ptr(),
+            kv: kv.as_mut_ptr(),
+            pos,
+            kv_base: 0,
+            v_off: 0,
+            kv_dim: 0,
+            n_heads: AH_NH,
+            n_kv_heads: 2,
+            head_dim: AH_HD,
+        };
+        // SAFETY: buffers sized per stamp_attn_heads' expectations.
+        unsafe { pool.par_attention_heads(&job) };
+        out
+    }
+
+    fn attn_heads_expected(pos: usize) -> Vec<f32> {
+        (0..AH_NH * AH_HD)
+            .map(|i| {
+                let (h, d) = (i / AH_HD, i % AH_HD);
+                i as f32 + (h * 31 + d + pos) as f32
+            })
+            .collect()
+    }
+
+    #[test]
+    fn attn_heads_matches_serial_expectation_across_pool_sizes() {
+        for threads in [1, 2, 4, 8, 16] {
+            let pool = Pool::new(threads);
+            for pos in [0, 9, 100] {
+                assert_eq!(
+                    attn_heads_dispatch(&pool, pos),
+                    attn_heads_expected(pos),
+                    "threads={threads} pos={pos}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn attn_heads_respects_decode_cap_without_changing_result() {
+        // Decode work: min(active, decode_threads) lanes, like par_gemv.
+        let pool = Pool::new(8);
+        pool.set_decode_threads(2);
+        assert_eq!(attn_heads_dispatch(&pool, 5), attn_heads_expected(5));
+        pool.set_decode_threads(1);
+        assert_eq!(attn_heads_dispatch(&pool, 5), attn_heads_expected(5));
+    }
+
+    #[test]
+    fn attn_heads_threads_exceeding_heads_collapses() {
+        let pool = Pool::new(16); // 16 lanes > 14 heads
+        assert_eq!(attn_heads_dispatch(&pool, 3), attn_heads_expected(3));
     }
 }
