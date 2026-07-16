@@ -125,6 +125,37 @@ impl<'c> LlvmModule<'c> {
             );
         }
 
+        // void inferno_attention_f32_<isa>_hspan(ptr out, ptr q, ptr kv,
+        //   ptr scores, i64 kv_base, i64 v_off, i64 pos, i64 kv_dim,
+        //   i64 n_heads, i64 n_kv_heads, i64 head_dim, i64 h_start, i64 h_end)
+        // — the M4b.11 head-span variant; passed as a function pointer to
+        // inferno_par_attention_heads, never called directly.
+        let attn_hspan_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
+        for isa in ["scalar", "avx2"] {
+            self.module.add_function(
+                &format!("inferno_attention_f32_{isa}_hspan"),
+                attn_hspan_ty,
+                Some(Linkage::External),
+            );
+        }
+
         // void inferno_par_gemv(ptr kernel, ptr y, ptr xq, ptr w, i64 k, i64 rows)
         // — the M4b.1 host dispatcher; the kernel chosen by `gemv_symbol` is
         // passed as a function pointer, so the per-(dtype, isa) selection
@@ -191,6 +222,33 @@ impl<'c> LlvmModule<'c> {
         self.module.add_function(
             "inferno_par_attention",
             par_attn_ty,
+            Some(Linkage::External),
+        );
+
+        // void inferno_par_attention_heads(ptr kernel, ptr out, ptr q,
+        //   ptr kv, i64 pos, i64 kv_base, i64 v_off, i64 kv_dim,
+        //   i64 n_heads, i64 n_kv_heads, i64 head_dim)
+        // — the M4b.11 decode-attention dispatcher: one query token,
+        // heads sharded across the pool (min(active, decode) lanes).
+        let par_attn_heads_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
+        self.module.add_function(
+            "inferno_par_attention_heads",
+            par_attn_heads_ty,
             Some(Linkage::External),
         );
 
@@ -380,6 +438,7 @@ mod tests {
         assert!(ir.contains("inferno_par_gemv"));
         assert!(ir.contains("inferno_par_gemm"));
         assert!(ir.contains("inferno_par_attention"));
+        assert!(ir.contains("inferno_par_attention_heads"));
         assert!(ir.contains("inferno_par_token_loop"));
         assert!(ir.contains("inferno_attention_f32_scalar"));
         assert!(ir.contains("inferno_attention_f32_avx2"));

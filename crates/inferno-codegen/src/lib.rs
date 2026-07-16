@@ -12,11 +12,13 @@ pub use error::{CodegenError, Result};
 /// Version of the host-symbol surface generated code links against
 /// (kernel symbols + `inferno_par_{gemv,gemm,attention,token_loop}` + the
 /// profiler global). Folded into `inferno-core`'s artifact cache key.
-/// "6" = M4b.9's `inferno_par_token_loop` dispatch; "5" = M4b.8's
-/// `inferno_par_attention` dispatch; "4" was M4b.3's attention kernel
-/// symbols (`inferno_attention_f32_{scalar,avx2}`); "3" was M4b.2's
+/// "7" = M4b.11's head-sharded decode attention
+/// (`inferno_par_attention_heads` dispatch + `inferno_attention_f32_*_hspan`
+/// kernel symbols); "6" = M4b.9's `inferno_par_token_loop` dispatch; "5" =
+/// M4b.8's `inferno_par_attention` dispatch; "4" was M4b.3's attention
+/// kernel symbols (`inferno_attention_f32_{scalar,avx2}`); "3" was M4b.2's
 /// GEMM dispatch + optional profiling (v2 was M4b.1's `inferno_par_gemv`).
-pub const HOST_ABI_VERSION: &str = "6";
+pub const HOST_ABI_VERSION: &str = "7";
 
 /// Default prefill tile length (tokens per batched forward pass). Part of
 /// `CompileOptions` and the artifact cache key.

@@ -124,6 +124,13 @@ pub fn attention_symbol(isa: inferno_kernels::KernelIsa) -> String {
     format!("inferno_attention_f32_{isa}")
 }
 
+/// `inferno_attention_f32_{isa}_hspan`: the head-span variant (M4b.11),
+/// selected identically to [`attention_symbol`]. Passed by pointer to
+/// `inferno_par_attention_heads`; never called directly by generated code.
+pub fn attention_hspan_symbol(isa: inferno_kernels::KernelIsa) -> String {
+    format!("{}_hspan", attention_symbol(isa))
+}
+
 /// Translate a [`Plan`]'s fusion islands into a [`LoopIr`]: one [`Step`] per
 /// graph node (a `MatMul` expands to `Quantize?` + `Gemv` + `Bias?`).
 pub fn build_loopir(plan: &Plan, graph: &Graph, _desc: &ModelDesc) -> LoopIr {
