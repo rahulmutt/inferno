@@ -459,3 +459,72 @@ attention decode share (parsed):
   t=1: 33.2%
   t=8: 46.6%
 ```
+
+### 2026-07-16 — gate verdicts (Task 3): Gate 1 AUTHORIZED, Gate 2 STOP
+
+Computed from the two attribution sessions above, exactly as pre-registered
+(§The pre-registered gates); the implementation tasks were not consulted.
+
+**Parsed S (attention decode share, best-t profile tables above):**
+16c 6336Y: S = 55.8% (t_best = 16, decode wall 2.404 s). 8c E-2388G:
+S = 46.6% (t_best = 8, decode wall 1.778 s).
+
+**Unique KV bytes (protocol arithmetic, identical for both machines):**
+`n_layers = 24`, `kv_dim = 128` (2 kv_heads × head_dim 64, `inferno
+inspect`), T = 64 generated tokens, prompt p0 = 2025 tokens. p0 is
+estimated, not logged by the protocol: the prompt is random base64
+(2048 bytes → 2732 chars); 20 samples through the devenv-pinned
+`llama-tokenize` (same GGUF vocab) give mean 2025.25, sd ≈ 18 (range
+1990–2057), i.e. ±0.9% on total bytes — far inside the gates' margins.
+
+Σ(p+1) for p = 2025..2088 = 64×2025 + 64×65/2 = 131,680.
+Per layer: 2 × 131,680 × 128 × 4 = 134,840,320 B. × 24 layers =
+**3,236,167,680 B = 3.2362 GB** (decimal, matching gate-bw-curve's
+bytes/sec/1e9).
+
+**In-situ GB/s (attention wall = decode wall × S):**
+- 16c: 2.404 × 0.558 = 1.3414 s → 3.2362 / 1.3414 = **2.41 GB/s**
+- 8c: 1.778 × 0.466 = 0.8285 s → 3.2362 / 0.8285 = **3.91 GB/s**
+
+**BW_ceiling provenance:** each machine's gate-bw-curve peak from the
+M4b.10 spec §Amendments, 2026-07-15 session record: 6336Y **54.39 GB/s**
+(2026-07-14T12:44:07Z, lanes = 8); E-2388G **45.95 GB/s**
+(2026-07-14T18:14:55Z, lanes = 6).
+
+**Gate 1 — P1 = S × (1 − 1/min(t_best, 14)):**
+- 16c: 0.558 × (1 − 1/14) = **51.8%**
+- 8c: 0.466 × (1 − 1/8) = **40.8%**
+
+Both ≥ 5% → **Lever 1 AUTHORIZED** (Tasks 4–7 run).
+
+**Gate 2 — P2 = S′ × ½ × min(1, BW_insitu / BW_ceiling), S′ = S/min(t_best, 14)
+(Gate 1 authorized):**
+- 16c: S′ = 0.558/14 = 0.03986; ratio = 2.41/54.39 = 0.0444 →
+  P2 = 0.03986 × ½ × 0.0444 = **0.09%**
+- 8c: S′ = 0.466/8 = 0.05825; ratio = 3.91/45.95 = 0.0850 →
+  P2 = 0.05825 × ½ × 0.0850 = **0.25%**
+
+Both < 3% → **Lever 2 (F16 KV) STOP**, closed as a diagnostic. **The
+finding:** at best-t the serial decode attention pass streams unique KV
+at 2.4–3.9 GB/s — 4–9% of each machine's measured bandwidth ceiling —
+so decode attention is not bandwidth-bound at the operating point, and
+halving KV bytes projects ≤ 0.25% of decode wall. The verdict is
+insensitive to the p0 estimate: P2 scales linearly with BW_insitu, which
+would have to exceed the ceiling itself before P2 crossed 3% on either
+machine. Task 8 is skipped; F16 KV stays closed unless a future
+attribution shows attention bandwidth-bound.
+
+**Headroom-set tg target for the closing data point (Task 9):**
+baseline tg (this session's uncapped re-bench, M4a §Amendments
+2026-07-16) × (1 + authorized levers' combined projected reduction) —
+Lever 1 only, so ×(1 + P1):
+
+- 16c: 53.48 × 1.5181 = **81.2 tok/s**
+- 8c: 56.74 × 1.4078 = **79.9 tok/s**
+
+Conservatism, stated explicitly: (1 + P1) deliberately understates the
+throughput a P1 wall-reduction would imply (1/(1−P1) = 2.08× / 1.69×),
+but P1 itself is a ceiling that ignores dispatch overhead (§Risks) and
+assumes perfect head-parallel scaling; the target nets those against
+each other. The closing data point judges against these numbers; v1
+(tg ≥ 1x vs llama best-of) is recorded as context only, never the gate.
