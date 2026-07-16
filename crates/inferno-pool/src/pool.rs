@@ -287,6 +287,10 @@ struct Shared {
     job: UnsafeCell<Job>,
     /// One slot per worker (capacity - 1 of them).
     slots: Vec<Slot>,
+    /// M4b.12 dispatch-split accounting (feature-gated; spec §The
+    /// dispatch-split instrument).
+    #[cfg(feature = "pool-profile")]
+    prof: crate::prof::ProfState,
 }
 
 // SAFETY: `job` (raw pointers + Vec) crosses threads under a strict
@@ -331,6 +335,8 @@ impl Pool {
                     thread: OnceLock::new(),
                 })
                 .collect(),
+            #[cfg(feature = "pool-profile")]
+            prof: crate::prof::ProfState::new(capacity),
         });
         let handles = (0..capacity - 1)
             .map(|i| {
@@ -388,6 +394,18 @@ impl Pool {
 
     pub fn decode_threads(&self) -> usize {
         self.shared.decode_cap.load(Ordering::Relaxed)
+    }
+
+    /// Snapshot the M4b.12 dispatch-split accounting.
+    #[cfg(feature = "pool-profile")]
+    pub fn prof_snapshot(&self) -> crate::prof::PoolProfSnapshot {
+        self.shared.prof.snapshot()
+    }
+
+    /// Zero the M4b.12 dispatch-split accounting.
+    #[cfg(feature = "pool-profile")]
+    pub fn prof_reset(&self) {
+        self.shared.prof.reset();
     }
 
     /// Run `kernel` over `0..rows`, split across up to

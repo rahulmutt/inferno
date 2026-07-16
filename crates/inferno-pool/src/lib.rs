@@ -9,11 +9,13 @@
 pub mod error;
 pub mod pool;
 pub mod probe;
+pub mod prof;
 pub mod shard;
 
 pub use error::PoolError;
 pub use pool::{AttnFn, AttnHeadsJob, AttnHspanFn, AttnJob, GemmFn, GemvFn, Pool, TokenBodyFn};
 pub use probe::{bandwidth_curve, knee_at_fraction};
+pub use prof::PoolProfSnapshot;
 pub use shard::{SHARD_ALIGN, shard_table, shard_table_aligned};
 
 use std::sync::OnceLock;
@@ -67,6 +69,35 @@ pub fn set_global_decode_threads(n: usize) -> bool {
         }
         None => false,
     }
+}
+
+/// Enable/disable the M4b.12 dispatch-split recording. No-op without the
+/// `pool-profile` feature — shipping builds carry none of the instrument.
+pub fn set_pool_profiling(on: bool) {
+    #[cfg(feature = "pool-profile")]
+    prof::set_enabled(on);
+    #[cfg(not(feature = "pool-profile"))]
+    let _ = on;
+}
+
+/// Zero the global pool's dispatch-split accounting (between profile
+/// phases). No-op without the feature or before `init_global`.
+pub fn pool_prof_reset() {
+    #[cfg(feature = "pool-profile")]
+    if let Some(p) = GLOBAL.get() {
+        p.prof_reset();
+    }
+}
+
+/// Snapshot the global pool's dispatch-split accounting. `None` without
+/// the feature or before `init_global`.
+pub fn pool_prof_snapshot() -> Option<PoolProfSnapshot> {
+    #[cfg(feature = "pool-profile")]
+    {
+        GLOBAL.get().map(|p| p.prof_snapshot())
+    }
+    #[cfg(not(feature = "pool-profile"))]
+    None
 }
 
 /// The host symbol M4b.1 generated code calls for every GEMV (resolved at

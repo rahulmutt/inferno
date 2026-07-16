@@ -7,6 +7,11 @@ license.workspace = true
 [dependencies]
 thiserror.workspace = true
 
+[features]
+# M4b.12 dispatch-split instrument (spec §The dispatch-split instrument).
+# Off in every shipping/bench build; the quiet-hw gate scripts build with it.
+pool-profile = []
+
 [dev-dependencies]
 inferno-kernels.workspace = true
 inferno-formats.workspace = true
