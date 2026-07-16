@@ -264,3 +264,100 @@ it does not error.
 
 *(Recorded protocol data points and scoped amendments land here; never
 edit a recorded data point.)*
+
+### 2026-07-16 — attribution session A (d2.c1.medium / Xeon Gold 6336Y, 16c): decode profiles at t=1 and t_best=16
+
+First of the two Task 2 sessions (16c primary). Quiet-hw pass: preflight FIT,
+smoke then real, inferno @ `1f579ce` (`git_dirty: false`). `t_best` = 16 (the
+protocol's physical-core count on this box). Attention decode share S: 33.7%
+at t=1, 55.8% at t=16. The companion uncapped tg re-bench from the same
+session is recorded in the M4a spec §Amendments (2026-07-16).
+
+```
+# gate-decode-attr (M4b.11 attribution: decode profile t=1 + best-t) — 2026-07-16T15:29:48Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-16
+
+--- profile at --threads 1 ---
+profile [prefill] 44.285s wall, 137281262842 cyc total
+  op                                   cycles   share        GB/s
+  attention                       44659891552   32.5%           -
+  matmul:lm_head.weight           23314299614   17.0%        41.1
+  matmul:layers.*.ffn.down_proj.weight    18609659284   13.6%        39.5
+  matmul:layers.*.ffn.gate_proj.weight    17858460048   13.0%        41.2
+  matmul:layers.*.ffn.up_proj.weight    17857131702   13.0%        41.2
+  swiglu                           4257924198    3.1%           -
+  matmul:layers.*.attn.o_proj.weight     3283783282    2.4%        41.3
+  matmul:layers.*.attn.q_proj.weight     3282353836    2.4%        41.3
+  rmsnorm                          1186978386    0.9%           -
+  rope                              864016194    0.6%           -
+  quantize                          530801038    0.4%           -
+  matmul:layers.*.attn.k_proj.weight      471912076    0.3%        41.0
+  matmul:layers.*.attn.v_proj.weight      471721634    0.3%        41.0
+  add                               331653660    0.2%           -
+  kv_append                         158436186    0.1%           -
+  bias                              120927416    0.1%           -
+  embed                              21312736    0.0%           -
+profile [decode] 3.998s wall, 12297121076 cyc total
+  op                                   cycles   share        GB/s
+  attention                        4140932266   33.7%           -
+  matmul:lm_head.weight            2171905292   17.7%        13.9
+  matmul:layers.*.ffn.down_proj.weight     1678220536   13.6%        13.8
+  matmul:layers.*.ffn.up_proj.weight     1669720890   13.6%        13.9
+  matmul:layers.*.ffn.gate_proj.weight     1667523272   13.6%        13.9
+  matmul:layers.*.attn.o_proj.weight      312427520    2.5%        13.7
+  matmul:layers.*.attn.q_proj.weight      311677904    2.5%        13.7
+  swiglu                            137023376    1.1%           -
+  matmul:layers.*.attn.k_proj.weight       45572460    0.4%        13.4
+  matmul:layers.*.attn.v_proj.weight       45554398    0.4%        13.4
+  rope                               44521154    0.4%           -
+  rmsnorm                            40555026    0.3%           -
+  add                                18094438    0.1%           -
+  bias                               12485866    0.1%           -
+  embed                                505366    0.0%           -
+  quantize                             401312    0.0%           -
+  kv_append                                 0    0.0%           -
+
+--- profile at --threads 16 ---
+profile [prefill] 3.687s wall, 11427738740 cyc total
+  op                                   cycles   share        GB/s
+  attention                        3444655168   30.1%           -
+  matmul:lm_head.weight            1806588282   15.8%       529.7
+  matmul:layers.*.ffn.gate_proj.weight     1512402708   13.2%       486.1
+  matmul:layers.*.ffn.up_proj.weight     1487605868   13.0%       494.2
+  matmul:layers.*.ffn.down_proj.weight     1482294262   13.0%       496.0
+  swiglu                            352399696    3.1%           -
+  matmul:layers.*.attn.o_proj.weight      346622368    3.0%       390.7
+  matmul:layers.*.attn.q_proj.weight      310304952    2.7%       436.4
+  quantize                          176559194    1.5%           -
+  rmsnorm                           113400044    1.0%           -
+  rope                               87476734    0.8%           -
+  matmul:layers.*.attn.v_proj.weight       80085500    0.7%       241.6
+  matmul:layers.*.attn.k_proj.weight       79642870    0.7%       242.9
+  add                                68260814    0.6%           -
+  bias                               52188654    0.5%           -
+  kv_append                          18827932    0.2%           -
+  embed                               8423694    0.1%           -
+profile [decode] 2.404s wall, 7346681636 cyc total
+  op                                   cycles   share        GB/s
+  attention                        4098136860   55.8%           -
+  matmul:lm_head.weight             708111680    9.6%        42.3
+  matmul:layers.*.ffn.gate_proj.weight      588411848    8.0%        39.1
+  matmul:layers.*.ffn.up_proj.weight      585690312    8.0%        39.3
+  matmul:layers.*.ffn.down_proj.weight      584340852    8.0%        39.4
+  matmul:layers.*.attn.o_proj.weight      245359098    3.3%        17.3
+  swiglu                            197202064    2.7%           -
+  matmul:layers.*.attn.q_proj.weight      135213184    1.8%        31.4
+  rope                               49573092    0.7%           -
+  rmsnorm                            46708114    0.6%           -
+  matmul:layers.*.attn.k_proj.weight       35469022    0.5%        17.1
+  matmul:layers.*.attn.v_proj.weight       34453324    0.5%        17.6
+  add                                21225638    0.3%           -
+  bias                               15945380    0.2%           -
+  embed                                500708    0.0%           -
+  quantize                             340460    0.0%           -
+  kv_append                                 0    0.0%           -
+
+attention decode share (parsed):
+  t=1: 33.7%
+  t=16: 55.8%
+```
