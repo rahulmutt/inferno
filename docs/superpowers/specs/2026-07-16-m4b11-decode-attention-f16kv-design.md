@@ -528,3 +528,326 @@ but P1 itself is a ceiling that ignores dispatch overhead (§Risks) and
 assumes perfect head-parallel scaling; the target nets those against
 each other. The closing data point judges against these numbers; v1
 (tg ≥ 1x vs llama best-of) is recorded as context only, never the gate.
+
+### 2026-07-16 — Lever-1 data point (Task 7): decode tg +12.7% (16c) / +13.4% (8c); lever kept
+
+Within-session A/B on both machines, parent `f74069e` (pre-Task-4) vs lever
+`ebe83bc` (Tasks 4–6), interleaved invocations per the standing discipline;
+preflight FIT on both; both boxes in CHI (PHX had no stock — different
+physical instances than Task 2's session A box, which the within-session
+design makes irrelevant). M4a protocol command per arm
+(`bench --pp 512 --tg 128 --reps 5 --threads 0 --json`) plus the
+short-context diagnostic (`--pp 16 --tg 32`).
+
+**16c (Xeon Gold 6336Y, d2.c1.medium):**
+
+```
+# M4b.11 Lever-1 A/B — 2026-07-16T18:10:15Z
+parent: f74069edb7ab935e0ae4dbab074e7c2b795ff445 | lever: ebe83bcfeb5839e42a9e786832c4032c48af3dbc
+model name	: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz
+logical CPUs: 32
+6.9.10+bpo-amd64
+
+## parent-long.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "f74069e",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 5,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 798.6328922392393,
+  "inferno_pp_stddev": 35.14910182966182,
+  "inferno_tg_tok_s": 50.70993765871119,
+  "inferno_tg_stddev": 0.5130204889396626,
+  "llama_pp_tok_s": 1079.879018,
+  "llama_pp_stddev": 282.208549,
+  "llama_tg_tok_s": 60.107193,
+  "llama_tg_stddev": 0.198032,
+  "llama_t1_pp_tok_s": 117.922843,
+  "llama_t1_pp_stddev": 0.045636,
+  "llama_t1_tg_tok_s": 16.501481,
+  "llama_t1_tg_stddev": 0.024568,
+  "inferno_t1_pp_tok_s": 61.52930858195416,
+  "inferno_t1_pp_stddev": 0.01297939025582972,
+  "inferno_t1_tg_tok_s": 21.825334107656563,
+  "inferno_t1_tg_stddev": 0.003631112457014242
+}
+
+## lever-long.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "ebe83bc",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 5,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 825.5882838046258,
+  "inferno_pp_stddev": 1.368900128385791,
+  "inferno_tg_tok_s": 57.144515715476494,
+  "inferno_tg_stddev": 0.8598028864106598,
+  "llama_pp_tok_s": 1152.475867,
+  "llama_pp_stddev": 253.474047,
+  "llama_tg_tok_s": 60.396291,
+  "llama_tg_stddev": 0.440273,
+  "llama_t1_pp_tok_s": 118.380995,
+  "llama_t1_pp_stddev": 0.434384,
+  "llama_t1_tg_tok_s": 22.667968,
+  "llama_t1_tg_stddev": 0.010698,
+  "inferno_t1_pp_tok_s": 61.372917574652924,
+  "inferno_t1_pp_stddev": 0.143995986641353,
+  "inferno_t1_tg_tok_s": 22.243378955892513,
+  "inferno_t1_tg_stddev": 0.027464621580827724
+}
+
+## parent-short.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "f74069e",
+  "llama_build_commit": "6f4f53f",
+  "pp": 16,
+  "tg": 32,
+  "reps": 5,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 618.389012044565,
+  "inferno_pp_stddev": 135.08682273852895,
+  "inferno_tg_tok_s": 63.530573388403276,
+  "inferno_tg_stddev": 0.37098307381862894,
+  "llama_pp_tok_s": 647.881867,
+  "llama_pp_stddev": 10.072625,
+  "llama_tg_tok_s": 63.554477,
+  "llama_tg_stddev": 2.637514,
+  "llama_t1_pp_tok_s": 98.02317,
+  "llama_t1_pp_stddev": 0.181475,
+  "llama_t1_tg_tok_s": 22.831486,
+  "llama_t1_tg_stddev": 0.007341,
+  "inferno_t1_pp_tok_s": 70.9848009668085,
+  "inferno_t1_pp_stddev": 0.08184955648835691,
+  "inferno_t1_tg_tok_s": 23.95369644197977,
+  "inferno_t1_tg_stddev": 0.27274227997289807
+}
+
+## lever-short.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "ebe83bc",
+  "llama_build_commit": "6f4f53f",
+  "pp": 16,
+  "tg": 32,
+  "reps": 5,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 574.0082344547969,
+  "inferno_pp_stddev": 142.2490770577237,
+  "inferno_tg_tok_s": 62.311857252695766,
+  "inferno_tg_stddev": 1.5336768564031324,
+  "llama_pp_tok_s": 598.713056,
+  "llama_pp_stddev": 3.697379,
+  "llama_tg_tok_s": 64.386323,
+  "llama_tg_stddev": 1.6379,
+  "llama_t1_pp_tok_s": 84.648605,
+  "llama_t1_pp_stddev": 0.145328,
+  "llama_t1_tg_tok_s": 16.473534,
+  "llama_t1_tg_stddev": 0.074192,
+  "inferno_t1_pp_tok_s": 71.26257243615689,
+  "inferno_t1_pp_stddev": 0.17199813728394345,
+  "inferno_t1_tg_tok_s": 23.266772036134295,
+  "inferno_t1_tg_stddev": 0.19137532306713256
+}
+
+--- within-session ratios (lever/parent) ---
+long: tg 50.70993765871119 -> 57.144515715476494 (x1.1269) | pp 798.6328922392393 -> 825.5882838046258 (x1.0338)
+short: tg 63.530573388403276 -> 62.311857252695766 (x0.9808) | pp 618.389012044565 -> 574.0082344547969 (x0.9282)
+```
+
+**8c (Xeon E-2388G, s2.c2.medium):**
+
+```
+# M4b.11 Lever-1 A/B — 2026-07-16T18:40:10Z
+parent: f74069edb7ab935e0ae4dbab074e7c2b795ff445 | lever: ebe83bcfeb5839e42a9e786832c4032c48af3dbc
+model name	: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz
+logical CPUs: 16
+6.9.10+bpo-amd64
+
+## parent-long.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz",
+  "physical_cores": 8,
+  "logical_cores": 16,
+  "inferno_version": "0.1.0",
+  "inferno_git": "f74069e",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 5,
+  "inferno_threads": 8,
+  "llama_threads": 8,
+  "inferno_pp_tok_s": 561.7553606115027,
+  "inferno_pp_stddev": 69.18354133887541,
+  "inferno_tg_tok_s": 54.95298632751336,
+  "inferno_tg_stddev": 0.5608284779582066,
+  "llama_pp_tok_s": 1046.481488,
+  "llama_pp_stddev": 1.974771,
+  "llama_tg_tok_s": 72.676938,
+  "llama_tg_stddev": 0.136844,
+  "llama_t1_pp_tok_s": 165.197085,
+  "llama_t1_pp_stddev": 0.032633,
+  "llama_t1_tg_tok_s": 33.676624,
+  "llama_t1_tg_stddev": 0.017472,
+  "inferno_t1_pp_tok_s": 87.91627694295605,
+  "inferno_t1_pp_stddev": 0.08436818720187408,
+  "inferno_t1_tg_tok_s": 34.17909785553883,
+  "inferno_t1_tg_stddev": 0.09810688797130884
+}
+
+## lever-long.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz",
+  "physical_cores": 8,
+  "logical_cores": 16,
+  "inferno_version": "0.1.0",
+  "inferno_git": "ebe83bc",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 5,
+  "inferno_threads": 8,
+  "llama_threads": 8,
+  "inferno_pp_tok_s": 616.0170539070803,
+  "inferno_pp_stddev": 14.17343068412102,
+  "inferno_tg_tok_s": 62.29783192521944,
+  "inferno_tg_stddev": 0.6613276998916865,
+  "llama_pp_tok_s": 1045.051971,
+  "llama_pp_stddev": 1.860512,
+  "llama_tg_tok_s": 72.736329,
+  "llama_tg_stddev": 0.037116,
+  "llama_t1_pp_tok_s": 165.018451,
+  "llama_t1_pp_stddev": 0.471274,
+  "llama_t1_tg_tok_s": 33.395607,
+  "llama_t1_tg_stddev": 0.026383,
+  "inferno_t1_pp_tok_s": 89.12442616501292,
+  "inferno_t1_pp_stddev": 0.06214856530277479,
+  "inferno_t1_tg_tok_s": 34.56110229413846,
+  "inferno_t1_tg_stddev": 0.11417049388125378
+}
+
+## parent-short.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz",
+  "physical_cores": 8,
+  "logical_cores": 16,
+  "inferno_version": "0.1.0",
+  "inferno_git": "f74069e",
+  "llama_build_commit": "6f4f53f",
+  "pp": 16,
+  "tg": 32,
+  "reps": 5,
+  "inferno_threads": 8,
+  "llama_threads": 8,
+  "inferno_pp_tok_s": 660.5874677011891,
+  "inferno_pp_stddev": 2.047906081336703,
+  "inferno_tg_tok_s": 67.40417397744628,
+  "inferno_tg_stddev": 0.009987423373478046,
+  "llama_pp_tok_s": 695.567542,
+  "llama_pp_stddev": 5.809217,
+  "llama_tg_tok_s": 71.2929,
+  "llama_tg_stddev": 2.690882,
+  "llama_t1_pp_tok_s": 139.792715,
+  "llama_t1_pp_stddev": 0.269516,
+  "llama_t1_tg_tok_s": 33.70961,
+  "llama_t1_tg_stddev": 0.22762,
+  "inferno_t1_pp_tok_s": 101.22746440492234,
+  "inferno_t1_pp_stddev": 0.020644634223130894,
+  "inferno_t1_tg_tok_s": 37.77947822201564,
+  "inferno_t1_tg_stddev": 0.03009997577874529
+}
+
+## lever-short.json
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz",
+  "physical_cores": 8,
+  "logical_cores": 16,
+  "inferno_version": "0.1.0",
+  "inferno_git": "ebe83bc",
+  "llama_build_commit": "6f4f53f",
+  "pp": 16,
+  "tg": 32,
+  "reps": 5,
+  "inferno_threads": 8,
+  "llama_threads": 8,
+  "inferno_pp_tok_s": 660.2509426322911,
+  "inferno_pp_stddev": 3.076636833628491,
+  "inferno_tg_tok_s": 67.38537833543542,
+  "inferno_tg_stddev": 0.409116869918936,
+  "llama_pp_tok_s": 741.148084,
+  "llama_pp_stddev": 0.832686,
+  "llama_tg_tok_s": 73.231058,
+  "llama_tg_stddev": 0.041178,
+  "llama_t1_pp_tok_s": 139.279557,
+  "llama_t1_pp_stddev": 0.193879,
+  "llama_t1_tg_tok_s": 33.878735,
+  "llama_t1_tg_stddev": 0.038399,
+  "inferno_t1_pp_tok_s": 100.87022927632182,
+  "inferno_t1_pp_stddev": 0.16164781412212373,
+  "inferno_t1_tg_tok_s": 38.104628799731145,
+  "inferno_t1_tg_stddev": 0.027262692004646982
+}
+
+--- within-session ratios (lever/parent) ---
+long: tg 54.95298632751336 -> 62.29783192521944 (x1.1337) | pp 561.7553606115027 -> 616.0170539070803 (x1.0966)
+short: tg 67.40417397744628 -> 67.38537833543542 (x0.9997) | pp 660.5874677011891 -> 660.2509426322911 (x0.9995)
+```
+
+**Against Gate 1's projection:** P1 was a ceiling of 51.8% (16c) / 40.8%
+(8c) of decode wall; the conservative headroom targets implied tg ×1.518 /
+×1.408. Observed: tg ×1.1269 (16c) and ×1.1337 (8c) — an implied decode-wall
+reduction of 11.3% / 11.8%. **The projection did not hold at its ceiling;
+the lever's win is real, positive on both machines, and far from P1** — the
+per-head shards evidently do not scale the serial attention pass anywhere
+near `min(t_best, 14)`-way. tg improved on both machines, so the
+pre-registered revert mitigation is not triggered: **the lever is kept.**
+The gap between +12% and the ceiling is a finding for any future decode-
+attention work, not a defect of this one.
+
+**Short-context diagnostic (dispatch overhead near pos ≈ 0, diagnostic
+only):** 16c tg ×0.9808 / pp ×0.9282; 8c tg ×0.9997 / pp ×0.9995. A small
+overhead is visible on the 16c box and none on the 8c box; per the spec, no
+threshold heuristic is added.
+
+pp at 512 moved ×1.0338 (16c) / ×1.0966 (8c); prefill lowering is untouched
+by the lever, and the parent-arm pp stddevs (35.1 and 69.2 tok/s
+respectively) put both movements within run-to-run spread — recorded as
+context, not as a prefill effect.
