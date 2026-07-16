@@ -81,8 +81,19 @@ if [ "$after" -ne "$before" ]; then
   fails+=("throttling: nr_throttled +$((after - before)) during ${CALIB_SECS}s calibration load")
 fi
 
+# Probe 5 — invariant TSC (M4b.12: the dispatch-split instrument compares
+# rdtsc across threads; only meaningful with constant+nonstop TSC).
+tsc_flags=$(awk '/^flags/ { print; exit }' "$PROC/cpuinfo")
+tsc_summary=ok
+for f in constant_tsc nonstop_tsc; do
+  case " $tsc_flags " in
+    *" $f "*) ;;
+    *) fails+=("tsc: cpuinfo flags lack $f"); tsc_summary=missing ;;
+  esac
+done
+
 machine_block
-echo "probes: cpus=$NPROC quota=$quota_summary psi_some_avg10=${psi:-?} throttled_delta=$((after - before)) calib=${CALIB_SECS}s"
+echo "probes: cpus=$NPROC quota=$quota_summary psi_some_avg10=${psi:-?} throttled_delta=$((after - before)) calib=${CALIB_SECS}s tsc=$tsc_summary"
 
 if [ "${#fails[@]}" -eq 0 ]; then
   echo "PREFLIGHT: FIT"

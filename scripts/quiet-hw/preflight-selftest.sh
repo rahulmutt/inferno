@@ -27,6 +27,7 @@ run_pf() { # <root> — runs preflight against the fake tree, fast calibration
 
 # FIT: unquota'd, quiet, enough cores, static cpu.stat (delta 0).
 root=$(mktree "max 100000" "0.10")
+printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\nflags\t\t: fpu constant_tsc nonstop_tsc\n' > "$root/proc/cpuinfo"
 out=$(run_pf "$root") || fail "expected FIT, got exit $? on: $out"
 echo "$out" | grep -q "PREFLIGHT: FIT" || fail "missing FIT line: $out"
 echo "$out" | grep -q "FakeVendor"    || fail "missing machine block: $out"
@@ -61,5 +62,11 @@ out=$(run_pf "$root" 2>&1) && fail "missing-PSI expected nonzero exit"
 echo "$out" | grep -q "PREFLIGHT: UNFIT"            || fail "missing-PSI: no UNFIT line: $out"
 echo "$out" | grep -qE "cpu pressure: .* missing"   || fail "missing-PSI: no missing-PSI reason: $out"
 echo "$out" | grep -q "FakeVendor"                  || fail "missing-PSI: no machine block (crashed before printing?): $out"
+
+# UNFIT: missing invariant-TSC flags (M4b.12 probe 5).
+root=$(mktree "max 100000" "0.10")
+printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\nflags\t\t: fpu sse2\n' > "$root/proc/cpuinfo"
+out=$(run_pf "$root" 2>&1) && fail "missing-TSC expected nonzero exit"
+echo "$out" | grep -q "tsc: cpuinfo flags lack constant_tsc" || fail "missing-TSC: no tsc reason: $out"
 
 echo "preflight-selftest: OK"
