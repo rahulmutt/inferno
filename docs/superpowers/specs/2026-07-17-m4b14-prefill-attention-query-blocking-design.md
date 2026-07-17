@@ -411,3 +411,231 @@ round-consistent per-thread win on the blamed bracket (attention cycles
 geomean is 0.972 (win only at pos0=512) — the win grows with visible
 length and is modest overall; quiet-hw Task 8 owns the real verdict.
 Metal spend unblocked per the pre-registered rule.
+
+### 2026-07-17 — mid-milestone gate sessions (Lever 1 on both boxes)
+
+Both sessions bench branch `m4b14-qblock` at `83c183f` (Tasks 1–7;
+`git_dirty=true` = untracked `models/` + SDD ledger only). Protocol:
+`mise run metal` per `docs/runbooks/metal.md`; on-box `verify.sh --smoke`
+first, then the real pass (preflight + the two gates standalone); preflight
+FIT both boxes. Session A raw: `target/metal/d2.c1.medium-20260717T201908Z`
+(real pass `.../quiet-hw/20260717T205013Z`). Session A trap delete did not
+stick (M4b.13 recurrence); gc hit 409s then a 403 but the delete landed —
+second gc confirmed zero before Session B. Session B (CHI; PHX has no
+s2.c2.medium stock): raw `target/metal/s2.c2.medium-20260717T210046Z`
+(real pass `.../quiet-hw/20260717T212433Z`); same delete-403-then-clear
+pattern, zero servers confirmed twice after.
+
+#### Session A — d2.c1.medium (Xeon Gold 6336Y, 16c, PHX): gate-prefill-attn-split.out
+
+```
+# gate-prefill-attn-split (M4b.14: attn scores/softmax/output sub-brackets) — 2026-07-17T20:50:23Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+--- t=1 prefill profile + attn sub-brackets ---
+profile [prefill] 33.148s wall, 102756652522 cyc total
+  op                                   cycles   share        GB/s
+  attention                       24325232698   23.7%           -
+  matmul:lm_head.weight           19641736136   19.1%        49.3
+  matmul:layers.*.ffn.gate_proj.weight    15016429648   14.6%        49.6
+  matmul:layers.*.ffn.up_proj.weight    15006980710   14.6%        49.6
+  matmul:layers.*.ffn.down_proj.weight    14952208820   14.6%        49.8
+  swiglu                           4292050616    4.2%           -
+  matmul:layers.*.attn.q_proj.weight     2765300442    2.7%        49.6
+  matmul:layers.*.attn.o_proj.weight     2761605764    2.7%        49.6
+  rmsnorm                          1196825042    1.2%           -
+  rope                              869086750    0.8%           -
+  quantize                          530282878    0.5%           -
+  matmul:layers.*.attn.k_proj.weight      397887570    0.4%        49.2
+  matmul:layers.*.attn.v_proj.weight      397068830    0.4%        49.3
+  add                               335778160    0.3%           -
+  bias                              134280006    0.1%           -
+  kv_append                         115689000    0.1%           -
+  embed                              18209452    0.0%           -
+profile [decode] 1.939s wall, 5963657248 cyc total
+  op                                   cycles   share        GB/s
+  attention                        2040674806   34.2%           -
+  matmul:lm_head.weight            1043891364   17.5%        14.4
+  matmul:layers.*.ffn.down_proj.weight      806462214   13.5%        14.4
+  matmul:layers.*.ffn.up_proj.weight      802884778   13.5%        14.4
+  matmul:layers.*.ffn.gate_proj.weight      802215154   13.5%        14.4
+  matmul:layers.*.attn.o_proj.weight      151065526    2.5%        14.1
+  matmul:layers.*.attn.q_proj.weight      149382282    2.5%        14.3
+  swiglu                             68285562    1.1%           -
+  matmul:layers.*.attn.k_proj.weight       22027908    0.4%        13.8
+  matmul:layers.*.attn.v_proj.weight       21857178    0.4%        13.9
+  rope                               19923346    0.3%           -
+  rmsnorm                            19468036    0.3%           -
+  add                                 8873922    0.1%           -
+  bias                                5891304    0.1%           -
+  embed                                556092    0.0%           -
+  quantize                             197776    0.0%           -
+  kv_append                                 0    0.0%           -
+attn [prefill sub-brackets] 24301091998 cyc instrumented
+attn:scores      11316917634
+attn:softmax      2032174764
+attn:output      10951999600
+
+--- attn sub-brackets (grep) ---
+attn:scores      11316917634
+attn:softmax      2032174764
+attn:output      10951999600
+```
+
+#### Session A — gate-bench-protocol.out
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-17T20:51:04Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (16 physical / 32 logical cores)
+inferno 0.1.0 (83c183f) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      911.10 ± 32.19       58.20 ± 0.50 
+inferno (t=1 diag)           1       69.99 ± 0.04        21.93 ± 0.00 
+llama.cpp                   16     1207.63 ± 251.80       59.49 ± 0.40 
+llama.cpp (t=1 diag)         1      118.55 ± 0.08        23.13 ± 0.09 
+
+ratio (inferno/llama.cpp): pp 0.75x | tg 0.98x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 513.42 | tg 61.99 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.79x | tg 0.94x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
+
+#### Session B — s2.c2.medium (Xeon E-2388G, 8c, CHI): gate-prefill-attn-split.out
+
+```
+# gate-prefill-attn-split (M4b.14: attn scores/softmax/output sub-brackets) — 2026-07-17T21:24:43Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+--- t=1 prefill profile + attn sub-brackets ---
+profile [prefill] 23.196s wall, 74041128516 cyc total
+  op                                   cycles   share        GB/s
+  attention                       18525303066   25.0%           -
+  matmul:lm_head.weight           14070624920   19.0%        70.0
+  matmul:layers.*.ffn.up_proj.weight    10763919578   14.5%        70.3
+  matmul:layers.*.ffn.down_proj.weight    10750665936   14.5%        70.4
+  matmul:layers.*.ffn.gate_proj.weight    10706141898   14.5%        70.7
+  swiglu                           2797747810    3.8%           -
+  matmul:layers.*.attn.q_proj.weight     1989105443    2.7%        70.1
+  matmul:layers.*.attn.o_proj.weight     1963575765    2.7%        71.0
+  rmsnorm                           703591821    1.0%           -
+  rope                              437476435    0.6%           -
+  quantize                          385024603    0.5%           -
+  matmul:layers.*.attn.v_proj.weight      283951926    0.4%        70.1
+  matmul:layers.*.attn.k_proj.weight      282957506    0.4%        70.4
+  add                               210382660    0.3%           -
+  kv_append                          83579362    0.1%           -
+  bias                               79132937    0.1%           -
+  embed                               7946850    0.0%           -
+profile [decode] 1.219s wall, 3870785562 cyc total
+  op                                   cycles   share        GB/s
+  attention                        1218812574   31.5%           -
+  matmul:lm_head.weight             707337838   18.3%        22.0
+  matmul:layers.*.ffn.down_proj.weight      546167282   14.1%        21.9
+  matmul:layers.*.ffn.gate_proj.weight      544964554   14.1%        21.9
+  matmul:layers.*.ffn.up_proj.weight      543611279   14.0%        22.0
+  matmul:layers.*.attn.q_proj.weight      101689087    2.6%        21.7
+  matmul:layers.*.attn.o_proj.weight      100533687    2.6%        21.9
+  swiglu                             47517422    1.2%           -
+  matmul:layers.*.attn.v_proj.weight       15139739    0.4%        20.8
+  matmul:layers.*.attn.k_proj.weight       15054783    0.4%        20.9
+  rope                               13463784    0.3%           -
+  rmsnorm                            11217539    0.3%           -
+  add                                 3004174    0.1%           -
+  bias                                2027484    0.1%           -
+  quantize                             158438    0.0%           -
+  embed                                 85898    0.0%           -
+  kv_append                                 0    0.0%           -
+attn [prefill sub-brackets] 18510337643 cyc instrumented
+attn:scores       8122310464
+attn:softmax      1441213287
+attn:output       8946813892
+
+--- attn sub-brackets (grep) ---
+attn:scores       8122310464
+attn:softmax      1441213287
+attn:output       8946813892
+```
+
+#### Session B — gate-bench-protocol.out
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-17T21:25:11Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (8 physical / 16 logical cores)
+inferno 0.1.0 (83c183f) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      738.57 ± 3.92        62.36 ± 0.10 
+inferno (t=1 diag)           1      107.97 ± 0.04        34.58 ± 0.02 
+llama.cpp                    8     1042.85 ± 2.16        72.77 ± 0.02 
+llama.cpp (t=1 diag)         1      165.44 ± 0.71        33.72 ± 0.03 
+
+ratio (inferno/llama.cpp): pp 0.71x | tg 0.86x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 628.80 | tg 72.56 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.70x | tg 0.86x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
+
+#### Gate verdict (pre-registered rule, human-computed)
+
+**Instrument admissibility** (sum of `attn:*` sub-brackets vs the whole
+`attention` bracket, same run):
+
+- A: (11,316,917,634 + 2,032,174,764 + 10,951,999,600) = 24,301,091,998 /
+  24,325,232,698 = **99.90%** — admissible.
+- B: (8,122,310,464 + 1,441,213,287 + 8,946,813,892) = 18,510,337,643 /
+  18,525,303,066 = **99.92%** — admissible.
+
+**Step 1 — attn_share:**
+
+- A: 24,325,232,698 / 102,756,652,522 = **0.2367** (was 35.5% at M4b.13's
+  sessions on the same box type — Lever 1 cut the bracket 43.76 → 24.33 Gcyc,
+  −44.4%, and total t=1 prefill 123.45 → 102.76 Gcyc, −16.8%).
+- B: 18,525,303,066 / 74,041,128,516 = **0.2502** (was 36.5%; total
+  90.78 → 74.04 Gcyc, −18.4%).
+
+**Step 2 — pp_ratio (post-Lever-1, vs llama best-of):** A **0.79x**
+(was 0.74x), B **0.70x** (was 0.70x — t=8 pp512 738.57 vs BLAS-build 1042.85;
+the t=1 diagnostic improved 1.04x→relative but the t=8 ratio is the gate).
+
+**Step 3 — ceiling checks** (`pp_ratio / (1 - f*c) >= 1.0`), sub-bracket
+fractions of prefill total — A: scores 0.11013, softmax 0.01978, output
+0.10658 (scores+output 0.21672); B: scores 0.10970, softmax 0.01947,
+output 0.12084 (scores+output 0.23054):
+
+| menu entry | f (A) | c | A: pp/(1−f·c) | f (B) | B: pp/(1−f·c) | verdict |
+|---|---|---|---|---|---|---|
+| flash online-softmax fused pass | 0.21672 | ½ | 0.79/0.89164 = **0.886** | 0.23054 | 0.70/0.88473 = **0.791** | STOP both |
+| vectorized/batched softmax | 0.01978 | even c=1 | 0.79/0.98022 = **0.806** | 0.01947 | 0.70/0.98053 = **0.714** | STOP both (blame gate also fails — softmax is the smallest sub-bracket) |
+| wider blocks / KV-panel prefetch | 0.21672 | modest < ½ | bounded above by the flash row | 0.23054 | bounded above by the flash row | STOP both |
+
+Upper bound for ANY attention-only lever (whole bracket, impossible c=1):
+A 0.79/0.76327 = 1.035; B 0.70/0.74980 = **0.934 < 1.0** — on the 8c box
+no attention lever, even one that deletes the entire bracket, reaches the
+criterion. This is the same rule-3 shape that kept M4b.13's VNNI unbuilt.
+
+**VERDICT: all-STOP. No Lever-2 menu entry is authorized on either box
+(rule 2 fails everywhere; rule 3 bound fails outright on the 8c box).
+Task 9 is skipped per the pre-registered rule. All-STOP is a successful
+diagnostic outcome (M4b.12/M4b.13 precedent).**
+
+**Finding (for the next milestone's scoping):** after query blocking, the
+t=1 prefill residual is matmul-shaped again — matmul:* sums to ~66.4% (A)
+/ ~67.3% (B) of prefill at memory-stream rates (~49.6 / ~70.3 GB/s), with
+attention at 23.7% / 25.0% (split ~evenly between scores and output;
+softmax ~2%) and lm_head alone at 19.1% / 19.0%. With GEMM exhausted
+(M4b.13) and attention now below the reach of any single-bracket lever on
+the 8c box, closing pp ≥ 1.0x there requires either a cross-bracket lever
+(e.g. quantized KV / attention-as-GEMM — both explicitly out of scope
+here) or accepting the 16c box as the criterion machine. Recorded as a
+diagnostic; no further prefill-attention lever in this milestone.
