@@ -38,3 +38,7 @@ harness = false
 [[bench]]
 name = "attention"
 harness = false
+
+[[bench]]
+name = "attn_decode_phases"
+harness = false
