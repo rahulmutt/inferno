@@ -466,6 +466,115 @@ unsafe fn attn_core_avx2(
     }
 }
 
+/// Query-blocked AVX2 attention (M4b.14). The block structure of
+/// [`inferno_attention_f32_scalar_qblock`] with the AVX2 inner loops of
+/// [`attn_core_avx2`] (fmadd dot + `hsum8`, `expf_avx2` softmax blocks +
+/// `expf_scalar` tail, broadcast-`wn` fmadd V-accumulation). Bit-identical
+/// to the scalar block kernel and, by transitivity, to the per-token kernel.
+///
+/// # Safety
+/// As [`inferno_attention_f32_scalar_qblock`], plus the running CPU has
+/// AVX2+FMA.
+#[allow(clippy::too_many_arguments)]
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_attention_f32_avx2_qblock(
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    scores: *mut f32,
+    kv_base: usize,
+    v_off: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
+) {
+    // SAFETY: contract as the scalar block kernel; head_dim a multiple of 8.
+    unsafe {
+        let scale = 1.0 / (head_dim as f32).sqrt();
+        let group = n_heads / n_kv_heads;
+        let kreg = kv_base;
+        let vreg = kv_base + v_off;
+        let s = pos0 + m_block;
+        for h in 0..n_heads {
+            let g = h / group;
+            // scores pass: load each K vector once, reuse across rows.
+            for t in 0..s {
+                let kb = kv.add(kreg + t * kv_dim + g * head_dim);
+                for r in 0..m_block {
+                    if t <= pos0 + r {
+                        let qh = q.add(r * q_stride + h * head_dim);
+                        let mut acc = _mm256_setzero_ps();
+                        let mut d = 0;
+                        while d < head_dim {
+                            let qv = _mm256_loadu_ps(qh.add(d));
+                            let kvv = _mm256_loadu_ps(kb.add(d));
+                            acc = _mm256_fmadd_ps(qv, kvv, acc);
+                            d += 8;
+                        }
+                        *scores.add(r * s + t) = hsum8(acc) * scale;
+                    }
+                }
+            }
+            // softmax + in-place normalize per row (scalar denom).
+            for r in 0..m_block {
+                let visible = pos0 + r + 1;
+                let base = scores.add(r * s);
+                let mut max = f32::NEG_INFINITY;
+                for t in 0..visible {
+                    max = max.max(*base.add(t));
+                }
+                let maxv = _mm256_set1_ps(max);
+                let mut denom = 0f32;
+                let mut t = 0;
+                while t + 8 <= visible {
+                    let sc = _mm256_loadu_ps(base.add(t));
+                    let e = crate::expf::expf_avx2(_mm256_sub_ps(sc, maxv));
+                    _mm256_storeu_ps(base.add(t), e);
+                    denom += hsum8(e);
+                    t += 8;
+                }
+                while t < visible {
+                    let e = crate::expf::expf_scalar(*base.add(t) - max);
+                    *base.add(t) = e;
+                    denom += e;
+                    t += 1;
+                }
+                for t in 0..visible {
+                    *base.add(t) /= denom;
+                }
+            }
+            // output pass: load each V vector once, reuse across rows.
+            for r in 0..m_block {
+                let oh = out.add(r * out_stride + h * head_dim);
+                for d in (0..head_dim).step_by(8) {
+                    _mm256_storeu_ps(oh.add(d), _mm256_setzero_ps());
+                }
+            }
+            for t in 0..s {
+                let vb = kv.add(vreg + t * kv_dim + g * head_dim);
+                for r in 0..m_block {
+                    if t <= pos0 + r {
+                        let wn = _mm256_set1_ps(*scores.add(r * s + t));
+                        let oh = out.add(r * out_stride + h * head_dim);
+                        for d in (0..head_dim).step_by(8) {
+                            let cur = _mm256_loadu_ps(oh.add(d));
+                            let vv = _mm256_loadu_ps(vb.add(d));
+                            _mm256_storeu_ps(oh.add(d), _mm256_fmadd_ps(wn, vv, cur));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Horizontal sum matching `reduce8`'s tree: (lo+hi) halves then pairwise.
 #[cfg(target_arch = "x86_64")]
 #[inline]

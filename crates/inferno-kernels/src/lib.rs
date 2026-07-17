@@ -31,6 +31,8 @@ pub mod registry;
 pub use attention::inferno_attention_f32_avx2;
 #[cfg(target_arch = "x86_64")]
 pub use attention::inferno_attention_f32_avx2_hspan;
+#[cfg(target_arch = "x86_64")]
+pub use attention::inferno_attention_f32_avx2_qblock;
 pub use attention::inferno_attention_f32_scalar;
 pub use attention::inferno_attention_f32_scalar_hspan;
 pub use attention::inferno_attention_f32_scalar_qblock;
