@@ -157,12 +157,12 @@ unsafe fn dot_pass(
 ) {
     for t in 0..visible {
         let kb = unsafe { kv.add(kreg + t * KV_DIM + g * HEAD_DIM) };
-        let mut acc = unsafe { _mm256_setzero_ps() };
+        let mut acc = _mm256_setzero_ps();
         let mut d = 0;
         while d < HEAD_DIM {
             let qv = unsafe { _mm256_loadu_ps(qh.add(d)) };
             let kvv = unsafe { _mm256_loadu_ps(kb.add(d)) };
-            acc = unsafe { _mm256_fmadd_ps(qv, kvv, acc) };
+            acc = _mm256_fmadd_ps(qv, kvv, acc);
             d += 8;
         }
         unsafe { *scores.add(t) = bhsum8(acc) * scale };
@@ -185,12 +185,12 @@ unsafe fn max_pass(scores: *const f32, visible: usize) -> f32 {
 #[inline]
 #[allow(clippy::missing_safety_doc)]
 unsafe fn exp_pass(scores: *mut f32, visible: usize, max: f32) -> f32 {
-    let maxv = unsafe { _mm256_set1_ps(max) };
+    let maxv = _mm256_set1_ps(max);
     let mut denom = 0f32;
     let mut t = 0;
     while t + 8 <= visible {
         let s = unsafe { _mm256_loadu_ps(scores.add(t)) };
-        let e = unsafe { bexpf_avx2(unsafe { _mm256_sub_ps(s, maxv) }) };
+        let e = unsafe { bexpf_avx2(_mm256_sub_ps(s, maxv)) };
         unsafe { _mm256_storeu_ps(scores.add(t), e) };
         denom += unsafe { bhsum8(e) };
         t += 8;
@@ -218,15 +218,15 @@ unsafe fn av_pass(
     visible: usize,
 ) {
     for d in (0..HEAD_DIM).step_by(8) {
-        unsafe { _mm256_storeu_ps(oh.add(d), unsafe { _mm256_setzero_ps() }) };
+        unsafe { _mm256_storeu_ps(oh.add(d), _mm256_setzero_ps()) };
     }
     for t in 0..visible {
-        let wn = unsafe { _mm256_set1_ps(unsafe { *scores.add(t) } / denom) };
+        let wn = unsafe { _mm256_set1_ps(*scores.add(t) / denom) };
         let vb = unsafe { kv.add(vreg + t * KV_DIM + g * HEAD_DIM) };
         for d in (0..HEAD_DIM).step_by(8) {
             let cur = unsafe { _mm256_loadu_ps(oh.add(d)) };
             let vv = unsafe { _mm256_loadu_ps(vb.add(d)) };
-            unsafe { _mm256_storeu_ps(oh.add(d), unsafe { _mm256_fmadd_ps(wn, vv, cur) }) };
+            unsafe { _mm256_storeu_ps(oh.add(d), _mm256_fmadd_ps(wn, vv, cur)) };
         }
     }
 }
@@ -258,7 +258,7 @@ unsafe fn full_local(b: &mut Buffers, pos: usize, h0: usize, h1: usize) {
         let denom = unsafe { exp_pass(b.scores.as_mut_ptr(), visible, max) };
         unsafe {
             av_pass(
-                unsafe { b.out.as_mut_ptr().add(h * HEAD_DIM) },
+                b.out.as_mut_ptr().add(h * HEAD_DIM),
                 b.kv.as_ptr(),
                 Buffers::V_OFF,
                 g,
