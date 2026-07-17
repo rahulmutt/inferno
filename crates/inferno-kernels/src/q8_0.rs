@@ -23,6 +23,17 @@ const PF_DIST: usize = match option_env!("INFERNO_PF_DIST") {
     None => 4,
 };
 
+/// Register-tile token-group width for the batched GEMM fast path (M4b.13):
+/// MR tokens share each weight-group load and keep their accumulators
+/// register-resident across the block loop. Pure loop restructuring — the
+/// per-(t,r) block-order f32 combine is unchanged at any value, so output
+/// bits never depend on it. Compile-time override via `INFERNO_GEMM_MR`
+/// for the Task 3 µbench sweep; default fixed by that sweep's Amendment.
+const MR: usize = match option_env!("INFERNO_GEMM_MR") {
+    Some(s) => crate::pf::parse_gemm_mr(s),
+    None => 4,
+};
+
 pub fn packed_len_q8_0_rs8(rows: usize, k: usize) -> usize {
     rows.div_ceil(STRIP) * (k / WBLOCK) * GROUP_BYTES
 }
@@ -222,10 +233,12 @@ pub unsafe extern "C" fn inferno_gemv_q8_0_rs8_avx2(
 }
 
 /// Batched Q8_0 GEMV (GEMM): `y[t*rows + r] = W[r] · dequant(xq_t)` for every
-/// token `t in 0..m` and row `r in row_start..row_end`. Each weight block is
-/// read once per batch (outer `b`, inner `t`); per (t,r) the block order is
-/// `0..nb`, identical to `inferno_gemv_q8_0_rs8_*`, so `gemm(m=1)` is
-/// bitwise-equal to `gemv`.
+/// token `t in 0..m` and row `r in row_start..row_end`. Tokens are processed
+/// in `MR`-wide register tiles (M4b.13): each weight block is read once per
+/// tile (outer `b`, inner tile of up to `MR` tokens) instead of once per
+/// token, with a shorter tail tile for `m % MR`. Per (t,r) the block order
+/// is still `0..nb`, identical to `inferno_gemv_q8_0_rs8_*`, so `gemm(m=1)`
+/// is bitwise-equal to `gemv` and the tiling never changes output bits.
 ///
 /// # Safety
 /// As the GEMV symbol, with: `xq` valid for `m` contiguous q8a rows of `k`
@@ -246,27 +259,33 @@ pub unsafe extern "C" fn inferno_gemm_q8_0_rs8_scalar(
     let act = Q8A_BLOCK_BYTES * nb; // per-token activation stride
     for r in row_start..row_end {
         let (strip, lane) = (r / STRIP, r % STRIP);
-        // One accumulator per token; blocks visited in order → gemv order.
-        let mut acc = vec![0f32; m];
-        for b in 0..nb {
-            let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
-            let dw = f32::from_le_bytes(unsafe { g.add(lane * 4).cast::<[u8; 4]>().read() });
-            let qw = unsafe { g.add(32 + lane * WBLOCK) };
-            for (t, at) in acc.iter_mut().enumerate() {
-                let xb = unsafe { xq.add(t * act + b * Q8A_BLOCK_BYTES) };
-                let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
-                let qx = unsafe { xb.add(4) };
-                let mut isum = 0i32;
-                for i in 0..WBLOCK {
-                    let a = i32::from(unsafe { qw.add(i).cast::<i8>().read() });
-                    let bb = i32::from(unsafe { qx.add(i).cast::<i8>().read() });
-                    isum += a * bb;
+        // MR-token tiles then a shorter tail tile; per (t,r) the block
+        // order stays 0..nb → gemv order (bit-identical by construction).
+        let mut t0 = 0;
+        while t0 < m {
+            let mr = MR.min(m - t0);
+            let mut acc = [0f32; 16]; // MR ≤ 16 (parse_gemm_mr bound)
+            for b in 0..nb {
+                let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+                let dw = f32::from_le_bytes(unsafe { g.add(lane * 4).cast::<[u8; 4]>().read() });
+                let qw = unsafe { g.add(32 + lane * WBLOCK) };
+                for (ti, at) in acc.iter_mut().enumerate().take(mr) {
+                    let xb = unsafe { xq.add((t0 + ti) * act + b * Q8A_BLOCK_BYTES) };
+                    let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
+                    let qx = unsafe { xb.add(4) };
+                    let mut isum = 0i32;
+                    for i in 0..WBLOCK {
+                        let a = i32::from(unsafe { qw.add(i).cast::<i8>().read() });
+                        let bb = i32::from(unsafe { qx.add(i).cast::<i8>().read() });
+                        isum += a * bb;
+                    }
+                    *at = (dw * dx).mul_add(isum as f32, *at);
                 }
-                *at = (dw * dx).mul_add(isum as f32, *at);
             }
-        }
-        for (t, at) in acc.iter().enumerate() {
-            unsafe { y.add(t * rows + r).write(*at) };
+            for (ti, at) in acc.iter().enumerate().take(mr) {
+                unsafe { y.add((t0 + ti) * rows + r).write(*at) };
+            }
+            t0 += mr;
         }
     }
 }
@@ -295,15 +314,53 @@ pub unsafe extern "C" fn inferno_gemm_q8_0_rs8_avx2(
     while r < row_end {
         let strip = r / STRIP;
         let lane0 = r - strip * STRIP;
-        // Full-strip fast path: 8 rows lane-parallel, one acc per token.
+        // Full-strip fast path (M4b.13 register tiles): MR tokens per tile,
+        // accumulators register-resident across the block loop; each group's
+        // weight vectors + sign-magnitude split computed once per tile
+        // (previously once per token). Per (t,r) the block-order f32 combine
+        // is unchanged → bit-identical to gemv.
         if lane0 == 0 && r + STRIP <= row_end {
-            let mut acc = vec![_mm256_setzero_ps(); m];
-            for b in 0..nb {
-                let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
-                let qs = unsafe { g.add(32) };
-                // Weight group's 8 per-row scales (lane = row), loaded once.
-                let dw = unsafe { _mm256_load_ps(g.cast()) };
-                for (t, at) in acc.iter_mut().enumerate() {
+            let mut t0 = 0;
+            while t0 + MR <= m {
+                let mut acc = [_mm256_setzero_ps(); MR];
+                for b in 0..nb {
+                    let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+                    let qs = unsafe { g.add(32) };
+                    let dw = unsafe { _mm256_load_ps(g.cast()) };
+                    let mut wv = [_mm256_setzero_si256(); STRIP];
+                    let mut aw = [_mm256_setzero_si256(); STRIP];
+                    for (lane, (wvl, awl)) in wv.iter_mut().zip(&mut aw).enumerate() {
+                        *wvl = unsafe { _mm256_load_si256(qs.add(lane * WBLOCK).cast()) };
+                        *awl = _mm256_sign_epi8(*wvl, *wvl);
+                    }
+                    for (ti, at) in acc.iter_mut().enumerate() {
+                        let xb = unsafe { xq.add((t0 + ti) * act + b * Q8A_BLOCK_BYTES) };
+                        let dx =
+                            f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
+                        let xv = unsafe { _mm256_loadu_si256(xb.add(4).cast()) };
+                        let mut p = [_mm256_setzero_si256(); STRIP];
+                        for (lane, pl) in p.iter_mut().enumerate() {
+                            let sx = _mm256_sign_epi8(xv, wv[lane]);
+                            *pl = _mm256_madd_epi16(_mm256_maddubs_epi16(aw[lane], sx), ones);
+                        }
+                        let isum = _mm256_cvtepi32_ps(hsum8_i32(p));
+                        let dwdx = _mm256_mul_ps(dw, _mm256_set1_ps(dx));
+                        *at = _mm256_fmadd_ps(dwdx, isum, *at);
+                    }
+                }
+                for (ti, at) in acc.iter().enumerate() {
+                    unsafe { _mm256_storeu_ps(y.add((t0 + ti) * rows + r), *at) };
+                }
+                t0 += MR;
+            }
+            // Token tail (m % MR): per-token, same block body (weight loads
+            // per token again — a vanishing share at PREFILL_TILE = 64).
+            for t in t0..m {
+                let mut at = _mm256_setzero_ps();
+                for b in 0..nb {
+                    let g = unsafe { w.add((strip * nb + b) * GROUP_BYTES) };
+                    let qs = unsafe { g.add(32) };
+                    let dw = unsafe { _mm256_load_ps(g.cast()) };
                     let xb = unsafe { xq.add(t * act + b * Q8A_BLOCK_BYTES) };
                     let dx = f32::from_le_bytes(unsafe { xb.cast::<[u8; 4]>().read_unaligned() });
                     let xv = unsafe { _mm256_loadu_si256(xb.add(4).cast()) };
@@ -316,11 +373,9 @@ pub unsafe extern "C" fn inferno_gemm_q8_0_rs8_avx2(
                     }
                     let isum = _mm256_cvtepi32_ps(hsum8_i32(p));
                     let dwdx = _mm256_mul_ps(dw, _mm256_set1_ps(dx));
-                    *at = _mm256_fmadd_ps(dwdx, isum, *at);
+                    at = _mm256_fmadd_ps(dwdx, isum, at);
                 }
-            }
-            for (t, at) in acc.iter().enumerate() {
-                unsafe { _mm256_storeu_ps(y.add(t * rows + r), *at) };
+                unsafe { _mm256_storeu_ps(y.add(t * rows + r), at) };
             }
             r += STRIP;
             continue;
