@@ -682,7 +682,9 @@ impl Pool {
     /// tests force counts here instead).
     ///
     /// # Safety
-    /// As [`Self::par_attention_heads`]; `active >= 1`.
+    /// As [`Self::par_attention_heads`]; `active >= 1` and `active <=
+    /// self.capacity` (a larger value would make `shards.len()` exceed the
+    /// slot count and panic at `slots[..n_worker]`).
     pub(crate) unsafe fn par_attention_heads_at(&self, job: &AttnHeadsJob, active: usize) {
         let n_heads = job.n_heads;
         if n_heads == 0 {

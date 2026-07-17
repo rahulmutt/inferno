@@ -15,7 +15,7 @@ mktree() { # <cpu.max content> <psi avg10> [cgroup rel path, default /podX]
   printf 'some avg10=%s avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' \
     "$2" > "$root/proc/pressure/cpu"
   grep -m1 . /proc/cpuinfo >/dev/null  # sanity: real /proc exists
-  printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\n' > "$root/proc/cpuinfo"
+  printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\nflags\t\t: fpu constant_tsc nonstop_tsc\n' > "$root/proc/cpuinfo"
   echo "$root"
 }
 
@@ -27,7 +27,6 @@ run_pf() { # <root> — runs preflight against the fake tree, fast calibration
 
 # FIT: unquota'd, quiet, enough cores, static cpu.stat (delta 0).
 root=$(mktree "max 100000" "0.10")
-printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\nflags\t\t: fpu constant_tsc nonstop_tsc\n' > "$root/proc/cpuinfo"
 out=$(run_pf "$root") || fail "expected FIT, got exit $? on: $out"
 echo "$out" | grep -q "PREFLIGHT: FIT" || fail "missing FIT line: $out"
 echo "$out" | grep -q "FakeVendor"    || fail "missing machine block: $out"
