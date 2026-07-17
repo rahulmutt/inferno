@@ -113,6 +113,142 @@ fn attn_core_scalar(
     }
 }
 
+/// Query-blocked scalar attention (M4b.14). Computes query rows `[0,
+/// m_block)` — row `r` at position `pos0 + r` — reusing each visible K and
+/// V vector across the block's rows (streamed once per head per block
+/// instead of once per token). Blocking only reorders the query axis, so
+/// each row's arithmetic is bit-for-bit the per-token kernel's: same
+/// `dot8`/`reduce8` order, same block-of-8 `expf_scalar` softmax + scalar
+/// tail, same ascending-`t` `mul_add` V-accumulation.
+///
+/// # Safety
+/// - `out`/`q` valid for `(m_block-1)*{out,q}_stride + n_heads*head_dim` f32.
+/// - `scores` valid for `m_block * (pos0 + m_block)` f32 (scratch).
+/// - `kv` valid for the K/V regions, holding every position `< pos0+m_block`.
+/// - `pos0 + m_block <= seq_len`; `m_block >= 1`; `head_dim` a multiple of 8.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_attention_f32_scalar_qblock(
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    scores: *mut f32,
+    kv_base: usize,
+    v_off: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
+) {
+    // SAFETY: contract above; delegate to a safe-slice core.
+    unsafe {
+        let s = pos0 + m_block;
+        let q_extent = (m_block - 1) * q_stride + n_heads * head_dim;
+        let out_extent = (m_block - 1) * out_stride + n_heads * head_dim;
+        let q = std::slice::from_raw_parts(q, q_extent);
+        let out = std::slice::from_raw_parts_mut(out, out_extent);
+        let scores = std::slice::from_raw_parts_mut(scores, m_block * s);
+        let kv = std::slice::from_raw_parts(kv, kv_base + 2 * v_off);
+        attn_core_scalar_qblock(
+            out, q, kv, scores, kv_base, v_off, pos0, m_block, kv_dim, n_heads, n_kv_heads,
+            head_dim, q_stride, out_stride,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attn_core_scalar_qblock(
+    out: &mut [f32],
+    q: &[f32],
+    kv: &[f32],
+    scores: &mut [f32],
+    kv_base: usize,
+    v_off: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
+) {
+    let scale = 1.0 / (head_dim as f32).sqrt();
+    let group = n_heads / n_kv_heads;
+    let kreg = kv_base;
+    let vreg = kv_base + v_off;
+    let s = pos0 + m_block; // per-row scores stride = max visible over the block
+    for h in 0..n_heads {
+        let g = h / group;
+        // scores pass: each visible K vector loaded once, reused across rows.
+        for t in 0..s {
+            let kb = kreg + t * kv_dim + g * head_dim;
+            let kt = &kv[kb..kb + head_dim];
+            for r in 0..m_block {
+                if t <= pos0 + r {
+                    let qh = &q[r * q_stride + h * head_dim..][..head_dim];
+                    // Same 8-lane partition order as the per-token kernel.
+                    scores[r * s + t] = dot8(qh, kt) * scale;
+                }
+            }
+        }
+        // softmax + in-place normalize per row (denom is a scalar). Mirrors
+        // the per-token loop EXACTLY: block-of-8 reduce8 denom + scalar tail.
+        for r in 0..m_block {
+            let visible = pos0 + r + 1;
+            let row = &mut scores[r * s..r * s + s];
+            let max = row[..visible]
+                .iter()
+                .fold(f32::NEG_INFINITY, |m, v| m.max(*v));
+            let mut denom = 0f32;
+            let mut t = 0;
+            while t + 8 <= visible {
+                let mut lanes = [0f32; 8];
+                for (l, lane) in lanes.iter_mut().enumerate() {
+                    let e = expf_scalar(row[t + l] - max);
+                    row[t + l] = e;
+                    *lane = e;
+                }
+                denom += reduce8(lanes);
+                t += 8;
+            }
+            while t < visible {
+                let e = expf_scalar(row[t] - max);
+                row[t] = e;
+                denom += e;
+                t += 1;
+            }
+            // Normalize now; w/denom is the same value the per-token kernel
+            // computes lazily in its output loop.
+            for w in row[..visible].iter_mut() {
+                *w /= denom;
+            }
+        }
+        // output pass: each visible V vector loaded once, reused across rows.
+        // Zero every row's head-span first, then accumulate in ascending t.
+        for r in 0..m_block {
+            let ob = r * out_stride + h * head_dim;
+            out[ob..ob + head_dim].fill(0.0);
+        }
+        for t in 0..s {
+            let vb = vreg + t * kv_dim + g * head_dim;
+            for r in 0..m_block {
+                if t <= pos0 + r {
+                    let wn = scores[r * s + t];
+                    let ob = r * out_stride + h * head_dim;
+                    for d in 0..head_dim {
+                        out[ob + d] = wn.mul_add(kv[vb + d], out[ob + d]);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Head-span variant (M4b.11): identical per-head math to
 /// [`inferno_attention_f32_scalar`] restricted to heads `[h_start, h_end)`,
 /// so any tiling of `0..n_heads` reproduces the whole call bit-for-bit.
