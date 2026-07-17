@@ -460,3 +460,24 @@ a const-specialized (or dim-monomorphized) kernel is the natural next
 lever, but it is out of M4b.15's pre-registered scope and needs its own
 plan. Per plan Task 5 Step 2.2: proceed to sessions for the quiet-hw
 diagnostic record.
+
+### 2026-07-17 — Task 8: local post-Lever-1 data point (non-quiet) — DEGENERATE (no lever shipped)
+
+Lever 1 shipped nothing (Task 5 STOP), so the plan's Step 1 µbench
+re-run for `r` is moot: `full` is the unchanged shipping kernel and
+r := 0; per the spec the headroom target degenerates to
+`baseline × 1.0` and the milestone closes as a diagnostic. Recorded
+here: the local e2e context point only, honestly labeled.
+
+**Local e2e (NON-QUIET dev box, AMD Ryzen 9 3900, ambient load high —
+context only, feeds no gate):** inferno 0.1.0 (c45e19b) vs llama.cpp
+6f4f53f, qwen2.5-0.5b-instruct-q8_0.gguf, pp=512 tg=128 reps=5:
+
+```
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          12      190.47 ± 6.94        17.34 ± 0.44
+inferno (t=1 diag)           1       61.53 ± 4.45        12.24 ± 0.73
+llama.cpp                   12      109.87 ± 30.93        6.71 ± 1.44
+llama.cpp (t=1 diag)         1       74.63 ± 4.03        17.42 ± 1.07
+ratio (inferno/llama.cpp): pp 1.73x | tg 2.59x
+```
