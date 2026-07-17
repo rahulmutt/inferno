@@ -99,6 +99,10 @@ for the v1 design.
   instrument (off in every shipping/bench build; quiet-hw gate scripts
   build with it), and `INFERNO_ATTN_SHARDS` is its probe-only shard-count
   override — neither is a tuning surface.
+  M4b.12's attribution closed all-STOP: publish/wake/scratch-alloc are each
+  sub-0.2% of the decode wall on both quiet boxes — decode-attention time is
+  in the hspan kernel itself (plus drain-side lane imbalance at 16c), so
+  don't reach for dispatch-side levers there (spec §Amendments 2026-07-17).
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
   operator-driven only, never CI. After any interrupted session run
   `mise run metal-gc` — EXIT traps don't survive killed terminals. The

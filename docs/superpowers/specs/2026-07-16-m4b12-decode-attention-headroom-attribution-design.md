@@ -1424,3 +1424,38 @@ count (0.28×/0.32× C(1) at max shards, flattening past n=7). This is the
 milestone's memory-stall/kernel-bound finding, recorded per §Attribution-first:
 an all-STOP with the finding is a successful outcome. Milestone proceeds
 directly to Task 11 (closing).
+
+### 2026-07-17 — closing verdict (exit-criteria walk)
+
+Milestone closed as a **diagnostic**: all three lever gates STOP'd, no lever
+landed, the shipping code is unchanged from the merged instrument branch
+(main `783b453`). The four exit criteria:
+
+1. **Blame table, sweep, perf capture, admissibility — recorded.** Sessions A
+   (16c) and B (8c) above carry the dispatch-split blame tables and full
+   `INFERNO_ATTN_SHARDS` C(n) sweeps verbatim, with all four admissibility
+   checks passing (sum identity 99.4% / 99.6%; perturbation −0.48% / +0.18%).
+   Deviation, recorded honestly: the `perf stat` rider SKIPPED on both boxes
+   (`perf` not on the box image's PATH — the gate's sanctioned exit 3). The
+   menu guard did not fire, so the perf capture was not needed as escalation
+   evidence; if a future milestone pursues the kernel-bound finding, provision
+   with perf installed.
+2. **Gate verdicts recorded once, arithmetic shown** — the 2026-07-17 gate-
+   verdicts amendment above: menu guard (does not fire, ratios 0.282 / 0.317)
+   and P_W / P_A / P_D per machine against the pre-registered 3% threshold.
+3. **Every STOP recorded; no lever authorized.** Levers A, D, W: STOP on both
+   machines (P_A 0.046%/0.057%, P_D 0.179%/0.045%, P_W 0.000%/0.000%).
+   Tasks 8–10 did not run; there are no data points or reverts to record.
+   The finding: decode-attention wall time is in the hspan kernel itself
+   (72.5% / 94.2% of the instrumented call) plus, on the 16c box, drain-side
+   lane imbalance (26.9%, per-lane kernel sums 0.90–1.19 Gcyc); publish, wake,
+   and scratch-alloc are each sub-0.2% of the decode wall. Dispatch overhead
+   is exonerated — this is the attribution record any future decode-attention
+   work (e.g. flash-decoding-style kernels or shard rebalancing) starts from.
+4. **Closing tg context (v1 context, never the gate):** from the sessions'
+   protocol runs, recorded verbatim in the M4a spec §Amendments (2026-07-17
+   entry): 16c tg 58.78 vs llama best-of 63.00 → **0.91x** (M4b.11 closing
+   baseline 0.96x — different box instance and llama best-of leg; within-
+   session ratios are the comparable quantity); 8c tg 62.66 vs 72.66 →
+   **0.86x** (M4b.11 closing: 0.86x). pp 0.75x / 0.60x. v1 win criterion
+   NOT MET (context only).

@@ -635,3 +635,59 @@ llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 648.69 | tg 72.68
 ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.60x | tg 0.86x
 gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
 ```
+
+### 2026-07-17 — M4b.12 closing benches (both machines, no lever landed)
+
+M4b.12 closed all-STOP (no lever landed), so the closing tg context comes
+from the attribution sessions' own protocol runs — the code benched IS the
+closing state (main `783b453`; session B ran `c2b8e04`, docs-only over it).
+Recorded here verbatim per the standing protocol; verdict cross-referenced
+from the M4b.12 spec §Amendments closing verdict.
+
+#### d2.c1.medium (6336Y 16c, PHX) — gate-bench-protocol.out (verbatim)
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-17T01:33:20Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (16 physical / 32 logical cores)
+inferno 0.1.0 (783b453) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      836.84 ± 19.71       58.78 ± 0.27 
+inferno (t=1 diag)           1       63.35 ± 0.02        16.17 ± 0.01 
+llama.cpp                   16     1232.83 ± 220.71       62.04 ± 0.04 
+llama.cpp (t=1 diag)         1      117.77 ± 0.10        16.44 ± 0.01 
+
+ratio (inferno/llama.cpp): pp 0.68x | tg 0.95x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 532.35 | tg 63.00 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.75x | tg 0.91x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
+
+#### s2.c2.medium (E-2388G 8c, CHI) — gate-bench-protocol.out (verbatim)
+
+```
+# gate-bench-protocol (M4a protocol / v1 win criterion) — 2026-07-17T03:35:26Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+model: qwen2.5-0.5b-instruct-q8_0.gguf (qwen2 1B Q8_0)
+cpu: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (8 physical / 16 logical cores)
+inferno 0.1.0 (c2b8e04) vs llama.cpp 6f4f53f | pp=512 tg=128 reps=5
+
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      622.35 ± 11.92       62.66 ± 0.03 
+inferno (t=1 diag)           1       91.09 ± 0.09        35.27 ± 0.12 
+llama.cpp                    8     1041.01 ± 2.08        72.68 ± 0.05 
+llama.cpp (t=1 diag)         1      164.89 ± 0.61        33.29 ± 0.05 
+
+ratio (inferno/llama.cpp): pp 0.60x | tg 0.86x
+
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 638.64 | tg 72.66 tok/s
+
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.60x | tg 0.86x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
