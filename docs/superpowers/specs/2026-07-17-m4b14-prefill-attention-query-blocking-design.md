@@ -377,3 +377,37 @@ _(quiet-hw session records, gate verdicts, and the closing exit-criteria
 walk are appended here as the milestone runs — data points recorded
 verbatim, never edited; ceiling/blame arithmetic shown; per the standing
 `inferno bench` manual-protocol rule.)_
+
+### Local dev data point (Task 7) — 2026-07-17, NON-QUIET shared devpod (24c, loadavg 8.7–9.4)
+
+**Never a quiet-hw verdict; local gate input only (M4b.13 Task-3 precedent).**
+
+µbench (criterion, `benches/attention.rs`, per_token AVX2 loop vs one qblock
+call, 14h/2kv/hd64, m_block=64; ratio = per_token/qblock point estimates,
+commit 6a95aef):
+- pos0=64: 0.915 · pos0=256: 0.952 · pos0=512: 1.054 · geomean 0.972
+- 4 repeats: only pos0=512 consistently favors qblock; box noise ±10%;
+  one heavily-loaded run excluded (uniform regression both variants).
+  Kernel-level µbench alone: inconclusive at short visible lengths.
+
+t=1 end-to-end prefill (pinned binaries base@35c51bd vs qblock@3789eeb,
+interleaved 3 rounds, same 2048-random-bytes-base64 prompt (2732 chars),
+`--max-tokens 32 --threads 1 --profile`, criterion model):
+
+| round | base wall/cyc | base attn cyc (share) | qblock wall/cyc | qblock attn cyc (share) |
+|---|---|---|---|---|
+| r1 | 35.369s / 109,639,783,449 | 29,744,715,850 (27.1%) | 34.697s / 107,556,961,975 | 27,524,195,994 (25.6%) |
+| r2 | 35.469s / 109,948,338,471 | 29,888,868,713 (27.2%) | 37.566s / 116,451,073,162 | 30,030,547,951 (25.8%) |
+| r3 | 38.409s / 119,064,434,458 | 32,665,111,390 (27.4%) | 37.670s / 116,770,923,534 | 30,394,231,085 (26.0%) |
+
+- min-of-3 total prefill: 109,639,783,449 → 107,556,961,975 cyc = **−1.9%**
+- min-of-3 attention bracket: 29,744,715,850 → 27,524,195,994 cyc = **−7.5%**
+- attention share dropped in EVERY round (27.1/27.2/27.4 → 25.6/25.8/26.0)
+  — share is load-robust; the direction is consistent, not a noise artifact.
+
+**LOCAL GATE: PASS (with caveat).** The end-to-end t=1 run shows a real,
+round-consistent per-thread win on the blamed bracket (attention cycles
+−5–7%, total −1.9% min-of-3). Caveat recorded honestly: the kernel µbench
+geomean is 0.972 (win only at pos0=512) — the win grows with visible
+length and is modest overall; quiet-hw Task 8 owns the real verdict.
+Metal spend unblocked per the pre-registered rule.
