@@ -103,6 +103,22 @@ for the v1 design.
   sub-0.2% of the decode wall on both quiet boxes — decode-attention time is
   in the hspan kernel itself (plus drain-side lane imbalance at 16c), so
   don't reach for dispatch-side levers there (spec §Amendments 2026-07-17).
+  Prefill attention is query-blocked below `inferno_par_attention` (M4b.14):
+  the pool's `run_attn_span` makes ONE `AttnBlockFn` call per lane shard
+  (`inferno_attention_f32_{scalar,avx2}_qblock`, 14-arg ABI with
+  `pos0`/`m_block`/row strides; `HOST_ABI_VERSION` "8"), streaming each
+  visible K/V vector once per block instead of once per token. The block
+  kernel is bit-identical to the per-token kernel for every block length —
+  the rig's `attention_qblock_*` proptests are the guard, and
+  `m_block == 1` bit-equals the per-token path (the `m == 1` prefill and
+  decode routes depend on it). The per-token kernels stay (rig oracle).
+  `inferno-kernels`' `attn-subprofile` cargo feature is the M4b.14
+  scores/softmax/output rdtsc instrument (off in every shipping/bench
+  build; only `gate-prefill-attn-split.sh` enables it) — not a tuning
+  surface. M4b.14 closed all-STOP: post-blocking, t=1 prefill is
+  matmul-shaped again (~66-67% at stream rate) and on the 8c box even
+  deleting the whole attention bracket can't reach pp 1.0x — no further
+  single-bracket prefill lever; see the M4b.14 spec §Amendments.
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
   operator-driven only, never CI. After any interrupted session run
   `mise run metal-gc` — EXIT traps don't survive killed terminals. The
