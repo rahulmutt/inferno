@@ -672,3 +672,15 @@ Lever 1 (query-blocked prefill attention, bit-identical) SHIPPED: t=1
 prefill total −16.8% (16c) / −18.4% (8c), attention bracket −44%, pp
 0.74x→0.79x on the 16c box, with zero tolerance change (`attn_rel_tol`
 untouched; differential green throughout).
+
+#### Erratum (2026-07-17, pre-merge review): matmul-share figures in the Finding
+
+The gate verdict's Finding paragraph and closing-verdict item 4 state
+"matmul:* ≈ 66.4% (A) / 67.3% (B)". Summing the recorded tables above gives
+the correct figures: **A 70,939,217,920 / 102,756,652,522 = 69.0%; B
+50,810,942,972 / 74,041,128,516 = 68.6%**. The recorded tables and every
+pre-registered-rule input (admissibility, attn_share, ceiling rows, bounds)
+are unaffected — matmul share feeds no rule — and the corrected figures make
+the "residual is matmul-shaped" conclusion slightly stronger. Recorded text
+above is left unedited per the standing rule; this erratum is the correction
+of record.

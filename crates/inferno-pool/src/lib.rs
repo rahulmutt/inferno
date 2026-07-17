@@ -230,7 +230,8 @@ pub unsafe extern "C" fn inferno_par_gemm(
 /// # Safety
 /// Same contract as [`Pool::par_attention`] over tokens `0..m`;
 /// additionally `kernel` must be a valid non-null function pointer with
-/// the M4b.3 attention ABI, and the KV cache must already contain every
+/// the M4b.14 query-blocked attention ABI ([`AttnBlockFn`]), and the KV
+/// cache must already contain every
 /// position `< pos0 + m` (the tile's append loop runs before this call).
 /// Generated code guarantees all of this by construction (M3 trust model).
 #[allow(clippy::too_many_arguments)]

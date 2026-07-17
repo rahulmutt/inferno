@@ -116,7 +116,7 @@ for the v1 design.
   scores/softmax/output rdtsc instrument (off in every shipping/bench
   build; only `gate-prefill-attn-split.sh` enables it) — not a tuning
   surface. M4b.14 closed all-STOP: post-blocking, t=1 prefill is
-  matmul-shaped again (~66-67% at stream rate) and on the 8c box even
+  matmul-shaped again (~69% at stream rate) and on the 8c box even
   deleting the whole attention bracket can't reach pp 1.0x — no further
   single-bracket prefill lever; see the M4b.14 spec §Amendments.
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
