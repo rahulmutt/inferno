@@ -440,10 +440,17 @@ single largest prefill bracket on both boxes (35.5% / 36.5%), larger than
 any matmul row; the matmul rows run at memory-stream rates (47.6 GB/s on
 A, ~68 GB/s on B) with lm_head the biggest single matmul (16.2% both).
 Lever 1 (register tiles) shipped and is in these numbers; the remaining
-prefill gap is dominated by the attention kernel plus the ~41% non-matmul
-tail, which no GEMM-side lever can close. This finding scopes a future
-attention-side prefill milestone; per the ladder discipline, closing
-diagnostic follows in the exit-criteria walk.
+prefill gap is dominated by the ~41% non-matmul tail — itself dominated
+by attention — which no GEMM-side lever can close. This finding scopes a
+future attention-side prefill milestone; per the ladder discipline,
+closing diagnostic follows in the exit-criteria walk.
+
+Variance note (Session A): the 16c llama.cpp default-build pp512 carried
+±237.90 on 1235.24 (~19% rel σ) — unusually noisy for quiet hardware.
+The verdict does not lean on it: rule 3 is carried by Session B, whose
+measurements are tight (±0.3–0.5%), and B's ceiling stays < 1.0 across
+the full rounding band of its pp ratio. Treat A's 0.74x/1.046 pair with
+that variance in mind.
 
 ### 2026-07-17 — closing verdict: exit-criteria walk
 
@@ -470,7 +477,7 @@ data — no new provision. Walking the four exit criteria:
    memory-stream rates (47.6 / ~68 GB/s), and the ceiling arithmetic
    shows no GEMM-side lever (including a perfect ½-ceiling VNNI) can
    close it on the 8-core box. The next prefill milestone, if any, must
-   target the attention kernel and the ~41% non-matmul tail.
+   target the ~41% non-matmul tail, which attention dominates.
 
 Context only, never the gate: closing tg 0.96x/0.94x (16c protocol/best-of)
 and 0.86x (8c) from the same sessions.
