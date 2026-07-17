@@ -270,6 +270,58 @@ unsafe fn full_local(b: &mut Buffers, pos: usize, h0: usize, h1: usize) {
     }
 }
 
+/// dot + max only (no exp, no AV). The max is black_boxed so the pass
+/// isn't dead-code-eliminated; scores stores are the kernel's own.
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::missing_safety_doc)]
+unsafe fn dot_only(b: &mut Buffers, pos: usize) {
+    let scale = 1.0 / (HEAD_DIM as f32).sqrt();
+    let group = N_HEADS / N_KV_HEADS;
+    let visible = pos + 1;
+    for h in 0..N_HEADS {
+        let g = h / group;
+        let qh = unsafe { b.q.as_ptr().add(h * HEAD_DIM) };
+        unsafe {
+            dot_pass(
+                qh,
+                b.kv.as_ptr(),
+                0,
+                g,
+                scale,
+                visible,
+                b.scores.as_mut_ptr(),
+            )
+        };
+        black_box(unsafe { max_pass(b.scores.as_ptr(), visible) });
+    }
+}
+
+/// dot + max + exp + denom (no AV).
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::missing_safety_doc)]
+unsafe fn no_av(b: &mut Buffers, pos: usize) {
+    let scale = 1.0 / (HEAD_DIM as f32).sqrt();
+    let group = N_HEADS / N_KV_HEADS;
+    let visible = pos + 1;
+    for h in 0..N_HEADS {
+        let g = h / group;
+        let qh = unsafe { b.q.as_ptr().add(h * HEAD_DIM) };
+        unsafe {
+            dot_pass(
+                qh,
+                b.kv.as_ptr(),
+                0,
+                g,
+                scale,
+                visible,
+                b.scores.as_mut_ptr(),
+            )
+        };
+        let max = unsafe { max_pass(b.scores.as_ptr(), visible) };
+        black_box(unsafe { exp_pass(b.scores.as_mut_ptr(), visible, max) });
+    }
+}
+
 /// The shipping kernel via its public symbol.
 fn full(b: &mut Buffers, pos: usize) {
     // SAFETY: buffers sized per the kernel contract (scores >= pos+1,
@@ -331,6 +383,16 @@ fn bench_phases(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("full_local", pos), &pos, |bch, &pos| {
             // SAFETY: avx2+fma asserted in main; buffer contract as `full`.
             bch.iter(|| unsafe { full_local(black_box(&mut b), pos, 0, N_HEADS) })
+        });
+        let mut b = Buffers::new();
+        group.bench_with_input(BenchmarkId::new("dot_only", pos), &pos, |bch, &pos| {
+            // SAFETY: avx2+fma asserted in main.
+            bch.iter(|| unsafe { dot_only(black_box(&mut b), pos) })
+        });
+        let mut b = Buffers::new();
+        group.bench_with_input(BenchmarkId::new("no_av", pos), &pos, |bch, &pos| {
+            // SAFETY: avx2+fma asserted in main.
+            bch.iter(|| unsafe { no_av(black_box(&mut b), pos) })
         });
     }
     group.finish();
