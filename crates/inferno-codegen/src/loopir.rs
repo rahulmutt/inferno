@@ -114,21 +114,27 @@ pub fn gemm_symbol(dtype: &DType, isa: inferno_kernels::KernelIsa) -> String {
     gemv_symbol(dtype, isa).replace("_gemv_", "_gemm_")
 }
 
-/// `inferno_attention_f32_{isa}`: the single f32 attention kernel (no dtype
-/// axis). Selected by the same `KernelIsa` codegen uses for gemv/gemm.
+/// `inferno_attention_f32_{isa}_qblock`: the query-blocked f32 attention
+/// kernel (M4b.14). Passed by pointer to `inferno_par_attention`, which now
+/// calls it once per lane shard. Selected by the same `KernelIsa` codegen
+/// uses for gemv/gemm.
 pub fn attention_symbol(isa: inferno_kernels::KernelIsa) -> String {
     let isa = match isa {
         inferno_kernels::KernelIsa::Scalar => "scalar",
         inferno_kernels::KernelIsa::Avx2 => "avx2",
     };
-    format!("inferno_attention_f32_{isa}")
+    format!("inferno_attention_f32_{isa}_qblock")
 }
 
 /// `inferno_attention_f32_{isa}_hspan`: the head-span variant (M4b.11),
 /// selected identically to [`attention_symbol`]. Passed by pointer to
 /// `inferno_par_attention_heads`; never called directly by generated code.
 pub fn attention_hspan_symbol(isa: inferno_kernels::KernelIsa) -> String {
-    format!("{}_hspan", attention_symbol(isa))
+    let isa = match isa {
+        inferno_kernels::KernelIsa::Scalar => "scalar",
+        inferno_kernels::KernelIsa::Avx2 => "avx2",
+    };
+    format!("inferno_attention_f32_{isa}_hspan")
 }
 
 /// Translate a [`Plan`]'s fusion islands into a [`LoopIr`]: one [`Step`] per

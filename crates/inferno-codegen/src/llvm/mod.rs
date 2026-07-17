@@ -125,6 +125,39 @@ impl<'c> LlvmModule<'c> {
             );
         }
 
+        // void inferno_attention_f32_<isa>_qblock(ptr out, ptr q, ptr kv,
+        //   ptr scores, i64 kv_base, i64 v_off, i64 pos0, i64 m_block,
+        //   i64 kv_dim, i64 n_heads, i64 n_kv_heads, i64 head_dim,
+        //   i64 q_stride, i64 out_stride)
+        // — the M4b.14 query-blocked prefill kernel; passed as a function
+        // pointer to inferno_par_attention, never called directly.
+        let attn_qblock_ty = void.fn_type(
+            &[
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                ptr.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+                i64_t.into(),
+            ],
+            false,
+        );
+        for isa in ["scalar", "avx2"] {
+            self.module.add_function(
+                &format!("inferno_attention_f32_{isa}_qblock"),
+                attn_qblock_ty,
+                Some(Linkage::External),
+            );
+        }
+
         // void inferno_attention_f32_<isa>_hspan(ptr out, ptr q, ptr kv,
         //   ptr scores, i64 kv_base, i64 v_off, i64 pos, i64 kv_dim,
         //   i64 n_heads, i64 n_kv_heads, i64 head_dim, i64 h_start, i64 h_end)
