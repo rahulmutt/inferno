@@ -1,0 +1,367 @@
+# M4b.15 — Decode Attention Per-Thread Kernel Quality (Phase-Marginal µbench, Gated KV-Split) Design
+
+**Date:** 2026-07-17
+**Status:** Approved design, pre-implementation
+**Milestone:** M4b.15 (see [inferno v1 design](2026-07-04-inferno-v1-design.md)
+§Milestones; follows [M4b.14](2026-07-17-m4b14-prefill-attention-query-blocking-design.md))
+
+This milestone takes up the **decode attention** finding that M4b.12's
+closing verdict recorded as the starting point for any future
+decode-attention work: the wall time is in the hspan kernel itself, not
+in dispatch, not in bandwidth. It follows the attribution-first
+discipline one level deeper than M4b.12 went — a phase-marginal µbench
+that explains where the kernel's cycles go *inside* the kernel boundary,
+a pair of bit-neutral per-phase levers gated on that blame, and one
+order-changing lever (a KV-position-split kernel, flash-decoding shape)
+pre-registered behind a mid-milestone gate.
+
+## Motivation
+
+At the M4b.14 closing benches (2026-07-17, both quiet-hw boxes, M4a
+protocol), the v1 win criterion (pp > 1x AND tg > 1x vs llama.cpp at its
+best) stands at:
+
+| machine | pp512 vs best-of | tg128 vs best-of |
+|---|---|---|
+| d2.c1.medium (6336Y 16c) | 0.79x | 0.94x |
+| s2.c2.medium (E-2388G 8c) | 0.70x | 0.86x |
+
+M4b.14's closing verdict established that the remaining pp gap is not
+closable from inside any single prefill bracket on the 8c box. **tg is
+the closer gap** (0.94x on the 16c box), and it is the direction the
+existing attribution record points at. That record, in full:
+
+1. **Decode attention is not bandwidth-bound.** M4b.11's Gate 2
+   arithmetic: at best-t the attention pass streams unique KV at
+   2.41 GB/s (16c) / 3.91 GB/s (8c) — **4.4% / 8.5%** of each machine's
+   measured bandwidth ceiling (54.39 / 45.95 GB/s, gate-bw-curve). F16
+   KV was STOP'd on that arithmetic (P2 = 0.09% / 0.25%) and stays
+   closed.
+2. **Decode attention is not dispatch-bound.** M4b.12's dispatch-split
+   blame tables: publish, wake-parked, and scratch-alloc are each
+   **sub-0.2%** of decode wall on both machines; the menu guard did not
+   fire (C(max)/C(1) = 0.28 / 0.32 — the kernel scales to the box's
+   lane count).
+3. **The wall is the kernel plus, on 16c, the drain.** kernel(shard0)
+   is **72.5% (16c) / 94.2% (8c)** of the instrumented call; on the 16c
+   box drain — the dispatcher waiting on the slowest lane — is
+   **26.9%**, with per-lane kernel sums spanning 0.90–1.19 Gcyc.
+4. **Attention's share of decode wall at best-t** (M4b.12 best-t
+   profiles, slowest-lane kernel sum × 1536 calls / decode total):
+   ~**27.9%** (16c: 773,833 × 1536 / 4,266,740,470) / ~**22.2%** (8c:
+   569,389 × 1536 / 3,943,440,779).
+
+A kernel that is neither streaming memory near its bandwidth roofline
+nor waiting on dispatch is stalling on something *inside* the kernel
+boundary — and nothing in the record says what. That unattributed
+region is this milestone's target. Ceiling context (why tg, unlike pp,
+is arithmetically in reach): removing a fraction `c` of the attention
+bracket reaches `tg_ratio / (1 - attn_share·c)`; at c=½ that is 1.09x
+(16c) / 0.97x (8c), and at c=1, 1.30x / 1.11x. The 16c box can close
+from attention alone; the 8c box is tight — the headroom-set exit
+criterion (below) is scoped for exactly that honesty.
+
+### The kernel-level suspects (by inspection — the µbench decides)
+
+`attn_core_avx2` (`inferno-kernels/src/attention.rs`) computes, per
+head: a QK-dot pass over every visible position, a max pass, an
+exp+denominator pass (`expf_avx2` 8-wide + scalar tail), and a weighted
+AV-accumulation pass. Two serial-dependency structures stand out:
+
+- **QK dot:** one YMM accumulator per position — head_dim 64 is a chain
+  of 8 *dependent* FMAs (4–5 cyc latency each) followed by an `hsum8`
+  reduction, per visible position. The loads could issue far ahead of
+  the FMAs; the single accumulator serializes them. This is consistent
+  with a kernel running at 4–9% of its bandwidth roofline.
+- **AV accumulate:** the 64-float output row is loaded, FMA'd, and
+  stored back to memory **once per visible position** — a
+  store-to-load-forwarding chain the length of the visible range. The
+  row fits in exactly 8 YMM registers.
+
+Counter-hypotheses the µbench must be able to blame instead: the
+exp/softmax pass (already 8-wide, but never measured in isolation), and
+GQA K/V re-streaming (7 Q-heads per KV head re-read the same K/V; the
+M4b.11 arithmetic says bandwidth is not the bound, but the µbench's
+roofline anchors confirm or refute it at working-set scale). Inspection
+is not attribution: **no lever ships without its phase being blamed by
+measurement.**
+
+### The 16c lane-imbalance reality (why "rebalancing" is not a lever)
+
+`shard_table_aligned(n_heads=14, active=16, align=1)`
+(`inferno-pool/src/shard.rs`) already produces **14 one-head shards** —
+every lane gets exactly one head, and two lanes idle. There is nothing
+to reassign at head granularity: the 26.9% drain and the 0.90–1.19 Gcyc
+per-lane spread arise at *equal* shard sizes (candidate explanations:
+dispatcher-lane double duty, GQA-group cache locality — 7 lanes stream
+each of the 2 shared KV groups — or topology). The µbench's cold/warm
+axis probes how much cache state can explain; the only *structural*
+remedy is granularity finer than a head, which is precisely Lever 2.
+The 16c drain fraction is therefore a **blame key for Lever 2**, not a
+Lever 1 entry.
+
+## Scope Decisions (M4b.15)
+
+| Decision | Choice |
+|---|---|
+| Instrument | Phase-marginal µbench (`attn_decode_phases`, new bench in `inferno-kernels`): phase-isolating kernel variants + counterfactual probes + roofline anchors. Bench-local loop copies; zero shipping-code change |
+| Levers | **Lever 1** = up to two bit-neutral per-phase kernel fixes (multi-position-blocked QK dot; register-resident AV accumulation), **independently gated** on the µbench blame — they address disjoint phases and compose. **Lever 2** = KV-position-split kernel (flash-decoding shape), authorized only by the mid-milestone gate |
+| Exit criterion | **Headroom-set target (M4b.11 style):** closing tg per box judged against `baseline_tg × (1 + S × r)` with `S`, `r`, and the baseline all measured in-session before the closing runs. v1 tg ≥ 1.0x recorded as context, never the gate. Sanctioned STOP-outs below |
+| Phase | **Decode attention (`m == 1` path) only.** Prefill attention (M4b.14's query-blocked kernel), every GEMM/GEMV path, and the pool dispatch machinery untouched |
+| Dtype | **f32 KV.** M4b.11's F16 KV STOP stands; the recorded arithmetic (4–9% of bandwidth ceiling) already forecloses a bandwidth re-opening |
+| Machines | 16c `d2.c1.medium` (6336Y) + 8c `s2.c2.medium` (E-2388G); one quiet-hw session per box doubling as mid-gate + closing (M4b.13/M4b.14 precedent); provision with `perf` on the image PATH (M4b.12 deviation, carried forward) |
+| Standing invariants | Lever 1 kernels bit-equal the current ones (per-position math unchanged); scalar kernel untouched; scalar↔AVX2 per-ISA identity; `_hspan` ≡ whole-call over any head split; `m == 1` compiled-path identity; cross-thread bit-identity; `attn_rel_tol` / `logits_abs_tol` untouched by Lever 1; compiled-vs-interpreter and artifact differentials green throughout |
+
+**Explicitly out of scope:**
+
+- **Prefill attention.** M4b.14 closed it (all-STOP; on the 8c box no
+  attention lever reaches the pp criterion). No prefill claim is made.
+- **F16 KV / any KV dtype change** (M4b.11 gate verdict; stays closed
+  unless a future attribution shows decode attention bandwidth-bound).
+- **Decode GEMV / bandwidth levers.** The 8c ceiling arithmetic says
+  attention alone may not reach tg 1.0x there; that is what the
+  headroom-set exit absorbs. A GEMV milestone is a separate decision.
+- **Dispatch/pool changes.** M4b.12 exonerated dispatch; publish, wake,
+  and alloc are closed findings.
+- **Shard reassignment.** Impossible at head granularity (14 one-head
+  shards); subsumed by Lever 2.
+
+## The instrument — `attn_decode_phases`
+
+**Why variants, not timers.** The per-call kernel wall is too small for
+intrusive sub-brackets — rdtsc pairs inside the per-position loops would
+perturb the very latency chains under suspicion (M4b.12's brackets
+worked because dispatch spans are µs-scale). The µbench instead times
+**phase-isolating variants** and attributes by *marginals*, with a
+pre-registered identity check standing in for M4b.12's sum-identity
+admissibility.
+
+**Structure.** New criterion bench `attn_decode_phases` in
+`inferno-kernels/benches/`, registered with the existing
+`mise run bench-kernels` task. Protocol geometry (14 Q / 2 KV heads,
+head_dim 64, `kv_dim` 128), single-threaded, one full 14-head call per
+iteration. Inputs deterministically varied (LCG fill — spread exp
+inputs, no RNG dependency). All variants are bench-local copies of
+`attn_core_avx2`'s loops; the shipping kernel is additionally timed via
+its public symbol as the anchor:
+
+1. **`full`** — the shipping kernel (public symbol).
+2. **`full_local`** — bench-local copy (guards against a copy-drift
+   artifact; must match `full` within noise or the run is inadmissible).
+3. **`dot_only`** — QK dot + `hsum8` + max; no exp, no AV.
+4. **`no_av`** — dot + max + exp + denom; no AV.
+   Marginals: **dot** = `dot_only`, **softmax** = `no_av − dot_only`,
+   **AV** = `full_local − no_av`.
+5. **Counterfactual probes** (also the Lever 1 candidates):
+   **`dot_blocked`** — the QK pass with N positions in flight on
+   independent accumulators, each position's own partition order and
+   `hsum8` tree unchanged (bit-identical per position);
+   **`av_regacc`** — the AV pass with the out row held in 8 YMM
+   registers across all positions, t-ascending accumulation order
+   preserved (bit-identical); **`combined`** — both.
+6. **Roofline anchors:** a pure K/V-stream loop over the same visible
+   extent (the bandwidth bound at working-set size) and an FMA-peak
+   microloop (the compute bound). Each phase marginal is read against
+   both anchors.
+
+**Sweep axes:** `pos ∈ {127, 511, 639, 1023, 2047}` — 511/639 bracket
+the bench protocol's decode range (pp 512 + tg 128); the wider points
+are for understanding, not gating. **Cold-vs-warm KV** at each pos:
+one head timed with KV freshly evicted vs re-run — the probe at the 16c
+per-lane-spread hypothesis (bounds how much cache state can explain; it
+cannot reproduce the pool).
+
+**Admissibility (pre-registered):** at every swept pos —
+(a) monotonicity `dot_only ≤ no_av ≤ full_local`;
+(b) every marginal ≥ 0 and `dot + softmax + AV` within ±10% of
+`full_local`; (c) `full_local` within ±5% of `full`. Any failure → the
+decomposition is not trusted, no lever gate may consume the run, and
+the instrument finding is itself the milestone's recorded outcome
+(sanctioned STOP-out).
+
+**Where it runs:** local dev box first — the Lever 1 gate input
+(M4b.14 Task 7 precedent: non-quiet, honestly labeled, gates on ratios
+not absolutes) — then re-run verbatim in each quiet-hw session for the
+record.
+
+## Pre-registered gates
+
+Formulas fixed here, before any measurement; verdicts recorded once in
+§Amendments with the arithmetic shown. No lever ships without its gate.
+
+**Gate 1a — dot blocking.** Ship iff, on the local µbench:
+(a) the dot marginal ≥ **15%** of `full_local` at pos 511 and 639, AND
+(b) `dot_blocked` beats `full_local` by ≥ **10%** whole-call at both of
+those positions, at the best block size N over the swept {2, 4, 8} —
+that N is the one that ships.
+
+**Gate 1b — register AV.** Same rule with the AV marginal and
+`av_regacc`.
+
+Gates 1a and 1b are evaluated independently; zero, one, or both fire.
+If both fire, `combined` must also beat each single probe (sanity; a
+regression there is recorded and the better single lever ships alone).
+
+**Softmax-blamed escape.** If the softmax marginal exceeds both other
+marginals at pos ≥ 511, no scoped bit-neutral lever exists
+(`expf_avx2` is already 8-wide): Lever 1 STOPs, the finding is
+recorded, and the milestone proceeds to the sessions for the diagnostic
+record.
+
+**Headroom-set target** (fixed at each session's mid-gate, judged at
+closing, per box):
+
+```
+tg_target = baseline_tg × (1 + S × r)
+```
+
+- `baseline_tg`: re-benched in-session on the same box instance before
+  the Lever 1 binary runs (M4b.11 rule — within-session ratios are the
+  comparable quantity).
+- `S`: attention's share of decode wall from the session's fresh best-t
+  split-bracket profile of the *baseline* binary.
+- `r`: whole-call kernel reduction (`full` old vs new via public
+  symbol), re-measured by the µbench **on that box**, averaged over
+  pos {511, 639}.
+
+Conservatism as in M4b.11: `(1 + S·r)` understates what a wall-share
+reduction implies (`1/(1−S·r)`) but ignores second-order effects; the
+target nets those against each other. If Lever 1 shipped nothing
+(gates fail / softmax escape), the target degenerates to
+`baseline × 1.0` and the milestone closes as a diagnostic on the
+instrument findings alone.
+
+**Gate 2 — KV-position-split kernel (Lever 2).** Evaluated at each
+session's mid-gate from *post-Lever-1* measurements: a `pool-profile`
+dispatch-split profile (M4b.12 instrument, rebuilt on the Lever 1
+binary) and the fresh best-t profile.
+
+```
+P2 = S_residual × c
+```
+
+- `S_residual`: attention share of decode wall post-Lever-1 (slowest-
+  lane kernel sum × calls / decode total, M4b.12 arithmetic).
+- `c`: the drain fraction of the instrumented call — the share
+  sub-head granularity can reclaim (16c baseline 26.9%; 8c ~6%, which
+  forecloses authorization there absent a surprise).
+
+Thresholds, M4b.11 verbatim: **≥ 5% on both machines → authorized;
+< 3% on both → STOP; split → judgment call, argument recorded in the
+amendment.** The expected outcome is a split (16c yes-ish, 8c no) — the
+judgment call must weigh that Lever 2's tolerance re-derivation is paid
+once but its win may exist on one box only.
+
+**Lever 2 numerics (pre-committed, if authorized):** a KV-position
+split merges per-split running maxima and exp-sums — reduction order
+changes, so outputs change. `attn_rel_tol` (and `logits_abs_tol` if the
+artifact differential moves) get a documented re-derivation against
+observed error distributions **before** any win claim — never
+loosened-to-green. The split kernel is a new pool entry point beside
+`inferno_par_attention_heads` (dispatch machinery untouched); ABI and
+artifact-cache-key impact assessed in the implementation plan. If the
+re-derivation would exceed what the observed distributions justify,
+Lever 2 reverts and the STOP is recorded (M4b.2 revert discipline).
+
+## Lever 1 — the bit-neutral fixes
+
+**Multi-position-blocked QK dot** (`dot_blocked` promoted): process N
+positions per outer step, each with its own accumulator register; the
+loads interleave and the FMA chains overlap. Each position's dot
+retains today's partition order and `hsum8` tree — **bit-identical per
+position by construction**. N is the Gate 1a winner over the swept
+{2, 4, 8}, fixed before shipping.
+
+**Register-resident AV accumulation** (`av_regacc` promoted): hold
+`out[h·64 .. h·64+64)` in 8 YMM accumulators across the whole visible
+loop; store once at the end. Accumulation order per output element
+stays t-ascending — **bit-identical by construction**.
+
+Both land inside `attn_core_avx2` only. The scalar kernel is untouched
+(its outputs are already the reference; Lever 1 does not change any
+output anywhere). The `_hspan` and whole-call public symbols keep their
+signatures; the qblock prefill kernel is untouched.
+
+**Testing:** rig exact-equality (M2 pattern) extended — blocked-dot and
+register-AV paths vs `attention_reference()` bit-exact across the
+geometry sweep including `visible` edge cases (1, 7, 8, 9, block-size
+boundaries); `_hspan` ≡ whole-call over every head split (existing
+hspan tiling tests re-run against the new core); `m == 1` compiled-path
+identity; `cargo test -p inferno-codegen --test differential` and
+`cargo test -p inferno-core --test artifact` green with tolerances
+untouched.
+
+## Tasks
+
+1. **µbench** — build `attn_decode_phases` (variants, probes, anchors,
+   cold/warm axis); run locally; record the full table + admissibility
+   verdict in §Amendments.
+2. **Local gate verdicts** — Gates 1a/1b (and the softmax escape if it
+   fires) computed from the Task 1 table, arithmetic recorded, before
+   any shipping-code change.
+3. **Lever 1 implementation** — only gate-passed fixes; rig equality
+   tests extended; both differentials green; `mise run test` +
+   `mise run lint`.
+4. **Local data point** — µbench re-run on the shipped kernel (public
+   symbol) + local e2e bench, honestly labeled non-quiet.
+5. **Quiet-hw session A (16c d2.c1.medium)** — baseline re-bench;
+   baseline best-t profile → `S`; µbench (record + `r`); headroom
+   target fixed; Lever 1 protocol runs; post-Lever-1 `pool-profile`
+   dispatch-split profile; Gate 2 inputs recorded. Provisioned per the
+   metal runbook, `perf` on PATH, `metal-gc` + zero-server check after.
+6. **Quiet-hw session B (8c s2.c2.medium)** — same protocol.
+7. **Gate 2 verdict** — computed once from both sessions' amendments,
+   arithmetic shown.
+8. **Lever 2** — only if authorized: KV-position-split kernel,
+   documented tolerance re-derivation before any claim, its own local
+   gate + rig tests, and a follow-up session pair for its closing data
+   point. If Gate 2 STOPs or splits-to-no, Tasks 5–6 double as the
+   closing sessions (M4b.13/M4b.14 precedent).
+9. **Closing verdict** — exit-criteria walk in §Amendments; tg vs the
+   headroom-set targets per box; v1 ratios recorded as context in the
+   M4a spec §Amendments.
+
+## Exit criteria
+
+1. µbench built; admissibility recorded locally and on both boxes.
+2. Every gate verdict (1a, 1b, softmax escape if fired, Gate 2)
+   recorded once with the arithmetic shown; no lever shipped without
+   its gate.
+3. All standing invariants held: rig identities bit-exact, tolerances
+   untouched — unless Lever 2 fired, in which case its re-derivation is
+   documented in §Amendments with the observed distributions.
+4. Closing tg judged against the headroom-set targets on both boxes;
+   v1 context recorded, never the gate.
+5. Every STOP recorded as a finding. Sanctioned STOP-outs: instrument
+   inadmissible; softmax-blamed; both Lever 1 gates fail; Gate 2
+   STOP/split-to-no. Each closes the milestone as a diagnostic
+   (M4b.12 precedent: an all-STOP with the finding is a successful
+   outcome).
+
+## Risks
+
+- **The marginals may not decompose cleanly** — out-of-order overlap
+  means `dot_only` + softmax + AV can undershoot `full` (phases hide
+  under each other). The ±10% identity check is the tripwire; an
+  inadmissible decomposition is itself a finding (which phases overlap
+  is information about the stall structure).
+- **Compiler autovectorization drift in bench-local copies** —
+  `full_local` vs `full` (±5%) guards it.
+- **`r` measured single-threaded may not transfer to the pool** (14
+  lanes share L2/DRAM differently than one). Mitigation: the headroom
+  target uses in-session `r` on the criterion box, and the closing
+  judgment is against the target, not the µbench.
+- **The 8c box may again be the wall** — at c=½, attention arithmetic
+  reaches only ~0.97x there. The headroom-set exit absorbs this
+  honestly; the closing verdict must state what the residual decode
+  wall is shaped like (GEMV bandwidth?) for the next milestone's
+  scoping, exactly as M4b.14 did for prefill.
+- **Lever 2's re-derivation cost is paid before its win is proven** —
+  that is why it sits behind Gate 2 with M4b.11's thresholds, and why
+  the split-verdict judgment must be recorded, not hand-waved.
+
+## Amendments
+
+Session records, gate verdicts, and the closing exit-criteria walk are
+appended here as they land; recorded data points are never edited
+(erratum pattern if a correction is needed).
