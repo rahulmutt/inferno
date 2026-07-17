@@ -444,3 +444,37 @@ prefill gap is dominated by the attention kernel plus the ~41% non-matmul
 tail, which no GEMM-side lever can close. This finding scopes a future
 attention-side prefill milestone; per the ladder discipline, closing
 diagnostic follows in the exit-criteria walk.
+
+### 2026-07-17 — closing verdict: exit-criteria walk
+
+Lever 2 was gated out (rule 3), so the Task 5 sessions are the closing
+data — no new provision. Walking the four exit criteria:
+
+1. **Lever-1 dev data point recorded?** Yes — "Lever 1 dev data point
+   (Task 3 local gate)" above: interleaved µbench (MR=4 geomean +11.9% on
+   the blamed shapes), t=1 pp +6.8%/+5.0%, honestly labeled non-quiet;
+   local gate PASS unblocked metal spend.
+2. **Fresh split-bracket profiles + gate verdict with arithmetic?** Yes —
+   "mid-milestone gate sessions" (both boxes verbatim) and "pre-registered
+   ladder verdict" above: matmul_share 58.57% / 58.32%, ceiling checks
+   1.046 / 0.988, rule 3 STOP-out, ½ factor untouched.
+3. **Every gate outcome recorded; no lever shipped without its gate?**
+   Yes — Lever 1 shipped only after the Task 3 local gate PASS; Lever 2
+   (Tasks 6–7) was never built: the mid-milestone gate STOPped it. An
+   all-STOP with the finding is a successful outcome per this spec.
+4. **Closing pp vs llama best-of on both boxes:** 0.74x (d2.c1.medium,
+   6336Y 16c) and 0.70x (s2.c2.medium, E-2388G 8c) — **pp < 1.0x on both
+   → v1 pp criterion NOT MET.** The recorded STOP finding: the residual
+   prefill gap is attention-shaped — attention is the largest t=1 prefill
+   bracket on both boxes (35.5% / 36.5%), the matmul rows already run at
+   memory-stream rates (47.6 / ~68 GB/s), and the ceiling arithmetic
+   shows no GEMM-side lever (including a perfect ½-ceiling VNNI) can
+   close it on the 8-core box. The next prefill milestone, if any, must
+   target the attention kernel and the ~41% non-matmul tail.
+
+Context only, never the gate: closing tg 0.96x/0.94x (16c protocol/best-of)
+and 0.86x (8c) from the same sessions.
+
+**M4b.13 CLOSED** — 6 of 8 tasks run; Tasks 6–7 skipped per the
+pre-registered gate; Lever 1 merged in PR #30; data record in this spec
+and M4a §Amendments.
