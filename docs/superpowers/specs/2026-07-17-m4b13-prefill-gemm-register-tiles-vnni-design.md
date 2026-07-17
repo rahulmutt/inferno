@@ -200,3 +200,51 @@ adjustable at gate time.
   session time per the M4a protocol; ratios are judged within-session.
 - **Metal session economics** — no parallel provisions; `metal-gc` after
   any failed session (standing runbook).
+
+## Amendments
+
+### 2026-07-17 — Lever 1 dev data point (Task 3 local gate)
+
+Dev box (AMD Ryzen 9 3900, Zen 2, 12c/24t, shared devpod host), not quiet
+hardware — local gate only, never the exit criterion.
+
+**Methodology note:** the devpod's host carried heavy neighbor load during
+the session (host loadavg 35–44 on 24 cores, no load inside this
+container), so single-shot criterion runs swung up to ±40% on the largest
+shape. The sweep below therefore used four pinned bench binaries
+(pre-tiling baseline @ 5deafb7 and the tiled kernel @ 930ef87 built at
+INFERNO_GEMM_MR=2/4/8) executed **interleaved, 3 rounds, round-robin**, and
+scores each variant by min-of-medians across rounds (least-perturbed run).
+Same machine, same session, same binaries throughout.
+
+µbench `gemm/Q8_0/inferno-avx2/*/m64`, min-of-medians, Gelem/s (Δ vs base):
+
+| shape (m=64)   | base @5deafb7 | MR=2           | MR=4               | MR=8           |
+|----------------|---------------|----------------|--------------------|----------------|
+| 4864x896       | 35.14         | 33.15 (−5.7%)  | **37.64 (+7.1%)**  | 35.39 (+0.7%)  |
+| 896x4864       | 29.24         | 33.39 (+14.2%) | **38.17 (+30.5%)** | 38.94 (+33.2%) |
+| 151936x896     | 34.51         | 34.87 (+1.0%)  | **34.58 (+0.2%)**  | 33.58 (−2.7%)  |
+| geomean Δ      | —             | +2.8%          | **+11.9%**         | +9.3%          |
+
+ggml reference rows (same session, standalone baseline run, m=64):
+4864x896 18.75 Gelem/s · 896x4864 19.45 Gelem/s · 151936x896 5.71 Gelem/s.
+
+**Chosen MR = 4** (best geomean; also the shipped default — no source
+change). Caveat recorded honestly: on 151936x896 (the LM head) the tiled
+kernel only ties baseline (+0.2%, within noise) — that shape is
+DRAM-bandwidth-bound at m=64 (weights ≈ 145 MB stream once regardless of
+tiling), so the tile win is confined to the cache-resident shapes. The
+quiet boxes have different bandwidth-per-core; Task 5 judges the real
+effect.
+
+Dev t=1 pp, `mise run bench -- models/qwen2.5-0.5b-instruct-q8_0.gguf`,
+`inferno (t=1 diag)` pp512 rows, two interleaved rounds each:
+
+| round | base @5deafb7 | tiled @930ef87 (MR=4) |
+|-------|---------------|------------------------|
+| 1     | 59.27 ± 1.03  | 63.30 ± 1.39 (+6.8%)  |
+| 2     | 58.80 ± 1.95  | 61.73 ± 3.24 (+5.0%)  |
+
+**Local gate verdict: PASS.** Tiled µbench ≥ baseline on all three blamed
+shapes at MR=4 (two decisive, one within-noise tie as caveated) AND t=1 pp
+improves in both rounds. Metal spend for Task 5 is unblocked.
