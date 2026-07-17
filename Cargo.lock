@@ -653,6 +653,7 @@ dependencies = [
  "inferno-core",
  "inferno-formats",
  "inferno-graph",
+ "inferno-kernels",
  "inferno-pool",
  "inferno-runtime",
  "inferno-target",
