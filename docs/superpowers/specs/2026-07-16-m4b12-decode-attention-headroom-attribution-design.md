@@ -1373,3 +1373,54 @@ inferno tg per interleaved rep (ship | prof-recording):
 ```
 SKIPPED: perf not on PATH
 ```
+
+### 2026-07-17 — gate verdicts (pre-registered arithmetic, both machines)
+
+Computed by the controller from the session A/B amendments above, exactly per
+the pre-registered formulas (§Pre-registered gates). Formulas were fixed before
+the data; lever tasks were not consulted.
+
+**Step 1 — admissibility (gate precondition):** 16c sum identity 99.4%,
+perturbation 0.9952 (−0.48%); 8c sum identity 99.6%, perturbation 1.0018
+(+0.18%). All four within bounds → data admissible on both machines.
+
+**Step 2 — menu guard.** `C(n) = kernel_max_cyc / calls` (1536 calls each):
+
+| n | 16c C(n) cyc/call | 8c C(n) cyc/call |
+|---|---|---|
+| 1 | 2,742,904 | 1,798,347 |
+| 2 | 1,419,804 | 1,090,001 |
+| 4 | 1,138,421 | 721,661 |
+| 7 | 768,876 | 593,761 |
+| max (16 / 8) | 773,833 | 569,389 |
+
+Guard: C(max) > C(1)/2? 16c: 773,833 vs 1,371,452 — **no** (ratio 0.282).
+8c: 569,389 vs 899,174 — **no** (ratio 0.317). The menu guard does not fire
+on either machine; per-lever gates are evaluated.
+
+**Step 3 — per-lever decode-wall shares** (best-t profile; decode_total_cyc =
+op table total: 16c 4,266,740,470 @ t=16; 8c 3,943,440,779 @ t=8):
+
+| share | 16c | 8c | threshold | verdict |
+|---|---|---|---|---|
+| P_W = wake_parked_cyc / decode_total | 0 / 4,266,740,470 = **0.000%** | 0 / 3,943,440,779 = **0.000%** | <3% on both | **STOP — Lever W not authorized** |
+| P_A = alloc_max_cyc / decode_total | 1,978,810 / 4,266,740,470 = **0.046%** | 2,241,174 / 3,943,440,779 = **0.057%** | <3% on both | **STOP — Lever A not authorized** |
+| P_D = publish_cyc / decode_total | 7,633,510 / 4,266,740,470 = **0.179%** | 1,775,264 / 3,943,440,779 = **0.045%** | <3% on both | **STOP — Lever D not authorized** |
+
+(P_W's numerator is literally zero on both machines: `wake-parked 0 (0 calls)`
+in both best-t profiles — no lane was park-eligible during decode attention at
+best-t. Shares are each computed against the same decode wall independently;
+per the design they are not summed — the P_W and P_D brackets overlap in wall
+time.)
+
+**Verdict: all three gates STOP. Tasks 8–10 (Levers A, D, W) do not run.**
+The dispatch-split blame table locates the headroom instead in (a) the
+attention kernel itself — kernel(shard0) is 72.5% (16c) / 94.2% (8c) of the
+instrumented call — and (b) on the 16c box, drain at 26.9%: the dispatcher
+waiting on the slowest worker lane, with per-lane kernel sums spanning
+0.90–1.19 Gcyc (load imbalance across head shards), while publish/wake/alloc
+are all sub-0.2%. The C(n) sweep confirms the kernel scales to the box's lane
+count (0.28×/0.32× C(1) at max shards, flattening past n=7). This is the
+milestone's memory-stall/kernel-bound finding, recorded per §Attribution-first:
+an all-STOP with the finding is a successful outcome. Milestone proceeds
+directly to Task 11 (closing).
