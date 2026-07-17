@@ -9,6 +9,42 @@
 
 use crate::expf::expf_scalar;
 
+/// M4b.14 mid-milestone gate instrument: splits the query-blocked kernel's
+/// per-head scores/softmax/output passes into `rdtsc` sub-brackets,
+/// compiled in only under `attn-subprofile` (OFF in shipping and bench
+/// builds — only `scripts/quiet-hw/gate-prefill-attn-split.sh` enables it).
+/// Accumulators are thread-local and summed (never overwritten) across every
+/// head/shard the calling thread runs, so the CLI's post-run drain sees the
+/// whole call's totals regardless of block/head tiling.
+#[cfg(feature = "attn-subprofile")]
+pub mod subprofile {
+    use std::cell::Cell;
+    thread_local! {
+        pub static SCORES: Cell<u64> = const { Cell::new(0) };
+        pub static SOFTMAX: Cell<u64> = const { Cell::new(0) };
+        pub static OUTPUT: Cell<u64> = const { Cell::new(0) };
+    }
+    #[inline]
+    pub fn rdtsc() -> u64 {
+        // SAFETY: _rdtsc is always available on x86_64.
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            std::arch::x86_64::_rdtsc()
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        0
+    }
+    /// Print and reset the accumulated cycle counts (called by the CLI after
+    /// a profiled prefill run when the feature is on).
+    pub fn drain() -> (u64, u64, u64) {
+        (
+            SCORES.with(|c| c.replace(0)),
+            SOFTMAX.with(|c| c.replace(0)),
+            OUTPUT.with(|c| c.replace(0)),
+        )
+    }
+}
+
 /// # Safety
 /// - `out`, `q` valid for `n_heads*head_dim` f32.
 /// - `kv` valid for the K region `[kv_base .. kv_base + seq_len*kv_dim]`
@@ -110,6 +146,154 @@ fn attn_core_scalar(
                 oh[d] = wn.mul_add(kv[vbase + d], oh[d]);
             }
         }
+    }
+}
+
+/// Query-blocked scalar attention (M4b.14). Computes query rows `[0,
+/// m_block)` — row `r` at position `pos0 + r` — reusing each visible K and
+/// V vector across the block's rows (streamed once per head per block
+/// instead of once per token). Blocking only reorders the query axis, so
+/// each row's arithmetic is bit-for-bit the per-token kernel's: same
+/// `dot8`/`reduce8` order, same block-of-8 `expf_scalar` softmax + scalar
+/// tail, same ascending-`t` `mul_add` V-accumulation.
+///
+/// # Safety
+/// - `out`/`q` valid for `(m_block-1)*{out,q}_stride + n_heads*head_dim` f32.
+/// - `scores` valid for `m_block * (pos0 + m_block)` f32 (scratch).
+/// - `kv` valid for the K/V regions, holding every position `< pos0+m_block`.
+/// - `pos0 + m_block <= seq_len`; `m_block >= 1`; `head_dim` a multiple of 8.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_attention_f32_scalar_qblock(
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    scores: *mut f32,
+    kv_base: usize,
+    v_off: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
+) {
+    // SAFETY: contract above; delegate to a safe-slice core.
+    unsafe {
+        let s = pos0 + m_block;
+        let q_extent = (m_block - 1) * q_stride + n_heads * head_dim;
+        let out_extent = (m_block - 1) * out_stride + n_heads * head_dim;
+        let q = std::slice::from_raw_parts(q, q_extent);
+        let out = std::slice::from_raw_parts_mut(out, out_extent);
+        let scores = std::slice::from_raw_parts_mut(scores, m_block * s);
+        let kv = std::slice::from_raw_parts(kv, kv_base + 2 * v_off);
+        attn_core_scalar_qblock(
+            out, q, kv, scores, kv_base, v_off, pos0, m_block, kv_dim, n_heads, n_kv_heads,
+            head_dim, q_stride, out_stride,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attn_core_scalar_qblock(
+    out: &mut [f32],
+    q: &[f32],
+    kv: &[f32],
+    scores: &mut [f32],
+    kv_base: usize,
+    v_off: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
+) {
+    let scale = 1.0 / (head_dim as f32).sqrt();
+    let group = n_heads / n_kv_heads;
+    let kreg = kv_base;
+    let vreg = kv_base + v_off;
+    let s = pos0 + m_block; // per-row scores stride = max visible over the block
+    for h in 0..n_heads {
+        let g = h / group;
+        // scores pass: each visible K vector loaded once, reused across rows.
+        #[cfg(feature = "attn-subprofile")]
+        let _t0 = subprofile::rdtsc();
+        for t in 0..s {
+            let kb = kreg + t * kv_dim + g * head_dim;
+            let kt = &kv[kb..kb + head_dim];
+            for r in 0..m_block {
+                if t <= pos0 + r {
+                    let qh = &q[r * q_stride + h * head_dim..][..head_dim];
+                    // Same 8-lane partition order as the per-token kernel.
+                    scores[r * s + t] = dot8(qh, kt) * scale;
+                }
+            }
+        }
+        #[cfg(feature = "attn-subprofile")]
+        subprofile::SCORES.with(|c| c.set(c.get() + subprofile::rdtsc() - _t0));
+        // softmax + in-place normalize per row (denom is a scalar). Mirrors
+        // the per-token loop EXACTLY: block-of-8 reduce8 denom + scalar tail.
+        #[cfg(feature = "attn-subprofile")]
+        let _t0 = subprofile::rdtsc();
+        for r in 0..m_block {
+            let visible = pos0 + r + 1;
+            let row = &mut scores[r * s..r * s + s];
+            let max = row[..visible]
+                .iter()
+                .fold(f32::NEG_INFINITY, |m, v| m.max(*v));
+            let mut denom = 0f32;
+            let mut t = 0;
+            while t + 8 <= visible {
+                let mut lanes = [0f32; 8];
+                for (l, lane) in lanes.iter_mut().enumerate() {
+                    let e = expf_scalar(row[t + l] - max);
+                    row[t + l] = e;
+                    *lane = e;
+                }
+                denom += reduce8(lanes);
+                t += 8;
+            }
+            while t < visible {
+                let e = expf_scalar(row[t] - max);
+                row[t] = e;
+                denom += e;
+                t += 1;
+            }
+            // Normalize now; w/denom is the same value the per-token kernel
+            // computes lazily in its output loop.
+            for w in row[..visible].iter_mut() {
+                *w /= denom;
+            }
+        }
+        #[cfg(feature = "attn-subprofile")]
+        subprofile::SOFTMAX.with(|c| c.set(c.get() + subprofile::rdtsc() - _t0));
+        // output pass: each visible V vector loaded once, reused across rows.
+        // Zero every row's head-span first, then accumulate in ascending t.
+        #[cfg(feature = "attn-subprofile")]
+        let _t0 = subprofile::rdtsc();
+        for r in 0..m_block {
+            let ob = r * out_stride + h * head_dim;
+            out[ob..ob + head_dim].fill(0.0);
+        }
+        for t in 0..s {
+            let vb = vreg + t * kv_dim + g * head_dim;
+            for r in 0..m_block {
+                if t <= pos0 + r {
+                    let wn = scores[r * s + t];
+                    let ob = r * out_stride + h * head_dim;
+                    for d in 0..head_dim {
+                        out[ob + d] = wn.mul_add(kv[vb + d], out[ob + d]);
+                    }
+                }
+            }
+        }
+        #[cfg(feature = "attn-subprofile")]
+        subprofile::OUTPUT.with(|c| c.set(c.get() + subprofile::rdtsc() - _t0));
     }
 }
 
@@ -326,6 +510,127 @@ unsafe fn attn_core_avx2(
                     _mm256_storeu_ps(oh.add(d), _mm256_fmadd_ps(wn, vv, cur));
                 }
             }
+        }
+    }
+}
+
+/// Query-blocked AVX2 attention (M4b.14). The block structure of
+/// [`inferno_attention_f32_scalar_qblock`] with the AVX2 inner loops of
+/// [`attn_core_avx2`] (fmadd dot + `hsum8`, `expf_avx2` softmax blocks +
+/// `expf_scalar` tail, broadcast-`wn` fmadd V-accumulation). Bit-identical
+/// to the scalar block kernel and, by transitivity, to the per-token kernel.
+///
+/// # Safety
+/// As [`inferno_attention_f32_scalar_qblock`], plus the running CPU has
+/// AVX2+FMA.
+#[allow(clippy::too_many_arguments)]
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inferno_attention_f32_avx2_qblock(
+    out: *mut f32,
+    q: *const f32,
+    kv: *mut f32,
+    scores: *mut f32,
+    kv_base: usize,
+    v_off: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
+) {
+    // SAFETY: contract as the scalar block kernel; head_dim a multiple of 8.
+    unsafe {
+        let scale = 1.0 / (head_dim as f32).sqrt();
+        let group = n_heads / n_kv_heads;
+        let kreg = kv_base;
+        let vreg = kv_base + v_off;
+        let s = pos0 + m_block;
+        for h in 0..n_heads {
+            let g = h / group;
+            // scores pass: load each K vector once, reuse across rows.
+            #[cfg(feature = "attn-subprofile")]
+            let _t0 = subprofile::rdtsc();
+            for t in 0..s {
+                let kb = kv.add(kreg + t * kv_dim + g * head_dim);
+                for r in 0..m_block {
+                    if t <= pos0 + r {
+                        let qh = q.add(r * q_stride + h * head_dim);
+                        let mut acc = _mm256_setzero_ps();
+                        let mut d = 0;
+                        while d < head_dim {
+                            let qv = _mm256_loadu_ps(qh.add(d));
+                            let kvv = _mm256_loadu_ps(kb.add(d));
+                            acc = _mm256_fmadd_ps(qv, kvv, acc);
+                            d += 8;
+                        }
+                        *scores.add(r * s + t) = hsum8(acc) * scale;
+                    }
+                }
+            }
+            #[cfg(feature = "attn-subprofile")]
+            subprofile::SCORES.with(|c| c.set(c.get() + subprofile::rdtsc() - _t0));
+            // softmax + in-place normalize per row (scalar denom).
+            #[cfg(feature = "attn-subprofile")]
+            let _t0 = subprofile::rdtsc();
+            for r in 0..m_block {
+                let visible = pos0 + r + 1;
+                let base = scores.add(r * s);
+                let mut max = f32::NEG_INFINITY;
+                for t in 0..visible {
+                    max = max.max(*base.add(t));
+                }
+                let maxv = _mm256_set1_ps(max);
+                let mut denom = 0f32;
+                let mut t = 0;
+                while t + 8 <= visible {
+                    let sc = _mm256_loadu_ps(base.add(t));
+                    let e = crate::expf::expf_avx2(_mm256_sub_ps(sc, maxv));
+                    _mm256_storeu_ps(base.add(t), e);
+                    denom += hsum8(e);
+                    t += 8;
+                }
+                while t < visible {
+                    let e = crate::expf::expf_scalar(*base.add(t) - max);
+                    *base.add(t) = e;
+                    denom += e;
+                    t += 1;
+                }
+                for t in 0..visible {
+                    *base.add(t) /= denom;
+                }
+            }
+            #[cfg(feature = "attn-subprofile")]
+            subprofile::SOFTMAX.with(|c| c.set(c.get() + subprofile::rdtsc() - _t0));
+            // output pass: load each V vector once, reuse across rows.
+            #[cfg(feature = "attn-subprofile")]
+            let _t0 = subprofile::rdtsc();
+            for r in 0..m_block {
+                let oh = out.add(r * out_stride + h * head_dim);
+                for d in (0..head_dim).step_by(8) {
+                    _mm256_storeu_ps(oh.add(d), _mm256_setzero_ps());
+                }
+            }
+            for t in 0..s {
+                let vb = kv.add(vreg + t * kv_dim + g * head_dim);
+                for r in 0..m_block {
+                    if t <= pos0 + r {
+                        let wn = _mm256_set1_ps(*scores.add(r * s + t));
+                        let oh = out.add(r * out_stride + h * head_dim);
+                        for d in (0..head_dim).step_by(8) {
+                            let cur = _mm256_loadu_ps(oh.add(d));
+                            let vv = _mm256_loadu_ps(vb.add(d));
+                            _mm256_storeu_ps(oh.add(d), _mm256_fmadd_ps(wn, vv, cur));
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "attn-subprofile")]
+            subprofile::OUTPUT.with(|c| c.set(c.get() + subprofile::rdtsc() - _t0));
         }
     }
 }

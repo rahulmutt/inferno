@@ -17,6 +17,14 @@
 compile_error!("inferno-kernels is x86-64-only until the v2 NEON milestone");
 
 pub mod act;
+// `attention` is private except under `attn-subprofile`, which needs the
+// module public so the CLI can reach `attention::subprofile::drain()`
+// (M4b.14 mid-milestone gate instrument). Shipping/bench builds never see
+// this path — the module stays private and the function re-exports below
+// are the only public surface.
+#[cfg(feature = "attn-subprofile")]
+pub mod attention;
+#[cfg(not(feature = "attn-subprofile"))]
 mod attention;
 mod buf;
 mod error;
@@ -31,8 +39,11 @@ pub mod registry;
 pub use attention::inferno_attention_f32_avx2;
 #[cfg(target_arch = "x86_64")]
 pub use attention::inferno_attention_f32_avx2_hspan;
+#[cfg(target_arch = "x86_64")]
+pub use attention::inferno_attention_f32_avx2_qblock;
 pub use attention::inferno_attention_f32_scalar;
 pub use attention::inferno_attention_f32_scalar_hspan;
+pub use attention::inferno_attention_f32_scalar_qblock;
 pub use buf::AlignedBuf;
 pub use error::{KernelError, Result};
 pub use f32k::{

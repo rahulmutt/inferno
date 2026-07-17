@@ -1130,6 +1130,185 @@ fn attn_kernel_avx2(
     out
 }
 
+/// Drive the query-blocked scalar kernel over a block of `m_block` query
+/// tokens at positions `pos0..pos0+m_block`. The KV cache must already hold
+/// K/V for every position `< pos0 + m_block`. Returns the [m_block *
+/// n_heads*head_dim] output block (row-major, out_stride = n_heads*head_dim).
+#[allow(clippy::too_many_arguments)]
+fn attn_kernel_scalar_qblock(
+    q_block: &[f32], // m_block rows of n_heads*head_dim, contiguous
+    kv: &mut [f32],
+    seq_len: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    let stride = n_heads * head_dim;
+    let s = pos0 + m_block;
+    let mut out = vec![f32::NAN; m_block * stride];
+    let mut scores = vec![0f32; m_block * s];
+    // SAFETY: buffers sized to the documented contract; every row's position
+    // pos0+r < seq_len, and kv holds those positions.
+    unsafe {
+        inferno_kernels::inferno_attention_f32_scalar_qblock(
+            out.as_mut_ptr(),
+            q_block.as_ptr(),
+            kv.as_mut_ptr(),
+            scores.as_mut_ptr(),
+            0,
+            seq_len * kv_dim,
+            pos0,
+            m_block,
+            kv_dim,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+            stride,
+            stride,
+        );
+    }
+    out
+}
+
+/// Drive the query-blocked AVX2 kernel; same contract as
+/// `attn_kernel_scalar_qblock`.
+#[allow(clippy::too_many_arguments)]
+fn attn_kernel_avx2_qblock(
+    q_block: &[f32],
+    kv: &mut [f32],
+    seq_len: usize,
+    pos0: usize,
+    m_block: usize,
+    kv_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    let stride = n_heads * head_dim;
+    let s = pos0 + m_block;
+    let mut out = vec![f32::NAN; m_block * stride];
+    let mut scores = vec![0f32; m_block * s];
+    // SAFETY: same contract as the scalar block driver; avx2 checked by caller.
+    unsafe {
+        inferno_kernels::inferno_attention_f32_avx2_qblock(
+            out.as_mut_ptr(),
+            q_block.as_ptr(),
+            kv.as_mut_ptr(),
+            scores.as_mut_ptr(),
+            0,
+            seq_len * kv_dim,
+            pos0,
+            m_block,
+            kv_dim,
+            n_heads,
+            n_kv_heads,
+            head_dim,
+            stride,
+            stride,
+        );
+    }
+    out
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+    #[test]
+    fn attention_qblock_isa_bitwise_equal(
+        seed in any::<u64>(),
+        pos0 in 0usize..6,
+        m_block in prop::sample::select(vec![1usize, 2, 3, 7, 8, 9]),
+        hd in prop::sample::select(vec![8usize, 16, 64]),
+    ) {
+        if !std::is_x86_feature_detected!("avx2") { return Ok(()); }
+        let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+        let kv_dim = n_kv_heads * head_dim;
+        let seq_len = 32usize;
+        prop_assume!(pos0 + m_block <= seq_len);
+        let stride = n_heads * head_dim;
+        let mut q_block = vec![0f32; m_block * stride];
+        for r in 0..m_block {
+            let row = pseudo(seed ^ (0x100 + r as u64), stride);
+            q_block[r * stride..(r + 1) * stride].copy_from_slice(&row);
+        }
+        let base_kv = pseudo(seed, 2 * seq_len * kv_dim);
+        let vreg = seq_len * kv_dim;
+        let mut kv = base_kv;
+        for r in 0..m_block {
+            let pos = pos0 + r;
+            let k = pseudo(seed ^ (0x200 + r as u64), kv_dim);
+            let v = pseudo(seed ^ (0x300 + r as u64), kv_dim);
+            kv[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(&k);
+            kv[vreg + pos * kv_dim..vreg + (pos + 1) * kv_dim].copy_from_slice(&v);
+        }
+        let mut kv_s = kv.clone();
+        let a = attn_kernel_scalar_qblock(&q_block, &mut kv_s, seq_len, pos0, m_block, kv_dim, n_heads, n_kv_heads, head_dim);
+        let b = attn_kernel_avx2_qblock(&q_block, &mut kv, seq_len, pos0, m_block, kv_dim, n_heads, n_kv_heads, head_dim);
+        for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+            prop_assert_eq!(x.to_bits(), y.to_bits(), "elem {}: scalar {} avx2 {}", i, x, y);
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(96))]
+    #[test]
+    fn attention_qblock_scalar_matches_per_token(
+        seed in any::<u64>(),
+        pos0 in 0usize..6,
+        m_block in prop::sample::select(vec![1usize, 2, 3, 7, 8, 9]),
+        hd in prop::sample::select(vec![8usize, 16, 64]),
+    ) {
+        let (n_heads, n_kv_heads, head_dim) = (4usize, 2usize, hd);
+        let kv_dim = n_kv_heads * head_dim;
+        let seq_len = 32usize;
+        prop_assume!(pos0 + m_block <= seq_len);
+        let stride = n_heads * head_dim;
+        // A distinct q row per block token.
+        let mut q_block = vec![0f32; m_block * stride];
+        for r in 0..m_block {
+            let row = pseudo(seed ^ (0x100 + r as u64), stride);
+            q_block[r * stride..(r + 1) * stride].copy_from_slice(&row);
+        }
+        // KV cache holding every position < pos0+m_block. K region then V.
+        let base_kv = pseudo(seed, 2 * seq_len * kv_dim);
+
+        // Reference: per-token kernel, row by row, over ONE accumulating cache —
+        // each call appends its own k/v at pos, so later rows see earlier rows'
+        // K/V exactly as the block cache does.
+        let mut want = vec![0f32; m_block * stride];
+        let mut kv_pt = base_kv.clone();
+        for r in 0..m_block {
+            let pos = pos0 + r;
+            let k = pseudo(seed ^ (0x200 + r as u64), kv_dim);
+            let v = pseudo(seed ^ (0x300 + r as u64), kv_dim);
+            let row = attn_kernel_scalar(
+                &q_block[r * stride..(r + 1) * stride], &k, &v, &mut kv_pt,
+                seq_len, pos, kv_dim, n_heads, n_kv_heads, head_dim,
+            );
+            want[r * stride..(r + 1) * stride].copy_from_slice(&row);
+        }
+        // Block: append all rows' k/v into one cache, then one block call.
+        let mut kv_blk = base_kv;
+        let vreg = seq_len * kv_dim;
+        for r in 0..m_block {
+            let pos = pos0 + r;
+            let k = pseudo(seed ^ (0x200 + r as u64), kv_dim);
+            let v = pseudo(seed ^ (0x300 + r as u64), kv_dim);
+            kv_blk[pos * kv_dim..(pos + 1) * kv_dim].copy_from_slice(&k);
+            kv_blk[vreg + pos * kv_dim..vreg + (pos + 1) * kv_dim].copy_from_slice(&v);
+        }
+        let got = attn_kernel_scalar_qblock(
+            &q_block, &mut kv_blk, seq_len, pos0, m_block, kv_dim, n_heads, n_kv_heads, head_dim,
+        );
+        for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+            prop_assert_eq!(g.to_bits(), w.to_bits(), "elem {}: block {} per-token {}", i, g, w);
+        }
+    }
+}
+
 /// Throwaway diagnostic (run manually): print the max relative error of the
 /// attention kernel vs the std-exp interpreter across the shape distribution,
 /// so `attn_rel_tol` is armed from data, not guessed. Run:

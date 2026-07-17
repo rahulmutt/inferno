@@ -124,6 +124,30 @@ pub fn render_pool(s: &inferno_pool::PoolProfSnapshot, op_attention_cyc: u64) ->
     out
 }
 
+/// Render the M4b.14 prefill attn scores/softmax/output sub-bracket rows
+/// (only compiled in under the `attn-subprofile` feature — see
+/// `inferno_kernels::attention::subprofile`). Cycle numbers are printed
+/// raw, unindented and anchored at column 0 so
+/// `scripts/quiet-hw/gate-prefill-attn-split.sh` can `grep -E
+/// '^attn:(scores|softmax|output)'` for them; `attn_share`/ceiling
+/// arithmetic is controller work done in the spec's Amendments, never here
+/// (same discipline as `render_pool`).
+#[cfg(feature = "attn-subprofile")]
+pub fn render_attn_subprofile((scores, softmax, output): (u64, u64, u64)) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let total = scores + softmax + output;
+    writeln!(out, "attn [prefill sub-brackets] {total} cyc instrumented").unwrap();
+    for (name, c) in [
+        ("attn:scores", scores),
+        ("attn:softmax", softmax),
+        ("attn:output", output),
+    ] {
+        writeln!(out, "{:<13} {:>14}", name, c).unwrap();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -156,6 +180,29 @@ mod tests {
         assert!(mm_line.contains('.') && !mm_line.contains(" - "));
         let rms_line = out.lines().find(|l| l.contains("rmsnorm")).unwrap();
         assert!(rms_line.trim_end().ends_with('-'));
+    }
+
+    #[test]
+    #[cfg(feature = "attn-subprofile")]
+    fn render_attn_subprofile_prints_greppable_rows() {
+        let out = super::render_attn_subprofile((10, 20, 30));
+        assert!(out.contains("60 cyc instrumented"), "{out}");
+        // Every row must be grep-anchorable at column 0 by the gate script's
+        // `grep -E '^attn:(scores|softmax|output)'`.
+        let rows: Vec<&str> = out.lines().filter(|l| l.starts_with("attn:")).collect();
+        assert_eq!(rows.len(), 3, "{out}");
+        assert!(
+            rows[0].starts_with("attn:scores") && rows[0].contains("10"),
+            "{out}"
+        );
+        assert!(
+            rows[1].starts_with("attn:softmax") && rows[1].contains("20"),
+            "{out}"
+        );
+        assert!(
+            rows[2].starts_with("attn:output") && rows[2].contains("30"),
+            "{out}"
+        );
     }
 
     #[test]

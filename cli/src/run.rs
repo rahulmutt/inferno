@@ -140,6 +140,14 @@ fn run_profile(
     let mut last = backend.forward(&prompt_ids)?;
     let prefill_secs = t0.elapsed().as_secs_f64();
 
+    // M4b.14: drain the query-blocked attention kernel's scores/softmax/
+    // output rdtsc sub-brackets right after the prefill call, before decode
+    // runs a different (non-qblock) attention kernel that never touches
+    // these thread-local accumulators. No-op unless built with
+    // --features attn-subprofile (the module doesn't even exist otherwise).
+    #[cfg(feature = "attn-subprofile")]
+    let attn_subprofile = inferno_kernels::attention::subprofile::drain();
+
     let slots = backend.profile_slots().to_vec();
     let prefill_counts = backend.profile_snapshot().unwrap_or_default();
     backend.profile_reset();
@@ -189,6 +197,14 @@ fn run_profile(
     print!(
         "{}",
         crate::profile::render("decode", &slots, &decode_counts, &decode_bytes, decode_secs)
+    );
+    // M4b.14: prefill attn scores/softmax/output sub-brackets (only prints
+    // on an attn-subprofile build). Greppable as `^attn:(scores|softmax|
+    // output)` by scripts/quiet-hw/gate-prefill-attn-split.sh.
+    #[cfg(feature = "attn-subprofile")]
+    print!(
+        "{}",
+        crate::profile::render_attn_subprofile(attn_subprofile)
     );
     // M4b.12 dispatch-split section (only prints on a pool-profile build).
     if let Some(snap) = inferno_pool::pool_prof_snapshot()

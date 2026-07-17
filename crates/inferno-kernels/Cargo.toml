@@ -20,6 +20,11 @@ criterion.workspace = true
 # shipping builds contain zero FFI (spec §Benchmarks).
 ggml-compare = ["dep:libloading"]
 
+# M4b.14: split the query-blocked attention kernel into scores/softmax/output
+# rdtsc sub-brackets for the mid-milestone gate. OFF in shipping and bench
+# builds — only scripts/quiet-hw/gate-prefill-attn-split.sh enables it.
+attn-subprofile = []
+
 # The workspace lints deny `unsafe_code`; this crate is the sanctioned
 # exception (intrinsics + the C ABI M3 codegen calls by symbol). Every unsafe
 # fn documents its contract; unsafe ops inside unsafe fns still need blocks.

@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 inferno-core.workspace = true
+inferno-kernels.workspace = true
 inferno-pool.workspace = true
 inferno-formats.workspace = true
 inferno-graph.workspace = true
@@ -27,6 +28,10 @@ tempfile.workspace = true
 
 [features]
 pool-profile = ["inferno-pool/pool-profile"]
+# M4b.14: prefill attn scores/softmax/output rdtsc sub-brackets, printed
+# after the --profile op table. OFF by default (see inferno-kernels'
+# attn-subprofile feature); only gate-prefill-attn-split.sh enables it.
+attn-subprofile = ["inferno-kernels/attn-subprofile"]
 
 [lints]
 workspace = true

@@ -63,12 +63,34 @@ pub type AttnHspanFn = unsafe extern "C" fn(
     usize,
 );
 
+/// The M4b.14 query-blocked attention kernel ABI: the [`AttnFn`] region args
+/// plus `pos0`/`m_block` (a shard of query tokens) and the `q`/`out` row
+/// strides. Matches `inferno-kernels`' `inferno_attention_f32_*_qblock`
+/// symbols exactly; passed by pointer (from generated code) to
+/// `inferno_par_attention`, which calls it once per lane shard.
+pub type AttnBlockFn = unsafe extern "C" fn(
+    *mut f32,   // out (shard's first row)
+    *const f32, // q (shard's first row)
+    *mut f32,   // kv
+    *mut f32,   // scores scratch (>= m_block * (pos0 + m_block))
+    usize,      // kv_base
+    usize,      // v_off
+    usize,      // pos0 (position of the shard's first row)
+    usize,      // m_block (rows in this shard)
+    usize,      // kv_dim
+    usize,      // n_heads
+    usize,      // n_kv_heads
+    usize,      // head_dim
+    usize,      // q_stride
+    usize,      // out_stride
+);
+
 /// Per-tile invariants of one parallel-attention dispatch (M4b.8). The
 /// token index `t in 0..m` is the sharded axis; per-token args derive as
 /// `out + t*out_stride`, `q + t*q_stride`, `pos0 + t`.
 #[derive(Clone, Copy)]
 pub struct AttnJob {
-    pub kernel: AttnFn,
+    pub kernel: AttnBlockFn,
     pub out: *mut f32,
     pub q: *const f32,
     pub kv: *mut f32,
@@ -163,38 +185,47 @@ unsafe fn run_shard(
     }
 }
 
-/// Run attention for tokens `[start, end)` of a dispatch: one serial
-/// per-token kernel call per token, with one lane-local `scores` scratch
-/// sized for the span's largest `pos + 1`. Heap-allocating here (one Vec
-/// per lane per tile per layer) is noise next to the attention math; it
-/// keeps the kernel ABI scratch-free of threading concerns.
+/// Run attention for tokens `[start, end)` of a dispatch (M4b.14): one
+/// query-blocked kernel call for the whole shard, with one lane-local
+/// `scores` scratch sized `m_block * (pos0 + end)`. Heap-allocating here
+/// (one Vec per lane per tile per layer) is noise next to the attention
+/// math; it keeps the kernel ABI scratch-free of threading concerns.
 ///
 /// # Safety
 /// The dispatcher's caller contract must cover tokens `[start, end)`:
 /// `out`/`q` valid for `m` rows of their strides (out rows disjoint per
 /// token — each token is computed by exactly one lane), `kv` fully
 /// appended for positions `< pos0 + end` and read-only for the duration,
-/// `kernel` a valid `AttnFn`.
+/// `kernel` a valid `AttnBlockFn`.
 pub(crate) unsafe fn run_attn_span(j: &AttnJob, start: usize, end: usize) {
-    let mut scores = vec![0f32; j.pos0 + end];
-    for t in start..end {
-        // SAFETY: forwarding the caller's contract for token t; scores is
-        // sized pos0 + end >= (pos0 + t) + 1.
-        unsafe {
-            (j.kernel)(
-                j.out.add(t * j.out_stride),
-                j.q.add(t * j.q_stride),
-                j.kv,
-                scores.as_mut_ptr(),
-                j.kv_base,
-                j.v_off,
-                j.pos0 + t,
-                j.kv_dim,
-                j.n_heads,
-                j.n_kv_heads,
-                j.head_dim,
-            );
-        }
+    let m_block = end - start;
+    if m_block == 0 {
+        return;
+    }
+    // Scratch: m_block rows, each row's stride is the block's max visible
+    // (pos0 + start) + m_block = j.pos0 + end.
+    let s = j.pos0 + end;
+    let mut scores = vec![0f32; m_block * s];
+    // SAFETY: forwarding the caller's contract for the shard's tokens. `out`
+    // and `q` are advanced to the shard's first row; the kernel walks rows by
+    // out_stride/q_stride. scores is sized m_block * s per the block ABI.
+    unsafe {
+        (j.kernel)(
+            j.out.add(start * j.out_stride),
+            j.q.add(start * j.q_stride),
+            j.kv,
+            scores.as_mut_ptr(),
+            j.kv_base,
+            j.v_off,
+            j.pos0 + start,
+            m_block,
+            j.kv_dim,
+            j.n_heads,
+            j.n_kv_heads,
+            j.head_dim,
+            j.q_stride,
+            j.out_stride,
+        );
     }
 }
 
@@ -590,11 +621,11 @@ impl Pool {
     }
 
     /// Tiled prefill attention across up to `active_threads()` lanes
-    /// (M4b.8): splits the tile's `m` tokens into align-1 contiguous
-    /// shards. Each token's out row is computed entirely by one lane with
-    /// the unchanged per-token kernel, so thread count never changes
-    /// output bits. The M4b.5 decode cap does NOT apply — attention here
-    /// is prefill work.
+    /// (M4b.8, query-blocked per M4b.14): splits the tile's `m` tokens into
+    /// align-1 contiguous shards. Each shard's out rows are computed
+    /// entirely by one lane with a single block-kernel call, so thread
+    /// count never changes output bits. The M4b.5 decode cap does NOT
+    /// apply — attention here is prefill work.
     ///
     /// # Safety
     /// As [`run_attn_span`] over `0..m`; calls must not overlap (one job
@@ -1073,9 +1104,11 @@ mod tests {
         drop(pool); // must not hang or panic
     }
 
-    /// Fake attention kernel with the real ABI: deterministic function of
-    /// (q row, pos), writes the whole out row, and touches `scores[pos]`
-    /// to prove each lane's scratch really covers `pos + 1` entries.
+    /// Fake query-blocked attention kernel with the real block ABI:
+    /// deterministic function of (q row, pos), writes each row's whole out
+    /// span, and touches `scores[r*s + pos]` to prove the scratch covers the
+    /// block's per-row visible range.
+    #[allow(clippy::too_many_arguments)]
     unsafe extern "C" fn stamp_attn(
         out: *mut f32,
         q: *const f32,
@@ -1083,17 +1116,27 @@ mod tests {
         scores: *mut f32,
         _kv_base: usize,
         _v_off: usize,
-        pos: usize,
+        pos0: usize,
+        m_block: usize,
         _kv_dim: usize,
         n_heads: usize,
         _n_kv_heads: usize,
         head_dim: usize,
+        q_stride: usize,
+        out_stride: usize,
     ) {
-        // SAFETY: run_attn_span sizes scores to max pos + 1 for its span.
-        unsafe { *scores.add(pos) = pos as f32 };
-        for i in 0..n_heads * head_dim {
-            // SAFETY: out/q rows are n_heads*head_dim per the AttnFn contract.
-            unsafe { *out.add(i) = *q.add(i) + (pos * 31 + i) as f32 };
+        let hd = n_heads * head_dim;
+        let s = pos0 + m_block;
+        for r in 0..m_block {
+            let pos = pos0 + r;
+            // SAFETY: scratch is m_block * s; index r*s + pos with pos < s.
+            unsafe { *scores.add(r * s + pos) = pos as f32 };
+            for i in 0..hd {
+                // SAFETY: out/q rows are out_stride/q_stride apart, hd wide.
+                unsafe {
+                    *out.add(r * out_stride + i) = *q.add(r * q_stride + i) + (pos * 31 + i) as f32;
+                }
+            }
         }
     }
 
