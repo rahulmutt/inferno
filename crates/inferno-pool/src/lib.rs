@@ -13,7 +13,9 @@ pub mod prof;
 pub mod shard;
 
 pub use error::PoolError;
-pub use pool::{AttnFn, AttnHeadsJob, AttnHspanFn, AttnJob, GemmFn, GemvFn, Pool, TokenBodyFn};
+pub use pool::{
+    AttnBlockFn, AttnFn, AttnHeadsJob, AttnHspanFn, AttnJob, GemmFn, GemvFn, Pool, TokenBodyFn,
+};
 pub use probe::{bandwidth_curve, knee_at_fraction};
 pub use prof::PoolProfSnapshot;
 pub use shard::{SHARD_ALIGN, shard_table, shard_table_aligned};
@@ -234,7 +236,7 @@ pub unsafe extern "C" fn inferno_par_gemm(
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inferno_par_attention(
-    kernel: AttnFn,
+    kernel: AttnBlockFn,
     out: *mut f32,
     q: *const f32,
     kv: *mut f32,

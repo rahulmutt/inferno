@@ -6,6 +6,7 @@
 
 use inferno_pool::inferno_par_attention;
 
+#[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn stamp_attn(
     out: *mut f32,
     q: *const f32,
@@ -13,17 +14,27 @@ unsafe extern "C" fn stamp_attn(
     scores: *mut f32,
     _kv_base: usize,
     _v_off: usize,
-    pos: usize,
+    pos0: usize,
+    m_block: usize,
     _kv_dim: usize,
     n_heads: usize,
     _n_kv_heads: usize,
     head_dim: usize,
+    q_stride: usize,
+    out_stride: usize,
 ) {
-    // SAFETY: the dispatcher sizes scores to max pos + 1 for its span.
-    unsafe { *scores.add(pos) = pos as f32 };
-    for i in 0..n_heads * head_dim {
-        // SAFETY: out/q rows are n_heads*head_dim per the AttnFn contract.
-        unsafe { *out.add(i) = *q.add(i) + (pos * 31 + i) as f32 };
+    let hd = n_heads * head_dim;
+    let s = pos0 + m_block;
+    for r in 0..m_block {
+        let pos = pos0 + r;
+        // SAFETY: the dispatcher sizes scores to m_block * s for its span.
+        unsafe { *scores.add(r * s + pos) = pos as f32 };
+        for i in 0..hd {
+            // SAFETY: out/q rows are out_stride/q_stride apart, hd wide.
+            unsafe {
+                *out.add(r * out_stride + i) = *q.add(r * q_stride + i) + (pos * 31 + i) as f32;
+            }
+        }
     }
 }
 
