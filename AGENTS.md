@@ -95,6 +95,10 @@ for the v1 design.
   (M4b.11) under the same `INFERNO_DECODE_THREADS` bound; the head-span
   kernels must stay bit-identical to the whole-call kernels (the rig's
   hspan tiling tests are the guard).
+  The pool's `pool-profile` cargo feature is the M4b.12 dispatch-split
+  instrument (off in every shipping/bench build; quiet-hw gate scripts
+  build with it), and `INFERNO_ATTN_SHARDS` is its probe-only shard-count
+  override — neither is a tuning surface.
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
   operator-driven only, never CI. After any interrupted session run
   `mise run metal-gc` — EXIT traps don't survive killed terminals. The

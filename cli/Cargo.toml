@@ -25,5 +25,8 @@ insta.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
 
+[features]
+pool-profile = ["inferno-pool/pool-profile"]
+
 [lints]
 workspace = true

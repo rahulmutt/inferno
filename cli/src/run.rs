@@ -117,6 +117,9 @@ fn run_profile(
     }
     // Distinct (profiled) cache entry — see `CompileOptions.profile`.
     engine.set_profile(true);
+    // M4b.12: dispatch-split recording (no-op unless built with
+    // --features pool-profile).
+    inferno_pool::set_pool_profiling(true);
     let mut backend = engine.compiled_backend()?;
 
     let desc = inferno_formats::load_desc(model)?;
@@ -140,6 +143,7 @@ fn run_profile(
     let slots = backend.profile_slots().to_vec();
     let prefill_counts = backend.profile_snapshot().unwrap_or_default();
     backend.profile_reset();
+    inferno_pool::pool_prof_reset();
 
     let mut sampler = Greedy;
     let mut generated = 0usize;
@@ -186,6 +190,17 @@ fn run_profile(
         "{}",
         crate::profile::render("decode", &slots, &decode_counts, &decode_bytes, decode_secs)
     );
+    // M4b.12 dispatch-split section (only prints on a pool-profile build).
+    if let Some(snap) = inferno_pool::pool_prof_snapshot()
+        && snap.calls > 0
+    {
+        let attn_cyc = slots
+            .iter()
+            .position(|s| s == "attention")
+            .map(|i| decode_counts[i])
+            .unwrap_or(0);
+        print!("{}", crate::profile::render_pool(&snap, attn_cyc));
+    }
     Ok(())
 }
 

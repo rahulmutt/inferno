@@ -161,6 +161,9 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    // M4b.12: the instrument-perturbation A/B benches with recording ON but
+    // without --profile; no-op unless built with --features pool-profile.
+    inferno_pool::set_pool_profiling(std::env::var("INFERNO_POOL_PROF").is_ok_and(|v| v == "1"));
     let cli = Cli::parse();
     match cli.command {
         Command::Inspect { model, tensors } => match inferno_formats::load_desc(&model) {

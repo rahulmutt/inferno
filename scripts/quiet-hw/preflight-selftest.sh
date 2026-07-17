@@ -15,7 +15,7 @@ mktree() { # <cpu.max content> <psi avg10> [cgroup rel path, default /podX]
   printf 'some avg10=%s avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' \
     "$2" > "$root/proc/pressure/cpu"
   grep -m1 . /proc/cpuinfo >/dev/null  # sanity: real /proc exists
-  printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\n' > "$root/proc/cpuinfo"
+  printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\nflags\t\t: fpu constant_tsc nonstop_tsc\n' > "$root/proc/cpuinfo"
   echo "$root"
 }
 
@@ -61,5 +61,11 @@ out=$(run_pf "$root" 2>&1) && fail "missing-PSI expected nonzero exit"
 echo "$out" | grep -q "PREFLIGHT: UNFIT"            || fail "missing-PSI: no UNFIT line: $out"
 echo "$out" | grep -qE "cpu pressure: .* missing"   || fail "missing-PSI: no missing-PSI reason: $out"
 echo "$out" | grep -q "FakeVendor"                  || fail "missing-PSI: no machine block (crashed before printing?): $out"
+
+# UNFIT: missing invariant-TSC flags (M4b.12 probe 5).
+root=$(mktree "max 100000" "0.10")
+printf 'vendor_id\t: FakeVendor\nmodel name\t: Fake CPU\nflags\t\t: fpu sse2\n' > "$root/proc/cpuinfo"
+out=$(run_pf "$root" 2>&1) && fail "missing-TSC expected nonzero exit"
+echo "$out" | grep -q "tsc: cpuinfo flags lack constant_tsc" || fail "missing-TSC: no tsc reason: $out"
 
 echo "preflight-selftest: OK"

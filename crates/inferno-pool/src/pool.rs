@@ -210,7 +210,11 @@ pub(crate) unsafe fn run_attn_span(j: &AttnJob, start: usize, end: usize) {
 /// per shard), `kv` fully appended for positions `<= pos` and read-only
 /// for the duration, `kernel` a valid `AttnHspanFn`.
 pub(crate) unsafe fn run_attn_heads_span(j: &AttnHeadsJob, start: usize, end: usize) {
+    #[cfg(feature = "pool-profile")]
+    let a0 = crate::prof::now();
     let mut scores = vec![0f32; j.pos + 1];
+    #[cfg(feature = "pool-profile")]
+    crate::prof::ALLOC_CYC.with(|c| c.set(crate::prof::now().saturating_sub(a0)));
     // SAFETY: forwarding the caller's contract for the head span.
     unsafe {
         (j.kernel)(
@@ -287,6 +291,10 @@ struct Shared {
     job: UnsafeCell<Job>,
     /// One slot per worker (capacity - 1 of them).
     slots: Vec<Slot>,
+    /// M4b.12 dispatch-split accounting (feature-gated; spec §The
+    /// dispatch-split instrument).
+    #[cfg(feature = "pool-profile")]
+    prof: crate::prof::ProfState,
 }
 
 // SAFETY: `job` (raw pointers + Vec) crosses threads under a strict
@@ -306,6 +314,22 @@ pub struct Pool {
     shared: Arc<Shared>,
     capacity: usize,
     handles: Vec<JoinHandle<()>>,
+}
+
+/// M4b.12 probe-only override: `INFERNO_ATTN_SHARDS=N` forces the
+/// decode-attention lane count, so the attribution shard sweep can move
+/// attention parallelism without touching the GEMV decode cap
+/// (`INFERNO_DECODE_THREADS` would confound the curve). Read once; unset
+/// or unparsable = no effect. Measurement scripts only — never a tuning
+/// surface (spec §Explicitly out of scope: no shard-count cap).
+fn attn_shards_override() -> Option<usize> {
+    static V: OnceLock<Option<usize>> = OnceLock::new();
+    *V.get_or_init(|| parse_attn_shards(std::env::var("INFERNO_ATTN_SHARDS").ok().as_deref()))
+}
+
+fn parse_attn_shards(v: Option<&str>) -> Option<usize> {
+    v.and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n >= 1)
 }
 
 impl Pool {
@@ -331,6 +355,8 @@ impl Pool {
                     thread: OnceLock::new(),
                 })
                 .collect(),
+            #[cfg(feature = "pool-profile")]
+            prof: crate::prof::ProfState::new(capacity),
         });
         let handles = (0..capacity - 1)
             .map(|i| {
@@ -388,6 +414,18 @@ impl Pool {
 
     pub fn decode_threads(&self) -> usize {
         self.shared.decode_cap.load(Ordering::Relaxed)
+    }
+
+    /// Snapshot the M4b.12 dispatch-split accounting.
+    #[cfg(feature = "pool-profile")]
+    pub fn prof_snapshot(&self) -> crate::prof::PoolProfSnapshot {
+        self.shared.prof.snapshot()
+    }
+
+    /// Zero the M4b.12 dispatch-split accounting.
+    #[cfg(feature = "pool-profile")]
+    pub fn prof_reset(&self) {
+        self.shared.prof.reset();
     }
 
     /// Run `kernel` over `0..rows`, split across up to
@@ -625,20 +663,45 @@ impl Pool {
     /// the `INFERNO_DECODE_THREADS` override applies like `par_gemv`.
     /// Each head's out row is computed entirely by one lane with the
     /// per-head math unchanged, so thread count never changes output bits.
+    /// `INFERNO_ATTN_SHARDS` (M4b.12, probe-only) forces the lane count.
     ///
     /// # Safety
     /// As [`run_attn_heads_span`] over `0..job.n_heads`; calls must not
     /// overlap (one job at a time).
     pub unsafe fn par_attention_heads(&self, job: &AttnHeadsJob) {
+        let active = self.active_threads().min(self.decode_threads());
+        let active = attn_shards_override()
+            .map(|n| n.min(self.capacity))
+            .unwrap_or(active);
+        // SAFETY: forwarding the caller's contract.
+        unsafe { self.par_attention_heads_at(job, active) };
+    }
+
+    /// [`Self::par_attention_heads`] with an explicit lane count — the
+    /// testable seam under the env override (env is process-global, so
+    /// tests force counts here instead).
+    ///
+    /// # Safety
+    /// As [`Self::par_attention_heads`]; `active >= 1` and `active <=
+    /// self.capacity` (a larger value would make `shards.len()` exceed the
+    /// slot count and panic at `slots[..n_worker]`).
+    pub(crate) unsafe fn par_attention_heads_at(&self, job: &AttnHeadsJob, active: usize) {
         let n_heads = job.n_heads;
         if n_heads == 0 {
             return;
         }
-        let active = self.active_threads().min(self.decode_threads());
+        #[cfg(feature = "pool-profile")]
+        let rec = crate::prof::enabled();
+        #[cfg(feature = "pool-profile")]
+        let t0 = if rec { crate::prof::now() } else { 0 };
         let shards = shard_table_aligned(n_heads, active, 1);
         if shards.len() == 1 {
             // SAFETY: caller contract covers the full head range.
             unsafe { run_attn_heads_span(job, 0, n_heads) };
+            #[cfg(feature = "pool-profile")]
+            if rec {
+                self.shared.prof.record_single(t0, crate::prof::now());
+            }
             return;
         }
         let n_worker = shards.len() - 1;
@@ -658,6 +721,16 @@ impl Pool {
             };
         }
         self.shared.remaining.store(n_worker, Ordering::SeqCst);
+        // Publish the dispatch timestamp BEFORE the epoch bump: both are
+        // SeqCst, so a worker that observes the new epoch also observes
+        // this value (single total order).
+        #[cfg(feature = "pool-profile")]
+        if rec {
+            self.shared
+                .prof
+                .dispatch_tsc
+                .store(crate::prof::now(), Ordering::SeqCst);
+        }
         let counter =
             (self.shared.epoch.load(Ordering::SeqCst) >> PACKED_SHARD_BITS).wrapping_add(1);
         self.shared.epoch.store(
@@ -674,9 +747,13 @@ impl Pool {
                     .unpark();
             }
         }
+        #[cfg(feature = "pool-profile")]
+        let t2 = if rec { crate::prof::now() } else { 0 };
         // SAFETY: caller contract; shard 0's heads are disjoint from
         // worker shards.
         unsafe { run_attn_heads_span(job, s0, e0) };
+        #[cfg(feature = "pool-profile")]
+        let t3 = if rec { crate::prof::now() } else { 0 };
         let mut spins = 0u32;
         while self.shared.remaining.load(Ordering::Acquire) != 0 {
             if spins < SPIN_ITERS {
@@ -685,6 +762,12 @@ impl Pool {
             } else {
                 std::thread::yield_now();
             }
+        }
+        #[cfg(feature = "pool-profile")]
+        if rec {
+            self.shared
+                .prof
+                .record_call(t0, t2, t3, crate::prof::now(), n_worker);
         }
     }
 
@@ -788,6 +871,8 @@ fn worker_loop(shared: &Shared, idx: usize) {
     loop {
         // Wait for a new epoch: bounded spin, then park.
         let mut spins = 0u32;
+        #[cfg(feature = "pool-profile")]
+        let mut spun_out = false;
         let epoch = loop {
             if shared.shutdown.load(Ordering::SeqCst) {
                 return;
@@ -801,6 +886,10 @@ fn worker_loop(shared: &Shared, idx: usize) {
                 std::hint::spin_loop();
             } else {
                 let slot = &shared.slots[idx];
+                #[cfg(feature = "pool-profile")]
+                {
+                    spun_out = true;
+                }
                 slot.parked.store(true, Ordering::SeqCst);
                 if shared.epoch.load(Ordering::SeqCst) == seen
                     && !shared.shutdown.load(Ordering::SeqCst)
@@ -812,6 +901,8 @@ fn worker_loop(shared: &Shared, idx: usize) {
             }
         };
         seen = epoch;
+        #[cfg(feature = "pool-profile")]
+        let t_start = crate::prof::now();
         let n_shards = epoch & PACKED_SHARD_MASK;
         if idx + 1 >= n_shards {
             continue; // no shard this dispatch: never touch `job`.
@@ -833,8 +924,26 @@ fn worker_loop(shared: &Shared, idx: usize) {
                 end,
             )
         };
+        #[cfg(feature = "pool-profile")]
+        let rec = crate::prof::enabled() && matches!(kind, JobKind::AttnHeads(_));
+        #[cfg(feature = "pool-profile")]
+        if rec {
+            crate::prof::ALLOC_CYC.with(|c| c.set(0));
+        }
         // SAFETY: dispatcher's caller contract covers this disjoint range.
         unsafe { run_shard(&kind, y, xq, w, k, start, end) };
+        #[cfg(feature = "pool-profile")]
+        if rec {
+            let t_end = crate::prof::now();
+            let lane = &shared.prof.lanes[idx + 1];
+            let wake = t_start.saturating_sub(shared.prof.dispatch_tsc.load(Ordering::SeqCst));
+            lane.call_wake.store(wake, Ordering::Relaxed);
+            lane.call_kernel
+                .store(t_end.saturating_sub(t_start), Ordering::Relaxed);
+            lane.call_alloc
+                .store(crate::prof::ALLOC_CYC.with(|c| c.get()), Ordering::Relaxed);
+            lane.call_parked.store(spun_out, Ordering::Relaxed);
+        }
         shared.remaining.fetch_sub(1, Ordering::Release);
     }
 }
@@ -1219,5 +1328,127 @@ mod tests {
     fn attn_heads_threads_exceeding_heads_collapses() {
         let pool = Pool::new(16); // 16 lanes > 14 heads
         assert_eq!(attn_heads_dispatch(&pool, 3), attn_heads_expected(3));
+    }
+
+    #[test]
+    fn parse_attn_shards_accepts_positive_ints_only() {
+        assert_eq!(parse_attn_shards(None), None);
+        assert_eq!(parse_attn_shards(Some("")), None);
+        assert_eq!(parse_attn_shards(Some("0")), None);
+        assert_eq!(parse_attn_shards(Some("abc")), None);
+        assert_eq!(parse_attn_shards(Some("-3")), None);
+        assert_eq!(parse_attn_shards(Some("7")), Some(7));
+        assert_eq!(parse_attn_shards(Some(" 14 ")), Some(14));
+    }
+
+    #[test]
+    fn forced_shard_counts_reproduce_unsharded_output() {
+        // The probe can only regroup heads: any forced count is bit-identical.
+        let pool = Pool::new(16);
+        for forced in [1, 2, 4, 7, 14, 16, 99] {
+            for pos in [0, 9, 100] {
+                let q: Vec<f32> = (0..AH_NH * AH_HD).map(|i| i as f32).collect();
+                let mut out = vec![f32::NAN; AH_NH * AH_HD];
+                let mut kv = [0f32; 1];
+                let job = AttnHeadsJob {
+                    kernel: stamp_attn_heads,
+                    out: out.as_mut_ptr(),
+                    q: q.as_ptr(),
+                    kv: kv.as_mut_ptr(),
+                    pos,
+                    kv_base: 0,
+                    v_off: 0,
+                    kv_dim: 0,
+                    n_heads: AH_NH,
+                    n_kv_heads: 2,
+                    head_dim: AH_HD,
+                };
+                // SAFETY: buffers sized per stamp_attn_heads' expectations.
+                unsafe { pool.par_attention_heads_at(&job, forced.min(pool.capacity())) };
+                assert_eq!(out, attn_heads_expected(pos), "forced={forced} pos={pos}");
+            }
+        }
+    }
+
+    #[cfg(feature = "pool-profile")]
+    mod prof_hooks {
+        use super::*;
+
+        #[test]
+        fn records_attn_heads_dispatches() {
+            let pool = Pool::new(4);
+            crate::prof::set_enabled(true);
+            for pos in [0, 9, 100] {
+                assert_eq!(attn_heads_dispatch(&pool, pos), attn_heads_expected(pos));
+            }
+            crate::prof::set_enabled(false);
+            let s = pool.prof_snapshot();
+            assert_eq!(s.calls, 3);
+            assert_eq!(s.instr_total(), s.publish_cyc + s.kernel0_cyc + s.drain_cyc);
+            assert!(s.kernel0_cyc > 0, "dispatcher span time must be recorded");
+            assert!(s.kernel_max_cyc >= s.kernel0_cyc);
+            assert_eq!(s.hist_log2.iter().sum::<u64>(), s.calls);
+            // 14 heads over 4 lanes: every lane got a span every call.
+            assert!(
+                s.lane_kernel_cyc.iter().all(|&k| k > 0),
+                "{:?}",
+                s.lane_kernel_cyc
+            );
+        }
+
+        #[test]
+        fn disabled_records_nothing() {
+            let pool = Pool::new(4);
+            crate::prof::set_enabled(false);
+            attn_heads_dispatch(&pool, 9);
+            assert_eq!(pool.prof_snapshot().calls, 0);
+        }
+
+        #[test]
+        fn gemv_dispatches_are_not_recorded() {
+            let pool = Pool::new(4);
+            crate::prof::set_enabled(true);
+            assert_eq!(dispatch(&pool, 512, 1), expected(512, 1));
+            crate::prof::set_enabled(false);
+            assert_eq!(pool.prof_snapshot().calls, 0);
+        }
+
+        #[test]
+        fn single_shard_path_records_kernel_only() {
+            let pool = Pool::new(1);
+            crate::prof::set_enabled(true);
+            attn_heads_dispatch(&pool, 9);
+            crate::prof::set_enabled(false);
+            let s = pool.prof_snapshot();
+            assert_eq!(s.calls, 1);
+            assert_eq!(s.publish_cyc, 0);
+            assert_eq!(s.drain_cyc, 0);
+            assert!(s.kernel0_cyc > 0);
+        }
+
+        #[test]
+        fn park_eligible_wait_sets_parked_bit() {
+            let pool = Pool::new(4);
+            crate::prof::set_enabled(true);
+            attn_heads_dispatch(&pool, 9);
+            // Well past the spin window: workers are park-eligible now.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            attn_heads_dispatch(&pool, 9);
+            crate::prof::set_enabled(false);
+            let s = pool.prof_snapshot();
+            assert!(s.parked_calls >= 1, "parked_calls = {}", s.parked_calls);
+            assert!(s.wake_parked_cyc > 0);
+        }
+
+        #[test]
+        fn reset_zeroes_between_phases() {
+            let pool = Pool::new(4);
+            crate::prof::set_enabled(true);
+            attn_heads_dispatch(&pool, 9);
+            pool.prof_reset();
+            attn_heads_dispatch(&pool, 9);
+            crate::prof::set_enabled(false);
+            assert_eq!(pool.prof_snapshot().calls, 1);
+        }
     }
 }
