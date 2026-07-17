@@ -639,3 +639,36 @@ the 8c box, closing pp ≥ 1.0x there requires either a cross-bracket lever
 (e.g. quantized KV / attention-as-GEMM — both explicitly out of scope
 here) or accepting the 16c box as the criterion machine. Recorded as a
 diagnostic; no further prefill-attention lever in this milestone.
+
+### Closing verdict: exit-criteria walk (2026-07-17)
+
+The Task 8 sessions are the closing protocol runs (M4b.13 precedent —
+same commit `83c183f`, same day, same `gate-bench-protocol.sh`; no new
+provision).
+
+1. **Local dev data point recorded (Task 7)?** YES — µbench + interleaved
+   t=1 pinned-binary comparison above, honestly labeled non-quiet; local
+   gate PASS with the µbench caveat recorded.
+2. **Fresh split-bracket profiles + gate verdict with arithmetic
+   recorded (Task 8)?** YES — both boxes FIT, instrument admissibility
+   99.90% / 99.92%, ceiling + blame arithmetic shown verbatim above.
+3. **Every gate outcome recorded; no lever shipped without its gate?**
+   YES — Lever 1 shipped only after the Task 7 local gate PASS; Lever 2
+   was NOT built (all-STOP; Task 9 skipped per the pre-registered rule).
+4. **Closing pp512 vs llama best-of ≥ 1.0x on both boxes?** **NO** —
+   0.79x (16c) / 0.70x (8c). **v1 pp criterion NOT MET; milestone closes
+   as a diagnostic (M4b.12/M4b.13 precedent).** STOP finding: the t=1
+   prefill residual is matmul-shaped again (matmul:* ≈ 66.4% / 67.3% at
+   memory-stream rates ~49.6 / ~70.3 GB/s; lm_head alone ~19% both), with
+   attention reduced to 23.7% / 25.0% (scores ≈ output, softmax ~2%). On
+   the 8c box even deleting the entire attention bracket reaches only
+   0.934 — the remaining pp gap is not closable from inside any single
+   prefill bracket; the next lever must be cross-bracket (quantized KV,
+   attention-as-GEMM — both out of scope here) or the criterion machine
+   question must be revisited. tg is context only (0.94x / 0.86x), never
+   the gate.
+
+Lever 1 (query-blocked prefill attention, bit-identical) SHIPPED: t=1
+prefill total −16.8% (16c) / −18.4% (8c), attention bracket −44%, pp
+0.74x→0.79x on the 16c box, with zero tolerance change (`attn_rel_tol`
+untouched; differential green throughout).
