@@ -477,7 +477,7 @@ proptest! {
 
     /// Each token in an m-row panel matches an independent gemv on that token.
     #[test]
-    fn q8_0_gemm_rows_match_per_token_gemv(seed in any::<u64>(), rows in 1usize..16, nb in 1usize..4, m in 1usize..6) {
+    fn q8_0_gemm_rows_match_per_token_gemv(seed in any::<u64>(), rows in 1usize..16, nb in 1usize..4, m in 1usize..20) {
         let k = nb * 32;
         let vals = pseudo(seed, rows * k);
         let w = q8_0::pack_q8_0_rs8(&quant::pack(&DType::Q8_0, &vals).unwrap(), rows, k).unwrap();
@@ -504,7 +504,7 @@ proptest! {
 
     /// Row-range partitioning is bit-stable (the property par_gemm relies on).
     #[test]
-    fn q8_0_gemm_range_partition_bitwise(seed in any::<u64>(), rows in 2usize..24, nb in 1usize..4, m in 1usize..4) {
+    fn q8_0_gemm_range_partition_bitwise(seed in any::<u64>(), rows in 2usize..24, nb in 1usize..4, m in 1usize..20) {
         let k = nb * 32;
         let split = (seed % rows as u64) as usize;
         let vals = pseudo(seed, rows * k);
@@ -522,6 +522,40 @@ proptest! {
             gemm_q8_0(isa, &w, &panel, k, m, rows, (split, rows), &mut split_y);
             for i in 0..m * rows {
                 prop_assert_eq!(full[i].to_bits(), split_y[i].to_bits(), "i {}", i);
+            }
+        }
+    }
+}
+
+/// M4b.13: a PREFILL_TILE-shaped panel (m = 64) crossing many register
+/// tiles, with rows spanning full strips plus a partial tail — the shape
+/// the tiled fast path sees in production. Every token must bit-equal an
+/// independent scalar gemv on that token, on every runnable ISA.
+#[test]
+fn q8_0_gemm_prefill_tile_matches_per_token_gemv() {
+    let (rows, k, m) = (28usize, 128usize, 64usize);
+    let vals = pseudo(7, rows * k);
+    let w = q8_0::pack_q8_0_rs8(&quant::pack(&DType::Q8_0, &vals).unwrap(), rows, k).unwrap();
+    let mut panel = Vec::new();
+    let mut per_token = Vec::new();
+    for t in 0..m {
+        let x = pseudo(0x300 + t as u64, k);
+        let xq = act::quantize_row_q8a(KernelIsa::Scalar, &x).unwrap();
+        panel.extend_from_slice(&xq);
+        let mut yv = vec![f32::NAN; rows];
+        gemv_q8_0(KernelIsa::Scalar, &w, &xq, rows, k, (0, rows), &mut yv);
+        per_token.push(yv);
+    }
+    for isa in KernelIsa::all_available() {
+        let mut yg = vec![f32::NAN; m * rows];
+        gemm_q8_0(isa, &w, &panel, k, m, rows, (0, rows), &mut yg);
+        for t in 0..m {
+            for r in 0..rows {
+                assert_eq!(
+                    yg[t * rows + r].to_bits(),
+                    per_token[t][r].to_bits(),
+                    "t{t} r{r} isa {isa:?}"
+                );
             }
         }
     }
