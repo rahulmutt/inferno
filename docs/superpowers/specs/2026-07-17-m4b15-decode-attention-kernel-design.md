@@ -365,3 +365,98 @@ untouched.
 Session records, gate verdicts, and the closing exit-criteria walk are
 appended here as they land; recorded data points are never edited
 (erratum pattern if a correction is needed).
+
+### 2026-07-17 — Task 5: local µbench + Lever 1 gate verdicts (non-quiet dev box)
+
+**Machine:** AMD Ryzen 9 3900 12-Core (24 threads), NON-QUIET dev box
+(shared host; load average ~18.7 during the run — ambient noise high,
+ratios are the quantity of record per the spec's local-gate rule).
+Bench commit: 762e131. Full run: `cargo bench -p inferno-kernels --bench
+attn_decode_phases`, bit-identity assert passed (all probes, pos 9/639).
+
+**Criterion means (µs), full run:**
+
+| pos | full | full_local | dot_only | no_av |
+|----|------|-----------|----------|-------|
+| 127 | 21.886 | 18.134 | 7.386 | 8.732 |
+| 511 | 96.672 | 72.509 | 28.929 | 34.169 |
+| 639 | 127.670 | 97.870 | 37.381 | 42.884 |
+| 1023 | 206.739 | 134.299 | 67.298 | 76.144 |
+| 2047 | 426.617 | 331.395 | 153.193 | 171.021 |
+
+| pos | dot_blocked2 | dot_blocked4 | dot_blocked8 | av_regacc | combined |
+|----|----|----|----|----|----|
+| 127 | 15.332 | 14.484 | 14.530 | 12.935 | 10.568 |
+| 511 | 66.241 | 56.206 | 65.732 | 61.705 | 52.554 |
+| 639 | 79.206 | 73.097 | 72.923 | 73.929 | 65.804 |
+| 1023 | 124.753 | 122.812 | 123.482 | 136.952 | 115.291 |
+| 2047 | 250.970 | 249.325 | 250.149 | 273.728 | 238.617 |
+
+Anchors: kv_stream 44.954 / 181.304 / 223.739 / 358.448 / 723.241 µs at
+pos 127/511/639/1023/2047; fma_peak 373.675 µs. Cold/warm (one head):
+pos 639 cold 69.991 vs warm 6.363 µs; pos 2047 cold 209.074 vs warm
+21.823 µs.
+
+**Admissibility (pre-registered, spec §The instrument):**
+- (a) monotonicity dot_only ≤ no_av ≤ full_local: PASS at all five pos.
+- (b) marginals ≥ 0 (all are; see below), sum = full_local exactly
+  (telescoping identity — the sum check is vacuous by construction;
+  noted for the record). Marginals (µs) dot/softmax/AV: 127:
+  7.386/1.346/9.402; 511: 28.929/5.240/38.340; 639: 37.381/5.503/54.986;
+  1023: 67.298/8.846/58.155; 2047: 153.193/17.828/160.374.
+- (c) full_local within ±5% of full: **FAIL at every pos.**
+  full_local/full = 0.8286 (−17.1%) at 127; 0.7501 (−25.0%) at 511;
+  0.7666 (−23.3%) at 639; 0.6496 (−35.0%) at 1023; 0.7768 (−22.3%)
+  at 2047.
+
+**VERDICT: STOP (instrument finding).** Admissibility check (c) failed;
+per the pre-registered rule the decomposition is not trusted, no lever
+gate may consume the run, and the instrument finding is the recorded
+outcome. **Gates 1a/1b: NOT EVALUATED (VOID — inadmissible run).**
+Tasks 6–7 (Levers 1a/1b) are SKIPPED. The softmax-escape check is moot
+for gating; for the record the softmax marginal is the smallest of the
+three at every pos ≥ 511.
+
+For transparency, the raw ratios the gates would have read (VOID, not
+consumable, no lever ships from them): dot marginal 39.9%/38.2% of
+full_local at 511/639; AV marginal 52.9%/56.2%; dot_blocked4 −22.5%/
+−25.3% whole-call vs full_local; av_regacc −14.9%/−24.5%.
+
+**Diagnostic evidence (stability + mechanism), recorded as evidence:**
+1. Focused re-run (same box, later, `-- 'phases/full'`): full_local/full
+   = 0.708 / 0.764 / 0.797 / 0.787 at pos 127/511/639/1023 — the gap
+   reproduces with disjoint 95% CIs; systematic, not noise.
+2. Disassembly of the bench binary (attn_decode_phases-cf66c9077dc73ab6):
+   `inferno_attention_f32_avx2` is a thunk to a NON-INLINED
+   `attn_core_avx2` whose QK dot compiles to a 4-instruction dynamic
+   loop (vmovups, vfmadd231ps, add, cmp/jb — one FMA per iteration,
+   runtime head_dim bound). The bench-local `full_local`, with
+   HEAD_DIM=64/KV_DIM=128 as compile-time consts, compiles the same
+   source loop to a fully-unrolled straight-line 8×FMA sequence with
+   constant offsets and no loop control.
+3. Interpretation (hypothesis, labeled): the frozen copy is
+   const-geometry-specialized by LLVM; the shipping kernel pays a
+   ~20–35% whole-call penalty for runtime-dim genericity at protocol
+   geometry. Check (c) exists precisely to catch copy-vs-symbol
+   codegen artifacts and did. The marginals in this table attribute the
+   SPECIALIZED kernel's phases, not the shipping kernel's — hence
+   inadmissible for Lever 1 gating.
+
+**Roofline context (per pre-registration, feeds no gate):** at pos 639
+the AV marginal (54.99 µs) and dot marginal (37.38 µs) sit well above
+the kv_stream anchor scaled to their footprint (K-half ≈ 112 µs for
+both K and V regions ≈ 224 µs total stream at serial-add latency —
+the anchor is latency-chained, not bandwidth-limited, so it bounds
+loosely on this noisy box). Cold/warm delta ≈ 11× at one-head
+granularity (6.4 → 70.0 µs at pos 639) — cache state can explain
+large per-lane spreads.
+
+**Instrument finding for the milestone record:** the decode attention
+µbench cannot gate bit-neutral micro-levers on this instrument design —
+the bench-local copies measure a const-specialized variant of the
+kernel. The actionable diagnostic is the gap itself: runtime-dim
+genericity costs ~20–35% whole-call at protocol geometry on this box;
+a const-specialized (or dim-monomorphized) kernel is the natural next
+lever, but it is out of M4b.15's pre-registered scope and needs its own
+plan. Per plan Task 5 Step 2.2: proceed to sessions for the quiet-hw
+diagnostic record.
