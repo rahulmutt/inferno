@@ -289,3 +289,568 @@ verbatim in the M4a spec §Amendments where the protocol lives):
 
 *(Recorded protocol data points and scoped amendments land here; never
 edit a recorded data point.)*
+
+### 2026-07-17 — attribution session A (d2.c1.medium / Xeon Gold 6336Y, 16c, PHX)
+
+Quiet-hw pass on merged main `783b453` (box cloned pinned SHA from origin;
+local `git_dirty=true` flag was an untracked `models/` dir only — nothing
+uncommitted reached the box). Preflight FIT (probe 5 invariant-TSC ok);
+smoke pass first, then this real pass; workload exit 0.
+Raw: `target/metal/d2.c1.medium-20260717T002043Z/target/quiet-hw/20260717T005054Z`.
+
+**Admissibility (both must pass before any gate is evaluated):**
+- Sum identity (instrument total vs op-profiler decode attention, best-t profile):
+  **99.4%** — within 90–110%. ADMISSIBLE.
+- Instrument perturbation (ship vs pool-profile-recording, 5 interleaved rep
+  pairs): ship mean tg 58.069, prof-recording mean tg 57.792, ratio
+  **0.9952 (−0.48%)** — within 1%. ADMISSIBLE.
+
+#### gate-attn-split.out (verbatim)
+
+```
+# gate-attn-split (M4b.12 attribution: dispatch-split profile + shard sweep) — 2026-07-17T01:40:43Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+--- dispatch-split profile at --threads 16 ---
+profile [prefill] 4.358s wall, 13506695392 cyc total
+  op                                   cycles   share        GB/s
+  attention                        3788042224   28.0%           -
+  matmul:lm_head.weight            2073916502   15.4%       469.4
+  matmul:layers.*.ffn.up_proj.weight     1880760872   13.9%       397.7
+  matmul:layers.*.ffn.gate_proj.weight     1780266194   13.2%       420.1
+  matmul:layers.*.ffn.down_proj.weight     1778487286   13.2%       420.6
+  matmul:layers.*.attn.q_proj.weight      489097952    3.6%       281.7
+  swiglu                            460692932    3.4%           -
+  matmul:layers.*.attn.o_proj.weight      408837680    3.0%       337.0
+  quantize                          205722668    1.5%           -
+  rmsnorm                           142690958    1.1%           -
+  rope                              117390926    0.9%           -
+  matmul:layers.*.attn.k_proj.weight       99185156    0.7%       198.5
+  matmul:layers.*.attn.v_proj.weight       96974260    0.7%       203.0
+  add                                84325356    0.6%           -
+  bias                               67781994    0.5%           -
+  kv_append                          22183716    0.2%           -
+  embed                              10338716    0.1%           -
+profile [decode] 1.407s wall, 4266740470 cyc total
+  op                                   cycles   share        GB/s
+  attention                        1247288240   29.2%           -
+  matmul:lm_head.weight             718769312   16.8%        41.3
+  matmul:layers.*.ffn.gate_proj.weight      570713728   13.4%        40.0
+  matmul:layers.*.ffn.up_proj.weight      569991536   13.4%        40.1
+  matmul:layers.*.ffn.down_proj.weight      565197776   13.2%        40.4
+  matmul:layers.*.attn.q_proj.weight      143484938    3.4%        29.3
+  swiglu                            140701940    3.3%           -
+  matmul:layers.*.attn.o_proj.weight      130104940    3.0%        32.3
+  rmsnorm                            41696146    1.0%           -
+  rope                               40224978    0.9%           -
+  matmul:layers.*.attn.k_proj.weight       32777402    0.8%        18.3
+  matmul:layers.*.attn.v_proj.weight       32136536    0.8%        18.7
+  add                                18957638    0.4%           -
+  bias                               13350140    0.3%           -
+  embed                                974840    0.0%           -
+  quantize                             370380    0.0%           -
+  kv_append                                 0    0.0%           -
+pool [decode attention] 1536 calls, 1240035282 cyc instrumented
+  sum identity vs op-profiler attention: 99.4% (admissible: 90-110%)
+  bucket                   cycles   share
+  publish                 7633510    0.6%
+  kernel(shard0)        898523068   72.5%
+  drain                 333878704   26.9%
+  per-call max-lane sums: wake 3058240 | wake-parked 0 (0 calls) | kernel-max 1229484238 | alloc-max 1978810
+  lane             wake         kernel          alloc  parked-calls
+  0                   0      898523068        1386456             0
+  1             1991482     1099127620        1156932             0
+  2             2801766     1169539780        1372874             0
+  3             2790020      924404668        1372198             0
+  4             2797248      992259776        1415718             0
+  5             2824754     1006209340        1455978             0
+  6             1971924     1176420180        1229062             0
+  7             2796936     1183796480        1468944             0
+  8             1980136     1193920426        1244452             0
+  9             1987446      900351496        1283384             0
+  10            2000444     1087488108        1362924             0
+  11            2792568     1169902266        1422462             0
+  12            2795238      935635538        1424826             0
+  13            1996432      999067796        1271894             0
+  14                  0              0              0             0
+  15                  0              0              0             0
+  per-call cycles histogram: 2^19:1510 2^20:26
+
+--- shard sweep (INFERNO_ATTN_SHARDS; pool sections only) ---
+--- INFERNO_ATTN_SHARDS=1 ---
+pool [decode attention] 1536 calls, 4213100122 cyc instrumented
+  sum identity vs op-profiler attention: 99.9% (admissible: 90-110%)
+  bucket                   cycles   share
+  publish                       0    0.0%
+  kernel(shard0)       4213100122  100.0%
+  drain                         0    0.0%
+  per-call max-lane sums: wake 0 | wake-parked 0 (0 calls) | kernel-max 4213100122 | alloc-max 1507240
+  lane             wake         kernel          alloc  parked-calls
+  0                   0     4213100122        1507240             0
+  1                   0              0              0             0
+  2                   0              0              0             0
+  3                   0              0              0             0
+  4                   0              0              0             0
+  5                   0              0              0             0
+  6                   0              0              0             0
+  7                   0              0              0             0
+  8                   0              0              0             0
+  9                   0              0              0             0
+  10                  0              0              0             0
+  11                  0              0              0             0
+  12                  0              0              0             0
+  13                  0              0              0             0
+  14                  0              0              0             0
+  15                  0              0              0             0
+  per-call cycles histogram: 2^21:1536
+
+--- INFERNO_ATTN_SHARDS=2 ---
+pool [decode attention] 1536 calls, 2186943456 cyc instrumented
+  sum identity vs op-profiler attention: 99.8% (admissible: 90-110%)
+  bucket                   cycles   share
+  publish                 6009120    0.3%
+  kernel(shard0)       2179745588   99.7%
+  drain                   1188748    0.1%
+  per-call max-lane sums: wake 2264244 | wake-parked 0 (0 calls) | kernel-max 2180818404 | alloc-max 1794478
+  lane             wake         kernel          alloc  parked-calls
+  0                   0     2179745588        1530342             0
+  1             2264244     2144741778        1321562             0
+  2                   0              0              0             0
+  3                   0              0              0             0
+  4                   0              0              0             0
+  5                   0              0              0             0
+  6                   0              0              0             0
+  7                   0              0              0             0
+  8                   0              0              0             0
+  9                   0              0              0             0
+  10                  0              0              0             0
+  11                  0              0              0             0
+  12                  0              0              0             0
+  13                  0              0              0             0
+  14                  0              0              0             0
+  15                  0              0              0             0
+  per-call cycles histogram: 2^20:1536
+
+--- INFERNO_ATTN_SHARDS=4 ---
+pool [decode attention] 1536 calls, 1759328234 cyc instrumented
+  sum identity vs op-profiler attention: 99.7% (admissible: 90-110%)
+  bucket                   cycles   share
+  publish                 7163542    0.4%
+  kernel(shard0)       1695966036   96.4%
+  drain                  56198656    3.2%
+  per-call max-lane sums: wake 3101770 | wake-parked 0 (0 calls) | kernel-max 1748615292 | alloc-max 2049026
+  lane             wake         kernel          alloc  parked-calls
+  0                   0     1695966036        1392876             0
+  1             2701618     1708092860        1168380             0
+  2             2701290     1477709054        1801200             0
+  3             2704638     1391416002        1287770             0
+  4                   0              0              0             0
+  5                   0              0              0             0
+  6                   0              0              0             0
+  7                   0              0              0             0
+  8                   0              0              0             0
+  9                   0              0              0             0
+  10                  0              0              0             0
+  11                  0              0              0             0
+  12                  0              0              0             0
+  13                  0              0              0             0
+  14                  0              0              0             0
+  15                  0              0              0             0
+  per-call cycles histogram: 2^20:1536
+
+--- INFERNO_ATTN_SHARDS=7 ---
+pool [decode attention] 1536 calls, 1191304162 cyc instrumented
+  sum identity vs op-profiler attention: 99.5% (admissible: 90-110%)
+  bucket                   cycles   share
+  publish                 6359568    0.5%
+  kernel(shard0)       1128513530   94.7%
+  drain                  56431064    4.7%
+  per-call max-lane sums: wake 2352362 | wake-parked 0 (0 calls) | kernel-max 1180993058 | alloc-max 2171870
+  lane             wake         kernel          alloc  parked-calls
+  0                   0     1128513530        1590118             0
+  1             1472260     1126388652        1267786             0
+  2             2108558     1163220440        1510578             0
+  3             2083864     1153988492        1427080             0
+  4             1465616     1133534992        1329662             0
+  5             2117416     1159651002        1464474             0
+  6             2110242     1162149524        1522816             0
+  7                   0              0              0             0
+  8                   0              0              0             0
+  9                   0              0              0             0
+  10                  0              0              0             0
+  11                  0              0              0             0
+  12                  0              0              0             0
+  13                  0              0              0             0
+  14                  0              0              0             0
+  15                  0              0              0             0
+  per-call cycles histogram: 2^19:1496 2^20:38 2^21:2
+
+--- INFERNO_ATTN_SHARDS=16 ---
+pool [decode attention] 1536 calls, 1199613388 cyc instrumented
+  sum identity vs op-profiler attention: 99.4% (admissible: 90-110%)
+  bucket                   cycles   share
+  publish                 7749384    0.6%
+  kernel(shard0)        853426504   71.1%
+  drain                 338437500   28.2%
+  per-call max-lane sums: wake 2667858 | wake-parked 0 (0 calls) | kernel-max 1188607998 | alloc-max 2195624
+  lane             wake         kernel          alloc  parked-calls
+  0                   0      853426504        1548128             0
+  1             2017170     1049363488        1367176             0
+  2             2394756     1146868352        1497590             0
+  3             2389886      914441288        1396286             0
+  4             2018142     1073459540        1372106             0
+  5             2383728     1088015656        1414480             0
+  6             2039202     1115553004        1361192             0
+  7             2049808      988931094        1430956             0
+  8             2391864     1091737812        1256534             0
+  9             2403896      915503388        1464850             0
+  10            2386036      998614032        1313542             0
+  11            2030238     1111379198        1307046             0
+  12            2380964     1095896138        1375760             0
+  13            2037646     1085702032        1371876             0
+  14                  0              0              0             0
+  15                  0              0              0             0
+  per-call cycles histogram: 2^19:1491 2^20:45
+
+```
+
+#### gate-attn-perturb.out (verbatim)
+
+```
+# gate-attn-perturb (M4b.12 admissibility: ship vs pool-profile-recording A/B) — 2026-07-17T01:41:39Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-17
+
+--- rep 1: ship ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 848.9445236060341,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 58.7405030310804,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 876.789248,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.528417,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 117.724479,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 16.493869,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.329763687296115,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 15.77228603136436,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 1: prof (recording on) ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 850.5025603017444,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 59.26852309405365,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 870.365513,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.278474,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 117.613917,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 16.410081,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.51264616541903,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 15.717115286372527,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 2: ship ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 847.1622771491026,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 56.93221860879559,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 876.8704,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.131272,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 118.430578,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 23.058096,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.02214820662615,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 22.734607314453484,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 2: prof (recording on) ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 841.4020489405282,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 56.64053334113887,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 876.905796,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 61.735528,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 118.377025,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 22.979728,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.54130628667714,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 22.629977413631263,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 3: ship ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 848.116284534678,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 58.54325470981239,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 865.233222,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.57931,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 117.753231,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 16.312925,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.2754700906178,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 15.833550843748641,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 3: prof (recording on) ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 850.1109085906357,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 58.78137274029949,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 871.473083,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.73818,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 117.830189,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 16.511388,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.465126008951586,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 16.19253772197079,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 4: ship ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 845.1197357553558,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 56.96758563336986,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 874.763688,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.995562,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 117.525208,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 22.998305,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.08472836592437,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 22.422880342978583,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 4: prof (recording on) ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 852.0059988677373,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 57.334122880942296,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 878.947879,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.293651,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 118.367975,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 23.049639,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.63169765797153,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 22.473039094559333,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 5: ship ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 850.4019482110696,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 59.163599224325644,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 869.889993,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 63.074936,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 117.538663,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 16.395299,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.26066417251713,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 15.782797427860979,
+  "inferno_t1_tg_stddev": 0.0
+}
+--- rep 5: prof (recording on) ---
+{
+  "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
+  "model_type": "qwen2 1B Q8_0",
+  "cpu_info": "Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz",
+  "physical_cores": 16,
+  "logical_cores": 32,
+  "inferno_version": "0.1.0",
+  "inferno_git": "783b453",
+  "llama_build_commit": "6f4f53f",
+  "pp": 512,
+  "tg": 128,
+  "reps": 1,
+  "inferno_threads": 16,
+  "llama_threads": 16,
+  "inferno_pp_tok_s": 507.725565089877,
+  "inferno_pp_stddev": 0.0,
+  "inferno_tg_tok_s": 56.934303586266076,
+  "inferno_tg_stddev": 0.0,
+  "llama_pp_tok_s": 873.526475,
+  "llama_pp_stddev": 0.0,
+  "llama_tg_tok_s": 62.434915,
+  "llama_tg_stddev": 0.0,
+  "llama_t1_pp_tok_s": 118.341633,
+  "llama_t1_pp_stddev": 0.0,
+  "llama_t1_tg_tok_s": 22.964467,
+  "llama_t1_tg_stddev": 0.0,
+  "inferno_t1_pp_tok_s": 63.62266912343549,
+  "inferno_t1_pp_stddev": 0.0,
+  "inferno_t1_tg_tok_s": 23.032094034725286,
+  "inferno_t1_tg_stddev": 0.0
+}
+
+inferno tg per interleaved rep (ship | prof-recording):
+58.7405030310804	59.26852309405365
+56.93221860879559	56.64053334113887
+58.54325470981239	58.78137274029949
+56.96758563336986	57.334122880942296
+59.163599224325644	56.934303586266076
+```
+
+#### gate-attn-perf.out (verbatim)
+
+```
+SKIPPED: perf not on PATH
+```
