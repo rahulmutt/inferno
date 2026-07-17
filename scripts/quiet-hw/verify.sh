@@ -72,6 +72,7 @@ run_gate decode-cap      bash "$HERE/gate-decode-cap.sh" "$MODEL"
 run_gate bw-curve        bash "$HERE/gate-bw-curve.sh"
 run_gate pf-dist         bash "$HERE/gate-pf-dist.sh"
 run_gate bench-protocol  bash "$HERE/gate-bench-protocol.sh" "$MODEL"
+run_gate prefill-attr    bash "$HERE/gate-prefill-attr.sh" "$MODEL"
 run_gate decode-attr     bash "$HERE/gate-decode-attr.sh" "$MODEL"
 run_gate attn-split      bash "$HERE/gate-attn-split.sh" "$MODEL"
 run_gate attn-perturb    bash "$HERE/gate-attn-perturb.sh" "$MODEL"
@@ -87,7 +88,7 @@ run_gate intel-ab        bash "$HERE/gate-intel-ab.sh" "${AB_ARGS[@]}"
   echo "| stage | status |"
   echo "|---|---|"
   echo "| preflight | ${status[preflight]} |"
-  for g in prefill-scaling decode-cap bw-curve pf-dist bench-protocol decode-attr attn-split attn-perturb attn-perf intel-ab; do
+  for g in prefill-scaling decode-cap bw-curve pf-dist bench-protocol prefill-attr decode-attr attn-split attn-perturb attn-perf intel-ab; do
     echo "| $g | ${status[$g]} |"
   done
   echo
@@ -97,7 +98,7 @@ run_gate intel-ab        bash "$HERE/gate-intel-ab.sh" "${AB_ARGS[@]}"
 } | tee "$OUT/summary.md"
 echo "results: $OUT"
 
-for g in prefill-scaling decode-cap bw-curve pf-dist bench-protocol decode-attr attn-split attn-perturb; do
+for g in prefill-scaling decode-cap bw-curve pf-dist bench-protocol prefill-attr decode-attr attn-split attn-perturb; do
   [ "${status[$g]}" = PASS ] || exit 1
 done
 [ "${status[intel-ab]}" = FAILED ] && exit 1
