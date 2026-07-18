@@ -15,6 +15,10 @@ pool-profile = []
 [dev-dependencies]
 inferno-kernels.workspace = true
 inferno-formats.workspace = true
+# M4b.17 instrument (examples only): the gemv_stream arms need mmap /
+# madvise to reproduce the artifact loader's 4 KiB file mapping and the
+# THP counterfactual. Same crate+features inferno-core already vendors.
+rustix = { workspace = true, features = ["mm", "std"] }
 
 # The workspace lints deny `unsafe_code`; this crate is the third sanctioned
 # exception (after inferno-kernels and inferno-core): it ships raw pointers
