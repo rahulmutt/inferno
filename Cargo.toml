@@ -19,7 +19,7 @@ inferno-plan = { path = "crates/inferno-plan" }
 inferno-codegen = { path = "crates/inferno-codegen" }
 inferno-core = { path = "crates/inferno-core" }
 inferno-pool = { path = "crates/inferno-pool" }
-inkwell = { version = "0.6", features = ["llvm18-1"] }
+inkwell = { version = "0.9", features = ["llvm22-1"] }
 thiserror = "2"
 sha2 = "0.10"
 criterion = "0.7"
