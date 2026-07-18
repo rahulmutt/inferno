@@ -6,7 +6,7 @@ pub mod error;
 pub mod llvm;
 pub mod loopir;
 pub mod profile;
-pub use emit::{Artifact, CompileOptions, Meta, compile};
+pub use emit::{Artifact, CompileOptions, Meta, compile, compile_attn_probe};
 pub use error::{CodegenError, Result};
 
 /// Version of the host-symbol surface generated code links against

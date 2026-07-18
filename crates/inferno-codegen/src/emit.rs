@@ -175,6 +175,62 @@ fn build_meta(
     }
 }
 
+/// M4b.16 test-harness entry: compile a one-function `.so` exporting the
+/// geometry-specialized attention as `inferno_attn_probe`. `cpu_features`
+/// is the LLVM feature string ("+avx2,+fma" or "" for baseline x86-64) —
+/// the harness checks the emitted function is bit-identical under BOTH.
+pub fn compile_attn_probe(
+    head_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
+    cpu_features: &str,
+    out_dir: &Path,
+) -> Result<PathBuf> {
+    let ctx = Context::create();
+    let module = ctx.create_module("attn_probe");
+    crate::llvm::emit_attn_hspan_fn(
+        &ctx,
+        &module,
+        head_dim,
+        n_heads,
+        n_kv_heads,
+        "inferno_attn_probe",
+        inkwell::module::Linkage::External,
+    );
+    module
+        .verify()
+        .map_err(|e| CodegenError::Llvm(e.to_string()))?;
+    Target::initialize_x86(&InitializationConfig::default());
+    let triple = TargetMachine::get_default_triple();
+    let tgt = Target::from_triple(&triple).map_err(|e| CodegenError::Emit(e.to_string()))?;
+    let tm = tgt
+        .create_target_machine(
+            &triple,
+            "x86-64",
+            cpu_features,
+            OptimizationLevel::Aggressive,
+            RelocMode::PIC,
+            CodeModel::Default,
+        )
+        .ok_or_else(|| CodegenError::Emit("no target machine".into()))?;
+    std::fs::create_dir_all(out_dir)?;
+    let obj = out_dir.join("attn_probe.o");
+    tm.write_to_file(&module, FileType::Object, &obj)
+        .map_err(|e| CodegenError::Emit(e.to_string()))?;
+    let so = out_dir.join("attn_probe.so");
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let status = Command::new(cc)
+        .arg("-shared")
+        .arg("-o")
+        .arg(&so)
+        .arg(&obj)
+        .status()?;
+    if !status.success() {
+        return Err(CodegenError::Link(format!("probe linker exited {status}")));
+    }
+    Ok(so)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

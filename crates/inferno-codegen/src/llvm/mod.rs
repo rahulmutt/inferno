@@ -11,7 +11,9 @@
 //! `arena`, `logits_out`) uses that one opaque `ptr` type; only scalars stay
 //! distinctly typed (`i64` for `size_t`, `i32` for the raw `token` id).
 
+mod attn_emit;
 mod ops;
+pub(crate) use attn_emit::emit_attn_hspan_fn;
 pub use ops::build_full_module;
 
 use crate::Result;
