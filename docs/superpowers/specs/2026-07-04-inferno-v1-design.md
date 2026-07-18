@@ -393,3 +393,41 @@ batching and prefix caching.
 - **Quantized-numerics drift** between reference and compiled paths.
   Mitigation: per-format tolerance rules defined once in `inferno-graph` and
   used by every test layer.
+
+## Amendments
+
+### 2026-07-18 — M4 closed; v1 win criterion NOT MET (closing record)
+
+M4 is closed. The v1 win criterion stated in §Scope Decisions — "Beat
+llama.cpp tokens/sec (prefill **and** decode) on the same machine, model,
+and quant" — is **NOT MET**. Standing ratios against llama.cpp
+best-of-builds, from the M4b.16 protocol sessions of 2026-07-18
+(Qwen2.5-0.5B-Instruct Q8_0, pp512/tg128, full-thread):
+
+| Machine | pp512 | tg128 |
+|---|---|---|
+| d2.c1.medium — Xeon Gold 6336Y, 16c | 0.83x | 0.96x |
+| s2.c2.medium — Xeon E-2388G, 8c | 0.69x | 0.86x |
+
+The verdict, the M4b findings ledger, and the ceiling arithmetic that
+closes each lever family are recorded in
+[2026-07-18-v1-close-design.md](2026-07-18-v1-close-design.md). In summary:
+every compiled-path streaming lever family is now measured at its wall —
+prefill GEMM (M4b.13), prefill attention (M4b.14), decode attention
+(M4b.15/M4b.16), and decode GEMV (M4b.17, where the shipping kernel runs
+0.5% *above* its own GEMV-shaped roofline). The residual gap is structural,
+not unexplored headroom.
+
+§Risks called this outcome: "Beating llama.cpp is hard… the win must come
+from specialization… and from microkernels that are competitive, not
+miraculous." The specialization bet was tested to a measured ceiling rather
+than abandoned, and the kernel-level criterion benches did the job that
+section asked of them — showing where the bet stood before the end-to-end
+protocol landed.
+
+v1 closes as-built, with no release artifact: no version bump, no tag, no
+publish. The v2 direction recorded in §Milestones (NEON/Apple Silicon, AOT
+cross-compilation, then server mode) is the successor conversation and is
+deliberately not designed here.
+
+This entry is append-only and edits no recorded data point.
