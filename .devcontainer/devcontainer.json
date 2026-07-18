@@ -3,7 +3,15 @@
   "image": "ghcr.io/rahulmutt/dev:sha-a44ce0e",
   "workspaceFolder": "/workspace",
   "remoteUser": "dev",
-  "runArgs": ["--cap-add=SYS_NICE"],
+  // PERFMON + unconfined seccomp: the quiet-hw counter lanes run perf inside
+  // this container, and the metal boxes' docker.io (20.10, bookworm) ships a
+  // default seccomp profile that blocks perf_event_open unconditionally —
+  // CAP_PERFMON alone only satisfies newer profiles that gate on it.
+  "runArgs": [
+    "--cap-add=SYS_NICE",
+    "--cap-add=PERFMON",
+    "--security-opt=seccomp=unconfined"
+  ],
   "containerEnv": {
     "INSTALL_DEVENV": "true"
   },

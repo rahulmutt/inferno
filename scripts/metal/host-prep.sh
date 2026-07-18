@@ -62,5 +62,15 @@ if [ "${METAL_SKIP_SETUP:-0}" != 1 ]; then
   else
     echo "governor: performance on $written cpus"
   fi
+  # perf for the quiet-hw counter lanes (binary comes from devenv, in the
+  # container). paranoid=-1 unlocks system-wide/uncore events (DRAM-read
+  # lane, M4b.17 spec) for the unprivileged container user; kptr_restrict=0
+  # keeps kernel symbols resolvable for perf record. Bench boxes are
+  # single-tenant and deleted after the session, so the loosening is scoped.
+  sysctl -qw kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0 || {
+    echo "perf: FAILED to set perf_event_paranoid/kptr_restrict sysctls" >&2
+    exit 1
+  }
+  echo "perf: perf_event_paranoid=-1 kptr_restrict=0"
 fi
 echo "host-prep: OK"
