@@ -831,3 +831,32 @@ Caveat (recorded, not edited): between the two runs the t=1 diag rows
 dropped for BOTH engines symmetrically (inferno 22.62→15.78, llama
 22.88→16.45 tg) — box-side drift affecting the single-thread diag only;
 t=16 rows are stable and are the protocol quantity.
+
+### 2026-07-18 — M4b.15 session B protocol data points (s2.c2.medium, E-2388G, CHI, quiet-hw FIT)
+
+Baseline binary 9883086 (2026-07-18T01:24:53Z):
+
+```
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      736.13 ± 2.25        62.40 ± 0.14
+inferno (t=1 diag)           1      106.31 ± 0.09        34.26 ± 0.17
+llama.cpp                    8     1053.54 ± 1.30        72.84 ± 0.02
+llama.cpp (t=1 diag)         1      165.01 ± 0.47        33.15 ± 0.02
+ratio (inferno/llama.cpp): pp 0.70x | tg 0.86x
+llama.cpp BLAS-build reference: pp 660.47 | tg 72.56 tok/s
+ratios (inferno vs llama best-of-builds): pp 0.70x | tg 0.87x
+```
+
+M4b.15 branch binary 066bd45, same kernel — no lever shipped
+(2026-07-18T01:39:50Z):
+
+```
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      737.23 ± 4.00        62.52 ± 0.10
+inferno (t=1 diag)           1      106.30 ± 0.06        35.19 ± 0.02
+llama.cpp                    8     1029.03 ± 53.75       72.71 ± 0.04
+llama.cpp (t=1 diag)         1      164.35 ± 0.52        33.56 ± 0.03
+ratio (inferno/llama.cpp): pp 0.72x | tg 0.86x
+llama.cpp BLAS-build reference: pp 650.10 | tg 72.66 tok/s
+ratios (inferno vs llama best-of-builds): pp 0.71x | tg 0.87x
+```

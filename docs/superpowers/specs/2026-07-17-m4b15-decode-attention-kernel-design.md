@@ -546,3 +546,58 @@ active lanes).
 
 **`S_residual`** = S = **29.1%** (identical kernel — no lever shipped;
 the lever-binary split profile is the same binary's dispatch view).
+
+### 2026-07-18 — Session B — s2.c2.medium (8c Xeon E-2388G), CHI, quiet-hw
+
+**Machine:** Intel Xeon E-2388G, 8 physical cores, CHI (PHX 406 —
+no stock; catalog showed NLD,SGP,CHI; `--location CHI` per runbook).
+PREFLIGHT: FIT. **DEVIATION:** perf unavailable (same as session A).
+First attempt was the PHX 406 (no server created); gc-confirmed zero
+before retry. Raw artifacts:
+`target/metal/s2.c2.medium-20260718T010355Z` (local-only, gitignored).
+
+**Protocol tables:** recorded verbatim in the M4a spec §Amendments.
+`baseline_tg` = **62.40** (t=8, baseline 9883086); lever-binary tg
+62.52 / pp 737.23 (066bd45, same kernel). Ratios 0.70x/0.86x baseline,
+0.72x/0.86x lever (best-of-builds 0.70x/0.87x and 0.71x/0.87x).
+
+**Baseline best-t attention share `S`** (gate-decode-attr, t=8 decode):
+attention 779547772 / 3781606717 cyc = **20.6%** (t=1: 33.6%).
+
+**Headroom target:** r := 0 (no lever) →
+`tg_target = 62.40 × 1.0 = 62.40` (degenerate per Task 5 STOP).
+
+**µbench on this box (criterion means, µs):**
+
+| pos | full | full_local | dot_only | no_av |
+|----|------|-----------|----------|-------|
+| 127 | 21.904 | 13.429 | 5.891 | 6.917 |
+| 511 | 88.900 | 62.199 | 21.059 | 25.282 |
+| 639 | 121.502 | 87.761 | 29.204 | 30.993 |
+| 1023 | 223.636 | 189.547 | 62.339 | 59.385 |
+| 2047 | 449.419 | 373.214 | 156.959 | 148.495 |
+
+Probes (µs, pos 127/511/639/1023/2047): dot_blocked2 13.119/50.464/
+85.557/160.703/389.041; dot_blocked4 12.802/53.314/81.747/173.312/
+358.116; dot_blocked8 13.355/55.065/89.450/171.659/314.038; av_regacc
+12.018/50.981/91.823/178.579/405.840; combined 10.748/46.096/76.037/
+144.778/335.517. Anchors: kv_stream 27.638/110.635/138.758/221.227/
+443.458 µs; fma_peak 210.027 µs. Cold/warm one-head: 639: 30.427 vs
+6.378 µs; 2047: 91.289 vs 27.153 µs.
+
+**µbench admissibility on this box:**
+- (c) full_local/full = 0.6131 (−38.7%) / 0.6997 (−30.0%) / 0.7223
+  (−27.8%) / 0.8476 (−15.2%) / 0.8304 (−17.0%) at pos 127/511/639/
+  1023/2047 — **FAIL at every pos** (bound ±5%).
+- (a) monotonicity: **FAIL at pos 1023 AND 2047** (no_av < dot_only;
+  softmax marginal −2.95 µs and −8.46 µs) — PASS at 127/511/639.
+- **The instrument finding reproduces on the third machine:** the
+  const-specialized copy beats the shipping kernel by −28…−30% at the
+  protocol positions on E-2388G (AMD dev box −23…−25%, 6336Y −37%).
+
+**Dispatch-split (gate-attn-split, lever binary, default shards):**
+1536 calls, sum identity 99.6% (admissible). Buckets: publish 0.2%,
+kernel(shard0) **97.7%**, **drain 2.1%** → Gate 2 `c = 0.021` (spec
+§Pre-registered gates forecast "8c ~6%"; measured even lower).
+
+**`S_residual`** = S = **20.6%** (identical kernel — no lever shipped).
