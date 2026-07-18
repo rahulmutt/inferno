@@ -26,7 +26,17 @@ in
   # Socket pinning for the quiet-hw gates (numa_wrap). A dual-socket box must
   # take its point on one socket or NUMA effects contaminate it, and without
   # this the pinned gates die with exit 127 — after the box is paid for.
-  ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.numactl ];
+  ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+    pkgs.numactl
+    # perf for the quiet-hw counter lanes (gate-gemv-stream and successors).
+    # The gates run inside the devpod container, where the metal box's apt is
+    # out of reach (M4b.17 amendment: counter lane skipped both sessions).
+    # perf's userland only needs the perf_event_open syscall — it does NOT
+    # need to match the host kernel version — but the container must grant
+    # it: see runArgs in .devcontainer/devcontainer.json and the sysctl in
+    # scripts/metal/host-prep.sh.
+    pkgs.linuxPackages.perf
+  ];
 
   env.LLVM_SYS_221_PREFIX = "${pkgs.llvmPackages_22.llvm.dev}";
   # ggml CPU backend for `mise run bench-kernels` (--features ggml-compare).
