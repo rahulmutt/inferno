@@ -67,6 +67,7 @@ pub fn build_full_module<'c>(
     if opts.profile {
         cg.prof_slots = slots.index_map();
     }
+    cg.emitted_attn = opts.emitted_attn;
     let loopir = build_loopir(plan, graph, desc);
     cg.lower_prefill(prefill, &loopir);
     cg.lower_decode(decode, &loopir);
@@ -141,6 +142,14 @@ struct Codegen<'c, 'a> {
     /// `llvm.readcyclecounter` declaration (always declared; only *called*
     /// when `prof_counters` is Some).
     readcyc_fn: FunctionValue<'c>,
+
+    /// M4b.16: emit + dispatch the geometry-specialized attention fn.
+    emitted_attn: bool,
+    /// Lazily emitted `attn_hspan.emitted` (one per module; layers share it,
+    /// since geometry — head_dim/n_heads/n_kv_heads — is one-per-model, not
+    /// per-layer; a future architecture varying geometry per layer would need
+    /// to key this cache on geometry instead of holding a single slot).
+    emitted_attn_fn: RefCell<Option<FunctionValue<'c>>>,
 }
 
 impl<'c, 'a> Codegen<'c, 'a> {
@@ -183,6 +192,8 @@ impl<'c, 'a> Codegen<'c, 'a> {
                 .expect("readcyclecounter declaration"),
             prof_counters: None,
             prof_slots: HashMap::new(),
+            emitted_attn: false,
+            emitted_attn_fn: RefCell::new(None),
         }
     }
 
@@ -1517,12 +1528,25 @@ impl<'c, 'a> Codegen<'c, 'a> {
         // path equivalent to the former direct kernel call. ---
         let q_ptr = self.arena_row_ptr(frame, q);
         let out_ptr = self.arena_row_ptr(frame, out);
-        let isa = self.module_isa();
-        let sym = crate::loopir::attention_hspan_symbol(isa);
-        let afn = self
-            .module
-            .get_function(&sym)
-            .expect("hspan attention kernel declared");
+        let afn = if self.emitted_attn {
+            *self.emitted_attn_fn.borrow_mut().get_or_insert_with(|| {
+                super::attn_emit::emit_attn_hspan_fn(
+                    self.ctx,
+                    self.module,
+                    head_dim,
+                    n_heads,
+                    n_kv_heads,
+                    "attn_hspan.emitted",
+                    Linkage::Private,
+                )
+            })
+        } else {
+            let isa = self.module_isa();
+            let sym = crate::loopir::attention_hspan_symbol(isa);
+            self.module
+                .get_function(&sym)
+                .expect("hspan attention kernel declared")
+        };
         let pfn = self
             .module
             .get_function("inferno_par_attention_heads")
