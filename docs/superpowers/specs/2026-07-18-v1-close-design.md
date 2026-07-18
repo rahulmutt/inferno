@@ -211,3 +211,34 @@ Because the deliverable is documentation, verification is about the
 - **The ledger is a re-derivation risk.** Compressing seventeen milestones
   into two tables invites paraphrase drift. Mitigation: verification item 3,
   plus the rule that the owning spec always wins on any discrepancy.
+
+## Amendments
+
+### 2026-07-18 — Closing verification (documentation-only milestone)
+
+Verification walk against §Verification, at the close of the `v1-close`
+branch:
+
+1. **Empty code diff** — `git diff main -- crates/ cli/ fuzz/ scripts/` is
+   empty. The branch touches only `README.md` and files under `docs/`.
+2. **Standing invariants** (unchanged from `708050d`; this milestone
+   changes no code): `mise run test` 69/69 (nextest); `mise run lint`
+   clean; `cargo test -p inferno-kernels --test rig` 33 passed / 3 ignored;
+   `cargo test -p inferno-codegen --test differential` 6 passed;
+   `cargo test -p inferno-core --test artifact` 5 passed (single-thread;
+   the parallel plain-cargo pool-init race is pre-existing, M4b.16 Task 7
+   finding).
+3. **Ledger figures traced** — every figure in §Campaign Findings Ledger
+   and §Motivation was grepped against the milestone spec that recorded it.
+   All matched verbatim; no ledger figure was recomputed or re-rounded.
+4. **README claims match the specs** — the status paragraph's ratios equal
+   the M4a-recorded best-of-builds figures (pp 0.83x / tg 0.96x on 6336Y
+   16c; pp 0.69x / tg 0.86x on E-2388G 8c), and its LLVM version equals
+   `devenv.nix`'s pin (22.1.8, `pkgs.llvmPackages_22`).
+5. **No new data point** — no quiet-hw session ran, no metal was
+   provisioned, and the M4a spec is untouched on this branch. Metal budget:
+   zero, as scoped.
+
+**v1 is closed.** The win criterion is NOT MET and the reason is recorded
+rather than assumed. The v2 direction is the successor item and is not
+designed here.
