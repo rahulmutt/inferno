@@ -303,3 +303,43 @@ TRIGGERED — the lever is not consistently slower (run 2 has it faster
 in every row; t=1 means are dead even at ~12.9 both variants).
 Sessions may proceed; the quiet-hw boxes are the only valid
 comparison venue, which is exactly why the gate lives there.
+
+### 2026-07-18 — Session A (d2.c1.medium 16c 6336Y, CHI, quiet-hw FIT)
+
+Attempt history: (1) devpod post-create hook panic (exit 134, transient
+class per standing quirks; trap delete left the server up — gc --force
+hit the 409/403-then-clear pattern, zero confirmed twice); (2) PHX 406
+no-stock, no server created; (3) CHI FIT. Raw artifacts:
+`target/metal/d2.c1.medium-20260718T071534Z`. Branch binary 1bd3838;
+model fetched on-box; fresh llama.cpp protocol baseline recorded in the
+M4a spec §Amendments (same session, 07:41:22Z).
+
+```
+# gate-emitted-attn (M4b.16 lever vs baseline) — 2026-07-18T07:48:00Z
+machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-18
+
+== baseline (INFERNO_EMITTED_ATTN=0) ==
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      953.32 ± 16.44       59.81 ± 0.44
+inferno (t=1 diag)           1       72.58 ± 0.07        15.79 ± 0.05
+llama.cpp                   16     1221.59 ± 309.75      59.53 ± 0.23
+llama.cpp (t=1 diag)         1      117.93 ± 0.60        22.63 ± 0.00
+ratio (inferno/llama.cpp): pp 0.78x | tg 1.00x
+
+== lever (INFERNO_EMITTED_ATTN=1) ==
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)          16      914.89 ± 26.34       60.02 ± 0.48
+inferno (t=1 diag)           1       70.24 ± 0.13        21.78 ± 0.01
+llama.cpp                   16     1247.15 ± 302.04      60.56 ± 0.19
+llama.cpp (t=1 diag)         1      117.71 ± 0.09        16.32 ± 0.03
+ratio (inferno/llama.cpp): pp 0.73x | tg 0.99x
+```
+
+Caveat (recorded, not edited): the t=1 diag rows drift between runs for
+BOTH engines, in the same class as the M4b.15 caveat already recorded in
+the M4a spec (here: inferno 15.79→21.78, llama 22.63→16.32 tg across the
+baseline→lever tables; the protocol run's t=1 rows differ from both).
+t=16 rows are stable (CIs ±0.19–0.48) and are the gate quantity.
+
+No verdict here — the gate needs both boxes; arithmetic and verdict are
+recorded once in the Task 11 amendment per the ladder.
