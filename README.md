@@ -8,12 +8,20 @@ setup time — then caches the compiled artifact for instant reloads.
 Loads GGUF and MLX (safetensors) models. No GPU: the goal is maximum speed on
 commodity hardware, laptops to phones. Written in Rust.
 
-**Status:** pre-release, milestone M3 (LLVM-compiled inference path: `inferno
-compile`/`run` beat the M1 interpreter's decode throughput on a real model).
+**Status:** v1 complete (2026-07-18). Inferno loads GGUF and MLX models,
+compiles them through LLVM to a cached native artifact, and runs a threaded
+compiled inference path end to end. The v1 goal was to beat llama.cpp on
+both prefill and decode throughput — **that goal was not met**. On the
+recorded quiet-hardware benches (Qwen2.5-0.5B-Instruct Q8_0, pp512/tg128,
+full-thread, vs llama.cpp's best builds) inferno reaches pp 0.83x / tg 0.96x
+on a 16-core Xeon Gold 6336Y and pp 0.69x / tg 0.86x on an 8-core Xeon
+E-2388G. The remaining gap is attributed to measured ceilings rather than
+unexplored headroom — see the
+[v1 close record](docs/superpowers/specs/2026-07-18-v1-close-design.md).
 
 ## Quickstart
 
-Requires [devenv](https://devenv.sh) (native deps: LLVM 18 + a C toolchain
+Requires [devenv](https://devenv.sh) (native deps: LLVM 22.1.8 + a C toolchain
 for linking, llama.cpp) and [mise](https://mise.jdx.dev) (Rust toolchain +
 dev tools; task runner):
 
@@ -28,7 +36,7 @@ Try it:
     cargo run -p inferno -- run crates/inferno-formats/tests/fixtures/tiny.gguf --prompt "the" --max-tokens 4
 
 The `run` command above compiles the model first (LLVM codegen + link to a
-cached `model.so` — needs the devenv shell's LLVM 18 + linker the first
+cached `model.so` — needs the devenv shell's LLVM 22.1.8 + linker the first
 time; later runs reuse the cached artifact) and runs the compiled path by
 default. Force a compile without generating, or inspect where the artifact
 landed, with `inferno compile`:
