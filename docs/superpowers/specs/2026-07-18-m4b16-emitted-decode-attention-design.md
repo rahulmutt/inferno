@@ -343,3 +343,44 @@ t=16 rows are stable (CIs ±0.19–0.48) and are the gate quantity.
 
 No verdict here — the gate needs both boxes; arithmetic and verdict are
 recorded once in the Task 11 amendment per the ladder.
+
+### 2026-07-18 — Session B (s2.c2.medium 8c E-2388G, CHI, quiet-hw FIT)
+
+Attempt history: FIT first try (CHI selected up front — catalog showed
+NLD,SGP,CHI in stock; a benign tunnel-teardown error was logged after
+workload + artifact collection completed, exit 0). Raw artifacts:
+`target/metal/s2.c2.medium-20260718T075751Z`. Branch binary 77c22c3;
+model fetched on-box; fresh llama.cpp protocol baseline recorded in the
+M4a spec §Amendments (same session, 08:18:39Z).
+
+```
+# gate-emitted-attn (M4b.16 lever vs baseline) — 2026-07-18T08:23:28Z
+machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-18
+
+== baseline (INFERNO_EMITTED_ATTN=0) ==
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      535.23 ± 2.42        61.47 ± 0.11
+inferno (t=1 diag)           1       99.89 ± 0.05        33.59 ± 0.02
+llama.cpp                    8     1039.86 ± 1.21        72.79 ± 0.08
+llama.cpp (t=1 diag)         1      164.33 ± 0.58        33.28 ± 0.09
+ratio (inferno/llama.cpp): pp 0.51x | tg 0.84x
+
+== lever (INFERNO_EMITTED_ATTN=1) ==
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      722.11 ± 27.10       62.07 ± 0.60
+inferno (t=1 diag)           1      106.16 ± 0.25        33.98 ± 0.04
+llama.cpp                    8     1044.56 ± 2.15        72.79 ± 0.04
+llama.cpp (t=1 diag)         1      164.73 ± 0.09        33.62 ± 0.10
+ratio (inferno/llama.cpp): pp 0.69x | tg 0.85x
+```
+
+Caveat (recorded, not edited): the inferno pp512 column swings hard
+across this session's three runs (protocol 677.20 ± 86.01, baseline
+535.23 ± 2.42, lever 722.11 ± 27.10) while the llama pp control holds
+~1040 — an inferno-side prefill variance on this box, not a decode
+phenomenon (the decode-attention flag does not touch prefill lowering,
+and pp is not the gate quantity). tg rows are tight (CIs ±0.11–0.60)
+and are the gate quantity.
+
+No verdict here — arithmetic and verdict recorded once in the Task 11
+amendment per the ladder.

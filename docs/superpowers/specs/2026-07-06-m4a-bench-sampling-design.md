@@ -891,3 +891,25 @@ Context: this run is the artifact-cache default path
 (INFERNO_EMITTED_ATTN unset → runtime-symbol attention); the M4b.16
 lever-vs-baseline comparison lives in the M4b.16 spec §Amendments
 (same box, same session).
+
+### 2026-07-18 — M4b.16 session B protocol data point (s2.c2.medium, E-2388G, CHI, quiet-hw FIT)
+
+Fresh llama.cpp baseline, mandatory this cycle (toolchain moved to
+inkwell 0.9 / LLVM 22 in ee03def). Branch binary 77c22c3
+(2026-07-18T08:18:39Z):
+
+```
+engine                 threads        pp512 tok/s        tg128 tok/s
+inferno (compiled)           8      677.20 ± 86.01       61.65 ± 0.40
+inferno (t=1 diag)           1      107.37 ± 0.11        33.42 ± 0.07
+llama.cpp                    8     1043.37 ± 6.85        72.67 ± 0.03
+llama.cpp (t=1 diag)         1      163.76 ± 0.81        33.47 ± 0.26
+ratio (inferno/llama.cpp): pp 0.65x | tg 0.85x
+llama.cpp BLAS-build reference (t pin not honored by BLAS): pp 623.82 | tg 72.61 tok/s
+ratios (inferno vs llama best-of-builds, from the independent --json run): pp 0.69x | tg 0.86x
+gate: v1 win criterion (pp > 1x AND tg > 1x vs llama at its best) -> NOT MET
+```
+
+Context: default path (runtime-symbol attention); M4b.16
+lever-vs-baseline in the M4b.16 spec §Amendments (same box, same
+session).
