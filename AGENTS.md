@@ -13,9 +13,9 @@ for the v1 design.
 - **Toolchain:** rust + dev tools are mise-pinned (`mise.toml`); native deps
   (LLVM, llama.cpp) come ONLY from `devenv.nix`. The devenv LLVM
   major.minor there must match the `inkwell` feature flag in
-  `inferno-codegen` (M3+) exactly — currently `llvm18-1` (`Cargo.toml`)
-  against LLVM 18.1.8 (`devenv.nix`'s `pkgs.llvmPackages_18`,
-  `LLVM_SYS_181_PREFIX`). Bumping one without the other breaks the build.
+  `inferno-codegen` (M3+) exactly — currently `llvm22-1` (`Cargo.toml`)
+  against LLVM 22.1.8 (`devenv.nix`'s `pkgs.llvmPackages_22`,
+  `LLVM_SYS_221_PREFIX`). Bumping one without the other breaks the build.
 - **`inferno-formats` must stay `#![forbid(unsafe_code)]`** and every parser
   read bounded — model files are untrusted input (see
   [docs/threat-model.md](docs/threat-model.md)). Touching parser code means

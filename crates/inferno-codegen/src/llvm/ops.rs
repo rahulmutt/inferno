@@ -255,7 +255,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
             .build_call(self.readcyc_fn, &[], "rdtsc")
             .unwrap()
             .try_as_basic_value()
-            .left()
+            .basic()
             .unwrap()
             .into_int_value()
     }
@@ -310,7 +310,7 @@ impl<'c, 'a> Codegen<'c, 'a> {
             .build_call(f, &[x.into()], "call")
             .unwrap()
             .try_as_basic_value()
-            .left()
+            .basic()
             .unwrap()
             .into_float_value()
     }

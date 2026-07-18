@@ -15,8 +15,8 @@ in
 {
   packages = [
     # LLVM for inferno-codegen (llvm-sys/inkwell). Major version MUST match
-    # the inkwell feature flag in crates/inferno-codegen (llvm18-1).
-    pkgs.llvmPackages_18.llvm.dev
+    # the inkwell feature flag in crates/inferno-codegen (llvm22-1).
+    pkgs.llvmPackages_22.llvm.dev
     pkgs.libffi
     pkgs.libxml2
     pkgs.zlib
@@ -28,7 +28,7 @@ in
   # this the pinned gates die with exit 127 — after the box is paid for.
   ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.numactl ];
 
-  env.LLVM_SYS_181_PREFIX = "${pkgs.llvmPackages_18.llvm.dev}";
+  env.LLVM_SYS_221_PREFIX = "${pkgs.llvmPackages_22.llvm.dev}";
   # ggml CPU backend for `mise run bench-kernels` (--features ggml-compare).
   # haswell = AVX2+FMA — the same ISA class as inferno's M2 kernels, so the
   # comparison is apples-to-apples. The per-arch backends live under bin/.
