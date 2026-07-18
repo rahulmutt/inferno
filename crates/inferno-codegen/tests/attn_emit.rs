@@ -148,3 +148,69 @@ fn emitted_matches_scalar_protocol_geometry() {
         0x4b16,
     );
 }
+
+/// Geometries: protocol (qwen 0.5b), MHA, phi-ish hd80, hd96, llama-7b-ish.
+const GEOMETRIES: &[(usize, usize, usize)] = &[
+    (64, 14, 2), // protocol: qwen2.5-0.5b
+    (64, 8, 8),  // MHA (group = 1)
+    (80, 10, 2), // phi-family head_dim
+    (96, 12, 4),
+    (128, 32, 8), // llama-7b-class
+];
+
+/// pos values: tiny, the 8-block boundary, both sides of the M4b.15
+/// inversion region (>= 1023), and a mid value.
+const POSITIONS: &[usize] = &[0, 1, 7, 8, 9, 300, 1022, 1023, 1024, 1500];
+
+fn sweep(features: &str, reference: AttnFn, tag: &str) {
+    for &(hd, nh, nkv) in GEOMETRIES {
+        let p = build_probe(hd, nh, nkv, features);
+        for (pi, &pos) in POSITIONS.iter().enumerate() {
+            // spans: full, first head, last head, uneven split point
+            let spans = [(0, nh), (0, 1), (nh - 1, nh), (1, (nh / 2).max(2))];
+            for (si, &(h0, h1)) in spans.iter().enumerate() {
+                let seed = 0x4b16_0000u64 | ((pi as u64) << 8) | si as u64;
+                assert_bit_identical(&p, reference, hd, nh, nkv, pos, h0, h1, seed);
+            }
+        }
+        drop(p); // one probe .so per geometry; tempdir cleaned here
+    }
+    eprintln!(
+        "sweep[{tag}]: {} geometries x {} pos x 4 spans OK",
+        GEOMETRIES.len(),
+        POSITIONS.len()
+    );
+}
+
+#[test]
+fn emitted_avx2_features_matches_scalar_rust() {
+    sweep(
+        "+avx2,+fma",
+        inferno_kernels::inferno_attention_f32_scalar_hspan,
+        "avx2/scalar-oracle",
+    );
+}
+
+#[test]
+fn emitted_baseline_features_matches_scalar_rust() {
+    // "" = x86-64 baseline (SSE2): the <8 x float> IR legalizes to 2x4-wide;
+    // per-lane order is unchanged, so bits must still match exactly.
+    sweep(
+        "",
+        inferno_kernels::inferno_attention_f32_scalar_hspan,
+        "sse2/scalar-oracle",
+    );
+}
+
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn emitted_matches_avx2_rust_kernel() {
+    if !std::is_x86_feature_detected!("avx2") {
+        return;
+    }
+    sweep(
+        "+avx2,+fma",
+        inferno_kernels::inferno_attention_f32_avx2_hspan,
+        "avx2/avx2-oracle",
+    );
+}
