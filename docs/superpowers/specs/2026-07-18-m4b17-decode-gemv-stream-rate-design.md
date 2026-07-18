@@ -621,3 +621,57 @@ a memory wall).
 Plan routing recorded: Tasks 7 (Lever H), 8–9 (SDE + VNNI GEMV), and 10
 (Round 2 closing sessions) are **SKIPPED**; Round 1 is the closing
 data; proceed to the closing-verdict task.
+
+### 2026-07-18 — Closing verdict (exit-criteria walk; diagnostic close)
+
+Ship gate: **N/A** — the rule-3 path builds no lever, so there is
+nothing to ship-gate; recorded here once so every gate has a recorded
+outcome.
+
+Exit-criteria walk (§Structure item 4):
+
+1. **16c exit criterion (tg ≥ 1.0x vs llama best-of)** — NOT MET, with
+   the recorded reason: the pre-registered gate STOPped at rule 3
+   before any lever was authorized. The ~4% tg gap (0.96x, M4b.16
+   protocol) is NOT stream-rate headroom — the shipping loop already
+   runs at its GEMV-shaped roofline (G = −0.2 GB/s). This is the
+   sanctioned STOP-out of the split criterion (Scope table: "rule-3
+   all-STOP with both findings recorded", M4b.12 precedent).
+2. **8c ceiling statement** — recorded (Session B amendment): honest
+   streaming headroom ≤ +1.2% e2e; even erasing the entire measured
+   shape tax yields +12.2% < the +16.3% that 1.0x requires. No
+   streaming lever can reach 1.0x on the 8c box.
+3. **Every gate verdict recorded once** — gate verdict (rule 3, STOP)
+   recorded once above with the arithmetic; ship gate N/A recorded once
+   here.
+4. **Standing invariants held at close** (HEAD 9709872 + this commit):
+   `mise run test` 69/69 (nextest); `mise run lint` clean;
+   `cargo test -p inferno-kernels --test rig` 33 passed / 3 ignored;
+   `cargo test -p inferno-codegen --test differential` 6 passed;
+   `cargo test -p inferno-core --test artifact` 5 passed
+   (single-thread; the parallel plain-cargo env race is pre-existing,
+   M4b.16 Task 7 finding); `git diff main --
+   crates/inferno-graph/src/tolerance.rs` EMPTY; kernels untouched this
+   milestone (no kernel diff at all); `HOST_ABI_VERSION` still "8".
+5. **Every STOP recorded as a finding** — the rule-3 STOP finding:
+   decode GEMV stream-rate attribution decomposes the ceiling−achieved
+   gap into (a) GEMV access-pattern shape tax (19.8% on 16c / 13.6% on
+   8c of the sequential ceiling) and (b) a 16c-only file-backing cost
+   (7.2%) that hugepages do NOT recover; achieved-vs-shaped-roofline
+   residual ≈ 0 on both boxes. Both bandwidth lever families (H:
+   residency, V: VNNI width) are foreclosed by measurement — closed as
+   a diagnostic milestone, M4b.12/M4b.16 precedent.
+6. **v1 context ratios (never the gate)** — no Round 2 protocol
+   sessions ran (no lever); the standing recorded ratios remain
+   M4b.16's: tg best-of 0.96x (16c) / 0.86x (8c). With M4b.14's
+   prefill closure and this milestone's decode-GEMV closure, every
+   compiled-path streaming lever family is now measured at its wall;
+   the v1-reckoning conversation (criterion redefinition or acceptance)
+   is the successor item (§Risks anticipated exactly this close).
+
+Metal budget: 2 provisioned sessions (STOP-case budget exactly);
+attempts beyond the 2 FIT boxes were pre-provision rejections (1
+multi-line workload validation, 2× PHX 406 no-stock) plus one
+mid-workload abort on the mkdir plan bug (session A attempt 1, ~26 min
+billed, superseded); post-session GC confirmed zero servers after every
+attempt.
