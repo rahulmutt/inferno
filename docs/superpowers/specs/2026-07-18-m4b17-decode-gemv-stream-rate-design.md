@@ -675,3 +675,32 @@ multi-line workload validation, 2× PHX 406 no-stock) plus one
 mid-workload abort on the mkdir plan bug (session A attempt 1, ~26 min
 billed, superseded); post-session GC confirmed zero servers after every
 attempt.
+
+### 2026-07-18 — Erratum (final-review Minors; append-only, no recorded row touched)
+
+1. The two session records above have empty machine-block fences: the
+   `machine:`/`probes:` header goes to the session stdout, not the tee'd
+   artifact files the blocks were assembled from. The blocks, verbatim
+   from the session logs (provenance otherwise already carried by the
+   headings + each session dir's `metadata.json`):
+
+   Session A (d2.c1.medium):
+   ```
+   machine: Intel(R) Xeon(R) Gold 6336Y CPU @ 2.40GHz (GenuineIntel) | 32 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-18
+   probes: cpus=32 quota=unquota'd psi_some_avg10=0.18 throttled_delta=0 calib=10s tsc=ok
+   PREFLIGHT: FIT
+   ```
+
+   Session B (s2.c2.medium):
+   ```
+   machine: Intel(R) Xeon(R) E-2388G CPU @ 3.20GHz (GenuineIntel) | 16 logical CPUs | kernel 6.9.10+bpo-amd64 | 2026-07-18
+   probes: cpus=16 quota=unquota'd psi_some_avg10=0.00 throttled_delta=0 calib=10s tsc=ok
+   PREFLIGHT: FIT
+   ```
+
+2. Session A gate-input parenthetical corrections (contextual figures
+   only; no gate quantity involved): attn-projection classes are
+   **8.9%** of streamed bytes (44,040,192 of 493,961,216 elements), not
+   8.8%; and the kv "share 0.8%" conflated the v/k profile cycle shares
+   (0.4% + 0.4%) with byte share — the kv-projection byte share is
+   **1.1%**.
