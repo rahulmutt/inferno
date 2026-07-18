@@ -272,3 +272,34 @@ always — context, never the gate.
 
 Session records, gate verdicts, and the closing exit-criteria walk are
 appended here as they happen.
+
+### 2026-07-18 — Local admission + local context point (non-quiet dev box)
+
+**Local admission (Task 7, at e870f78): PASS.** attn_emit 4/4,
+differential 6/6, artifact 5/5 (nextest and `--test-threads=1`; the
+parallel plain-cargo runner shows the known pre-existing intra-process
+env race — reproduced with the pre-Task-6 test file, so not a
+regression; CI's nextest lane is the gate of record), `mise run test`
+69/69 (+315 unit), `mise run lint` clean, tolerance.rs diff vs main
+empty, kernels diff vs main = expf.rs/lib.rs visibility-only.
+
+**Local context point — context only, never a gate.** Machine:
+operator devpod, AMD Ryzen 9 3900 (12c/24t), SHARED AND NOISY —
+recorded verbatim, noise dominates. Two back-to-back pairs
+(pp512/tg128/reps5/threads0, binary at e870f78, llama.cpp 6f4f53f):
+
+| run | variant | inferno t=12 tg | inferno t=1 tg | llama t=12 tg (control) |
+|---|---|---|---|---|
+| 1 | baseline | 11.12 ± 1.04 | 13.32 ± 0.08 | 12.31 ± 2.36 |
+| 1 | lever    |  5.58 ± 1.67 | 12.50 ± 0.39 |  7.82 ± 3.88 |
+| 2 | baseline |  7.50 ± 0.59 | 12.42 ± 0.66 | 14.81 ± 0.49 |
+| 2 | lever    | 13.55 ± 1.03 | 13.34 ± 0.17 | 10.24 ± 2.18 |
+
+The llama.cpp control swings 7.82–14.81 across runs and the
+inferno-vs-itself sign flips run to run (t=12 AND t=1), so no
+directional read exists in this data. Sanity-check outcome for the
+plan's stop-condition ("lever slower by more than noise"): NOT
+TRIGGERED — the lever is not consistently slower (run 2 has it faster
+in every row; t=1 means are dead even at ~12.9 both variants).
+Sessions may proceed; the quiet-hw boxes are the only valid
+comparison venue, which is exactly why the gate lives there.
