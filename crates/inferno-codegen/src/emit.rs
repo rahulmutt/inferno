@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::{CodegenError, Result};
 
 /// Compile-time options that change the emitted artifact (and therefore its
-/// cache identity). Both fields are folded into `inferno-core`'s cache key.
+/// cache identity). All fields are folded into `inferno-core`'s cache key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompileOptions {
     /// Emit per-op `readcyclecounter` instrumentation + the

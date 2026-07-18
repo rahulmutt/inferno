@@ -406,7 +406,7 @@ measured 20–35% whole-call attention-kernel gains from const-geometry
 specialization (machine-independent, three boxes), and M4b.12/15
 attribution put decode attention at 29.1% (16c t=16) / 20.6% (8c t=8)
 of the decode wall — a naive transfer predicts roughly 6–10% (16c) /
-2–4% (8c) e2e. Observed: +0.35% / +0.98% with a bit-identical emitted
+4–7% (8c) e2e. Observed: +0.35% / +0.98% with a bit-identical emitted
 kernel actually dispatched (sabotage-proven wiring, same-logits
 invariant). The µbench's frozen-copy speedup does NOT transfer to the
 shipping dispatch path: the copy's gain came from const-geometry

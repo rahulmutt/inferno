@@ -97,7 +97,7 @@ for the v1 design.
   hspan tiling tests are the guard).
   Since M4b.16 the decode attention kernel dispatched through
   `inferno_par_attention_heads` is, when `CompileOptions::emitted_attn`
-  is set (env `INFERNO_EMITTED_ATTN`), a codegen-emitted private
+  is set (env `INFERNO_EMITTED_ATTN`; default-off), a codegen-emitted private
   `attn_hspan.emitted` function with the model's geometry baked in as
   constants — bit-identical to the Rust hspan kernels (the
   `attn_emit` harness in `inferno-codegen` is the guard; the Rust
