@@ -384,3 +384,83 @@ and are the gate quantity.
 
 No verdict here — arithmetic and verdict recorded once in the Task 11
 amendment per the ladder.
+
+### 2026-07-18 — Gate verdict (both boxes, ladder applied)
+
+Arithmetic, shown once, from the session tables above (e2e decode tg at
+best-t, protocol model/geometry):
+
+- Session A (16c 6336Y): r_A = tg_lever / tg_base = 60.02 / 59.81 =
+  **1.0035** (+0.35%; CIs ±0.48/±0.44 overlap — indistinguishable from
+  flat).
+- Session B (8c E-2388G): r_B = 62.07 / 61.47 = **1.0098** (+0.98%;
+  CIs ±0.60/±0.11 — marginal at best).
+
+Ladder (M4b.11 thresholds verbatim): ≥5% both → ship; <3% both → STOP.
+Both boxes are <3%. **VERDICT: STOP.** The flag stays default-off; the
+milestone closes as a diagnostic with the recorded data. No judgment
+rung was reached — the pre-registered STOP condition applies directly.
+
+**STOP recorded as a finding (M4b.12 precedent):** the M4b.15 µbench
+measured 20–35% whole-call attention-kernel gains from const-geometry
+specialization (machine-independent, three boxes), and M4b.12/15
+attribution put decode attention at 29.1% (16c t=16) / 20.6% (8c t=8)
+of the decode wall — a naive transfer predicts roughly 6–10% (16c) /
+2–4% (8c) e2e. Observed: +0.35% / +0.98% with a bit-identical emitted
+kernel actually dispatched (sabotage-proven wiring, same-logits
+invariant). The µbench's frozen-copy speedup does NOT transfer to the
+shipping dispatch path: the copy's gain came from const-geometry
+compilation of an isolated, cache-warm, single-thread loop; under the
+pool's head-sharded dispatch at the protocol geometry the decode wall
+is dominated by memory bandwidth and phase overheads the specialized
+code cannot touch. The emitted path (attn_emit harness, probe compiler,
+cache-keyed flag) stays in-tree as a shipped-but-default-off
+diagnostic instrument and as the emission substrate for future fusion
+work (rope-into-attention, F16 KV), which was its architectural
+purpose beyond raw speed.
+
+### 2026-07-18 — Closing verdict (exit-criteria walk)
+
+1. **Prerequisite PR landed first, gates green — YES.** PR #34
+   (ee03def), inkwell 0.9 / LLVM 22.1.8, CI green first run;
+   differential 6/6, artifact green, mise test/lint clean at merge.
+2. **Emitted decode attention behind cache-keyed flag, default per
+   gate outcome — YES.** STOP → `emitted_attn` default false
+   (emit.rs), `INFERNO_EMITTED_ATTN=1` opt-in at 5 CLI sites, flag
+   hashed into `cache_key` (`key_differs_by_emitted_attn` green).
+3. **Bit-exactness harness + same-logits invariant green, incl
+   non-protocol geometries — YES.** `attn_emit` suite: protocol test +
+   3 sweeps (5 geometries × 10 pos × 4 spans × {scalar, avx2} oracles ×
+   {avx2, sse2 baseline} feature sets);
+   `emitted_attn_artifact_logits_bit_identical` (prefill + 8 decode
+   steps, to_bits equality; sabotage red/green proved routing).
+4. **Standing invariants — YES.** Final-gate run at 8b90a45 (Task 11):
+   kernels rig, codegen differential, core artifact, `mise run test`,
+   `mise run lint` all green; `git diff main -- crates/inferno-graph/
+   src/tolerance.rs` empty; `git diff main -- crates/inferno-kernels/`
+   = expf.rs/lib.rs visibility-only.
+5. **Both sessions, fresh llama baselines, tables recorded, verdict
+   per ladder — YES.** Session A/B headings above; protocol tables in
+   M4a spec §Amendments (both dated 2026-07-18, binaries 1bd3838/
+   77c22c3); gate arithmetic recorded once above; STOP per ladder.
+6. **Residual-decode-wall-shape statement — YES.** Post-M4b.16 the
+   decode wall shape is unchanged from the M4b.15 attribution:
+   GEMV/bandwidth-shaped. Numbers: eliminating attention-kernel
+   geometry genericity end-to-end (bit-identical emitted kernel) moved
+   tg by +0.35% on the box where attention is 29.1% of the wall and
+   +0.98% where it is 20.6% — i.e. the attention-kernel compute
+   fraction of the wall is effectively saturated; the residual wall is
+   GEMV weight-streaming bandwidth plus phase overheads (M4b.12's
+   all-STOP attribution stands). Next-milestone scoping should target
+   the GEMV/bandwidth axis or accept the t-scaling ceiling; further
+   decode-attention micro-levers are not supported by this data.
+7. **Every STOP recorded as a finding — YES.** Gate STOP above; the
+   M4b.15 admissibility STOP already stands in that spec.
+8. **AGENTS.md decode-attention paragraph — YES.** Added in Task 7;
+   wording already describes the opt-in flag (default-off), correct
+   for the STOP outcome.
+
+v1 context (recorded as always, never the gate): best-of-builds tg
+0.96x (16c) / 0.86x (8c) — v1 criterion NOT MET, unchanged finding.
+Milestone closes as a diagnostic: instrument shipped default-off,
+finding recorded, no lever default flipped.
