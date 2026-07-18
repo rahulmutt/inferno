@@ -127,6 +127,16 @@ for the v1 design.
   matmul-shaped again (~69% at stream rate) and on the 8c box even
   deleting the whole attention bracket can't reach pp 1.0x — no further
   single-bracket prefill lever; see the M4b.14 spec §Amendments.
+  Decode GEMV streaming is closed too (M4b.17, rule-3 STOP): the shipping
+  AVX2 GEMV through `inferno_par_gemv` runs AT its GEMV-shaped stream
+  roofline on both quiet boxes (16c 40.7 vs 40.49 GB/s; 8c 39.2 vs
+  39.49) — the ~13–14 GB/s gap to the M4b.10 sequential-stream ceilings
+  is access-pattern shape tax, not page-walk cost (a fully THP-backed
+  copy of the weights recovers nothing) and not kernel quality (a wider
+  dot product cannot raise a memory wall) — so don't reach for hugepage
+  residency, VNNI GEMV, or any other decode-GEMV streaming lever; the
+  `gemv_stream` example in `inferno-pool` is the instrument that would
+  have to move first (see the M4b.17 spec §Amendments).
 - **`mise run metal` spends real money** (PhoenixNAP bare metal, hourly):
   operator-driven only, never CI. After any interrupted session run
   `mise run metal-gc` — EXIT traps don't survive killed terminals. The
