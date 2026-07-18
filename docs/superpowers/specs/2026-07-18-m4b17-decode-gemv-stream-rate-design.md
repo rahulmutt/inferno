@@ -586,3 +586,38 @@ reach tg 1.0x on the 8c box. llama's +16% there is not bandwidth we are
 leaving on the table; the box's decode wall is structurally above our
 1.0x line.** This is the measured-ceiling statement the split exit
 criterion requires.
+
+### 2026-07-18 — Gate verdict (rules 1–3 walked once, Session A / 16c deciding)
+
+Inputs (Session A quantities above): achieved = **40.7 GB/s**
+(profile-weighted, 13.65 ms/token GEMV); GEMV-shaped roofline in the
+shipping memory condition (mmap4k stream row, t=16) = **40.49 GB/s**.
+
+**G = roofline − achieved = 40.49 − 40.7 = −0.2 GB/s (−0.5%; ≈ 0
+within noise).**
+
+- **Rule 1** — THP recovery ≥ G/2? Recovery (thp − mmap4k, gemv rows) =
+  39.13 − 39.39 = **−0.26 GB/s**: nil, with hugepage backing confirmed
+  (AnonHugePages 544768 kB) and G itself ≈ 0, so there is no page-walk
+  cost to recover. The §Risks-required dTLB corroboration is also
+  unavailable (counter-lane deviation). **Does not fire.**
+- **Rule 2** — shipping kernel ≥ 5% below its own GEMV-shaped roofline,
+  with counter-lane port/compute pressure? The kernel is **0.5% ABOVE**
+  the roofline (40.7 vs 40.49); per-class: ffn 41.7 vs 40.92, lm_head
+  43.8 vs 42.97. No counter lane either. **Does not fire.**
+- **Rule 3** — achieved within 5% of the GEMV-shaped roofline? Yes:
+  |−0.5%| < 5% (8c corroborates: +0.7%). **FIRES → STOP.**
+
+**VERDICT: Rule 3 — STOP. No lever is authorized or built.** The
+shipping AVX2 GEMV through the shipping dispatch is at its structural
+ceiling for this access pattern on both boxes. The ~13–14 GB/s gap to
+the recorded sequential-stream ceilings is a **shape tax** (19.8% on
+16c, 13.6% on 8c) plus a file-backing cost on 16c (7.2%, present
+identically in the THP arm, hence not a page-size effect) — neither is
+addressable by Lever H (hugepages recover nothing) nor Lever V (the
+kernel already saturates its roofline; a wider dot product cannot raise
+a memory wall).
+
+Plan routing recorded: Tasks 7 (Lever H), 8–9 (SDE + VNNI GEMV), and 10
+(Round 2 closing sessions) are **SKIPPED**; Round 1 is the closing
+data; proceed to the closing-verdict task.
