@@ -92,6 +92,12 @@ impl Engine {
         self.opts.prefill_tile = t.max(1);
     }
 
+    /// Dispatch decode attention through the codegen-emitted geometry-specialized
+    /// function instead of the runtime hspan symbol (M4b.16). Off by default.
+    pub fn set_emitted_attn(&mut self, on: bool) {
+        self.opts.emitted_attn = on;
+    }
+
     /// Compile (or load a verified cached compile of) the model for this
     /// engine's target/`max_seq_len`, and build a ready-to-use
     /// [`CompiledBackend`] over it. Also sizes the process-global

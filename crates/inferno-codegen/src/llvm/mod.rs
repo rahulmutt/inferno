@@ -448,6 +448,7 @@ mod tests {
         let opts = crate::CompileOptions {
             profile: true,
             prefill_tile: 64,
+            emitted_attn: false,
         };
         let ctx = Context::create();
         let m = super::build_full_module(&ctx, &plan, &graph, &desc, &opts, &slots).unwrap();

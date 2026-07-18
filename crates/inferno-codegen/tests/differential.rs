@@ -214,6 +214,7 @@ fn profiling_does_not_change_logits() {
         &CompileOptions {
             profile: true,
             prefill_tile: 64,
+            emitted_attn: false,
         },
         prof_dir.path(),
     )
@@ -253,6 +254,7 @@ fn prefill_tiling_is_bit_invariant_to_tile_size() {
             &CompileOptions {
                 profile: false,
                 prefill_tile: t,
+                emitted_attn: false,
             },
             dir,
         )
@@ -343,6 +345,7 @@ fn prefill_is_bit_invariant_to_thread_count() {
         &CompileOptions {
             profile: false,
             prefill_tile: 4,
+            emitted_attn: false,
         },
         tmp.path(),
     )

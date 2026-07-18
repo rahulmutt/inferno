@@ -30,6 +30,11 @@ pub struct CompileOptions {
     /// Prefill tile length (tokens per batched forward pass); sizes the
     /// GEMM activation panel (`act_scratch`) and the codegen tile loop.
     pub prefill_tile: usize,
+    /// M4b.16: dispatch decode attention through the codegen-emitted,
+    /// geometry-specialized function instead of the runtime hspan symbol.
+    /// Bit-identical output (the attn_emit harness is the guard); a distinct
+    /// artifact (folded into the cache key).
+    pub emitted_attn: bool,
 }
 
 impl Default for CompileOptions {
@@ -37,6 +42,7 @@ impl Default for CompileOptions {
         CompileOptions {
             profile: false,
             prefill_tile: crate::PREFILL_TILE,
+            emitted_attn: false,
         }
     }
 }

@@ -158,6 +158,7 @@ pub fn measure_inferno(
     // Compile (or cache-hit) happens here, outside any timed region.
     let mut engine = Engine::load(model, max_seq_len)?;
     engine.set_threads(threads);
+    engine.set_emitted_attn(std::env::var("INFERNO_EMITTED_ATTN").is_ok_and(|v| v == "1"));
     let mut backend = engine.compiled_backend()?;
 
     let run_once = |backend: &mut dyn Backend| -> Result<(f64, f64), Box<dyn std::error::Error>> {
