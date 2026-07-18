@@ -11,6 +11,7 @@ set -euo pipefail
 command -v cargo >/dev/null || { echo "missing cargo (devenv shell)" >&2; exit 2; }
 
 OUT="${QHW_OUT:-$(mktemp -d)}"
+mkdir -p "$OUT"
 PHYS=$(phys_cores)
 if [ "${QHW_SMOKE:-0}" = 1 ]; then
   LANES=2 LAYERS=2 REPS=2
