@@ -601,3 +601,79 @@ kernel(shard0) **97.7%**, **drain 2.1%** → Gate 2 `c = 0.021` (spec
 §Pre-registered gates forecast "8c ~6%"; measured even lower).
 
 **`S_residual`** = S = **20.6%** (identical kernel — no lever shipped).
+
+### 2026-07-18 — Gate 2 verdict (KV-position-split kernel, Lever 2)
+
+`P2 = S_residual × c` per machine, inputs from the session amendments:
+
+- **Session A (16c 6336Y):** P2 = 0.291 × 0.255 = **0.0742 → 7.4%** (≥ 5%)
+- **Session B (8c E-2388G):** P2 = 0.206 × 0.021 = **0.0043 → 0.43%** (< 3%)
+
+Thresholds (M4b.11 verbatim): ≥5% both → authorize; <3% both → STOP;
+split → judgment call, argument recorded. This is a **SPLIT** (the
+spec's forecast outcome). **Judgment: STOP (split-to-no).** Argument,
+per the spec's pre-committed weighing:
+
+1. The win exists on one box only: 7.4% reclaimable on 16c, 0.43% on
+   8c — and the 8c box is the machine where decode tg is the wall
+   (v1 tg 0.86x there vs 0.93–0.98x on 16c). Lever 2 cannot move the
+   box that needs moving.
+2. Lever 2's tolerance re-derivation is paid globally: split maxima /
+   exp-sum merges change outputs everywhere, loosening the standing
+   bit-exactness discipline on both boxes to buy a one-box win.
+3. The milestone's own instrument finding exposes a strictly larger,
+   machine-independent, bit-neutral-able lever first: the shipping
+   kernel leaves ~28–37% whole-call on the table vs a const-geometry-
+   specialized compile of the SAME source (reproduced on all three
+   machines). Harvesting that (dim-monomorphized kernel, arithmetic
+   order unchanged) would also shift S_residual and c, so Gate 2's
+   inputs would need re-measuring afterward anyway. Sequencing Lever 2
+   before it is backwards.
+
+### 2026-07-18 — Closing verdict (exit-criteria walk)
+
+1. **µbench built; admissibility recorded locally and on both boxes:**
+   YES — Task 5 (dev box), Session A, Session B amendments. The
+   admissibility verdict is FAIL on all three machines (check (c)
+   −15…−40%; monotonicity inversions at pos ≥ 1023 on both quiet
+   boxes) — recorded as the sanctioned instrument STOP-out.
+2. **Every gate verdict recorded once, arithmetic shown; no lever
+   shipped without its gate:** YES — Gates 1a/1b VOID/NOT EVALUATED
+   (inadmissible run; raw ratios recorded transparency-only), softmax
+   escape moot (recorded), Gate 2 split-to-no (above). No lever
+   shipped: `attn_core_avx2` and `attn_core_scalar` are byte-untouched
+   on this branch (the branch adds a bench, a session script, and spec
+   records only).
+3. **Standing invariants held:** YES — rig bit-exact suites green
+   through every task review and the closing sweep (rig, codegen
+   differential, core artifact, `mise run test`, `mise run lint` —
+   Task 11 final run); `git log 67c0e7f..HEAD -- crates/inferno-graph/
+   src/tolerance.rs` is empty (zero M4b.15 tolerance changes). Lever 2
+   did not fire.
+4. **Closing tg vs headroom-set targets:** targets are degenerate
+   (baseline × 1.0, no lever shipped). Session A: 59.12 vs 57.26 —
+   **MET**; Session B: 62.52 vs 62.40 — **MET**. Both trivially: same
+   kernel binary, within-session variance; no lever claim is made.
+   v1 ratios (context, never the gate, recorded in the M4a spec):
+   A pp 0.71x / tg 0.98x; B pp 0.70x / tg 0.86x — v1 NOT MET; the
+   milestone closes as a diagnostic.
+5. **Every STOP recorded as a finding:** YES — (i) instrument
+   inadmissible (Task 5, reproduced Sessions A+B): the phase-marginal
+   µbench design cannot gate micro-levers because bench-local copies
+   compile const-geometry-specialized; (ii) Gate 2 split-to-no (above).
+   Both are sanctioned STOP-outs; the milestone closes as a diagnostic
+   (M4b.12 precedent).
+
+**Residual decode wall shape (required by §Risks, next-milestone
+scoping input):** at best-t the decode wall is matmul-shaped plus a
+kernel-quality finding: 16c — attention 29.1%, lm_head 16.7%, ffn
+matmuls ~40% at ~41 GB/s; 8c — attention 20.6%, lm_head 20.5%, ffn
+matmuls 47.4% at ~40 GB/s (GEMV stream rate). The new, actionable
+finding: the decode attention kernel itself leaves **28–37% whole-call
+cross-machine** by compiling with runtime dims — a dim-monomorphized
+(const head_dim=64 / kv_dim specialization at codegen or build time)
+kernel is bit-neutral-able (arithmetic order unchanged) and is the
+natural next lever, ahead of any KV-split parallelism work. On 8c the
+drain fraction is 2.1% — sub-head granularity has nothing to reclaim
+there; the 8c decode wall is GEMV bandwidth + kernel quality, not
+parallelism.
