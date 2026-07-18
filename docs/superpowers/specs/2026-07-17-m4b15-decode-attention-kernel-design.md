@@ -481,3 +481,68 @@ llama.cpp                   12      109.87 ± 30.93        6.71 ± 1.44
 llama.cpp (t=1 diag)         1       74.63 ± 4.03        17.42 ± 1.07
 ratio (inferno/llama.cpp): pp 1.73x | tg 2.59x
 ```
+
+### 2026-07-18 — Session A — d2.c1.medium (16c Xeon Gold 6336Y), quiet-hw
+
+**Machine:** Intel Xeon Gold 6336Y @ 2.40GHz, 32 logical CPUs, kernel
+6.9.10+bpo-amd64. PREFLIGHT: FIT (psi 0.00, throttled_delta 0, tsc ok).
+**DEVIATION:** perf unavailable (`linux-perf` not locatable on the box
+image; recorded per plan). First provision attempt (server
+6a5abc336df43c5b5fbca180) died to a transient SSH-tunnel drop mid-
+workload after the baseline protocol table; runner delete + metal-gc
+--force (409/403-then-clear quirk) confirmed zero servers before the
+retry. Retry = this session. Raw artifacts:
+`target/metal/d2.c1.medium-20260718T000851Z` (workload.log, criterion
+tree, quiet-hw dir; local-only, gitignored).
+
+**Protocol tables:** recorded verbatim in the M4a spec §Amendments
+(standing rule), including the both-engines t=1 drift caveat.
+`baseline_tg` = **57.26** (t=16, baseline binary 9883086);
+lever-binary tg 59.12 / pp 924.67 (066bd45, same kernel — no lever).
+
+**Baseline best-t attention share `S`** (gate-decode-attr, t=16 decode):
+attention 1238854680 / 4250870946 cyc = **29.1%** (t=1: 34.0%).
+
+**Headroom target:** no lever shipped → r := 0;
+`tg_target = 57.26 × (1 + 0.291 × 0) = 57.26 × 1.0 = 57.26` (degenerate
+per Task 5 STOP). Closing judges tg against this.
+
+**µbench on this box (criterion means, µs):**
+
+| pos | full | full_local | dot_only | no_av |
+|----|------|-----------|----------|-------|
+| 127 | 31.096 | 18.518 | 7.646 | 10.931 |
+| 511 | 121.360 | 75.650 | 30.595 | 35.212 |
+| 639 | 150.547 | 95.061 | 38.792 | 53.943 |
+| 1023 | 241.093 | 151.257 | 75.397 | 74.637 |
+| 2047 | 795.832 | 570.608 | 157.242 | 172.609 |
+
+Probes (µs): dot_blocked2 17.049/67.606/84.473/134.390/568.041;
+dot_blocked4 15.416/65.810/82.113/131.077/577.720; dot_blocked8
+18.267/67.244/84.007/134.070/572.658; av_regacc 17.629/72.265/90.607/
+143.831/581.444; combined 15.711/62.878/78.543/125.257/538.831 (pos
+127/511/639/1023/2047). Anchors: kv_stream 38.776/155.235/194.027/
+310.003/621.163 µs; fma_peak 294.164 µs. Cold/warm one-head: 639:
+33.031 vs 6.440 µs; 2047: 99.844 vs 42.016 µs.
+
+**µbench admissibility on this box:**
+- (c) full_local/full = 0.5955 (−40.4%) / 0.6233 (−37.7%) / 0.6314
+  (−36.9%) / 0.6274 (−37.3%) / 0.7170 (−28.3%) at pos 127/511/639/
+  1023/2047 — **FAIL at every pos** (bound ±5%).
+- (a) monotonicity: **FAIL at pos 1023** (no_av 74.637 < dot_only
+  75.397; softmax marginal −0.76 µs, noise-level inversion) — PASS at
+  the other four pos.
+- **The Task 5 instrument finding REPRODUCES on quiet hardware,
+  stronger:** the shipping kernel's runtime-dim genericity gap vs the
+  const-specialized copy is −37% at the protocol positions on this
+  Intel box (vs −23…−25% on the AMD dev box). Machine-independent
+  codegen artifact, not noise and not load.
+
+**Dispatch-split (gate-attn-split, lever binary):** sum identity vs
+op-profiler attention 99.4% (admissible 90–110%). Buckets: publish
+0.8%, kernel(shard0) 73.7%, **drain 25.5%** → Gate 2 `c = 0.255`.
+Slowest-lane kernel spread visible (lane sums 0.88–1.14 Gcyc across 14
+active lanes).
+
+**`S_residual`** = S = **29.1%** (identical kernel — no lever shipped;
+the lever-binary split profile is the same binary's dispatch view).
