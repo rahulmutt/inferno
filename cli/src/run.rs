@@ -117,6 +117,7 @@ fn run_profile(
     }
     // Distinct (profiled) cache entry — see `CompileOptions.profile`.
     engine.set_profile(true);
+    engine.set_emitted_attn(std::env::var("INFERNO_EMITTED_ATTN").is_ok_and(|v| v == "1"));
     // M4b.12: dispatch-split recording (no-op unless built with
     // --features pool-profile).
     inferno_pool::set_pool_profiling(true);
@@ -241,6 +242,7 @@ pub(crate) fn load_compiled(
     if threads != 0 {
         engine.set_threads(threads as usize);
     }
+    engine.set_emitted_attn(std::env::var("INFERNO_EMITTED_ATTN").is_ok_and(|v| v == "1"));
     let backend = engine.compiled_backend()?;
     let generator = Generator::load_with_backend(model, max_seq_len, Box::new(backend))?;
     Ok(generator)

@@ -83,6 +83,7 @@ pub fn cache_key(
     // Profiling and tile size change the emitted artifact.
     h.update([opts.profile as u8]);
     h.update((opts.prefill_tile as u64).to_le_bytes());
+    h.update([opts.emitted_attn as u8]);
     Ok(format!("{:x}", h.finalize()))
 }
 
@@ -120,6 +121,7 @@ mod tests {
             &inferno_codegen::CompileOptions {
                 profile: true,
                 prefill_tile: 64,
+                emitted_attn: false,
             },
         )
         .unwrap();
@@ -132,10 +134,25 @@ mod tests {
             &inferno_codegen::CompileOptions {
                 profile: false,
                 prefill_tile: 32,
+                emitted_attn: false,
             },
         )
         .unwrap();
         assert_ne!(k1, k_tile); // prefill_tile is part of the key
+    }
+
+    #[test]
+    fn key_differs_by_emitted_attn() {
+        let t = TargetDesc::detect().unwrap();
+        let m = Path::new("../inferno-formats/tests/fixtures/tiny.gguf");
+        let base = inferno_codegen::CompileOptions::default();
+        let lever = inferno_codegen::CompileOptions {
+            emitted_attn: true,
+            ..Default::default()
+        };
+        let k1 = cache_key(m, &t, 64, &base).unwrap();
+        let k2 = cache_key(m, &t, 64, &lever).unwrap();
+        assert_ne!(k1, k2, "emitted_attn must be part of the artifact identity");
     }
 
     #[test]

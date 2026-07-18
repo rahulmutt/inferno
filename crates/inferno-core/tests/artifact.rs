@@ -227,3 +227,50 @@ fn tampered_meta_is_rejected() {
         "recompiled artifact must reproduce original logits exactly, max |Δ| = {max}"
     );
 }
+
+/// M4b.16: the emitted-attention artifact must be BIT-IDENTICAL to the
+/// runtime-symbol artifact — prefill logits and every decode_step's logits.
+/// (The attn_emit harness proves the function; this proves the wiring.)
+///
+/// Uses max_seq_len 100 — every other artifact-cache-key value in this file
+/// (64, 96) is already claimed by another test sharing `use_temp_cache`'s
+/// fixed directory; this file's isolation convention is one unclaimed
+/// `max_seq_len` per test.
+#[test]
+fn emitted_attn_artifact_logits_bit_identical() {
+    use_temp_cache();
+    let model = model_path();
+    let target = TargetDesc::detect().unwrap();
+    let max_seq_len = 100usize;
+    let base_opts = CompileOptions::default();
+    let lever_opts = CompileOptions {
+        emitted_attn: true,
+        ..Default::default()
+    };
+    let base = Artifact::load_or_compile(&model, &target, max_seq_len, &base_opts).unwrap();
+    let lever = Artifact::load_or_compile(&model, &target, max_seq_len, &lever_opts).unwrap();
+
+    let desc = load_desc(&model).unwrap();
+    let vocab = desc.hyperparams.vocab_size as usize;
+    let tokens = vec![1u32, 4, 7, 2];
+
+    let run = |art: &Artifact| -> Vec<Vec<u32>> {
+        let mut kv = vec![0f32; art.meta().kv_total_bytes / 4];
+        let mut arena = vec![0f32; art.meta().arena_f32];
+        let mut logits = vec![0f32; vocab];
+        let mut all = Vec::new();
+        art.prefill(&tokens, 0, &mut kv, &mut arena, &mut logits);
+        all.push(logits.iter().map(|v| v.to_bits()).collect());
+        for step in 0..8 {
+            let tok = (3 + step as u32) % 11; // deterministic token walk
+            art.decode_step(tok, tokens.len() + step, &mut kv, &mut arena, &mut logits);
+            all.push(logits.iter().map(|v| v.to_bits()).collect());
+        }
+        all
+    };
+    assert_eq!(
+        run(&base),
+        run(&lever),
+        "emitted attention changed logits bits"
+    );
+}

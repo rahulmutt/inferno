@@ -10,9 +10,12 @@ use std::arch::x86_64::*;
 // clippy::approx_constant (deny-by-default) flags the literal digit-for-digit
 // as an approximation of this exact std constant; using it directly avoids
 // the lint while producing the identical f32 bit pattern (0x3fb8aa3b).
-const LOG2E: f32 = std::f32::consts::LOG2_E;
-const LN2_HI: f32 = 0.693_359_4;
-const LN2_LO: f32 = -2.121_944_4e-4;
+// pub: inferno-codegen's attn_emit reads these to bake the identical
+// polynomial into emitted IR (M4b.16). One source of truth — never copy
+// the values into codegen.
+pub const LOG2E: f32 = std::f32::consts::LOG2_E;
+pub const LN2_HI: f32 = 0.693_359_4;
+pub const LN2_LO: f32 = -2.121_944_4e-4;
 // C0..C6: Taylor coefficients of exp(r) = 1 + r + r^2/2! + ... + r^6/6!,
 // i.e. a degree-6 polynomial in r (7 terms, C[6] = 1/720). The brief's
 // original 6-entry array (C0..C5) was only degree-5 despite the doc comment
@@ -20,7 +23,7 @@ const LN2_LO: f32 = -2.121_944_4e-4;
 // the 1e-6 test tolerance for ~12% of the -88..88 sweep (up to ~3.3e-6, e.g.
 // x=-69.0). Adding the natural next term (1/720) restores the degree-6 the
 // brief specifies and brings every swept point under the 1e-6 bound.
-const C: [f32; 7] = [
+pub const C: [f32; 7] = [
     1.0,
     1.0,
     0.5,

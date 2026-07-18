@@ -95,6 +95,14 @@ for the v1 design.
   (M4b.11) under the same `INFERNO_DECODE_THREADS` bound; the head-span
   kernels must stay bit-identical to the whole-call kernels (the rig's
   hspan tiling tests are the guard).
+  Since M4b.16 the decode attention kernel dispatched through
+  `inferno_par_attention_heads` is, when `CompileOptions::emitted_attn`
+  is set (env `INFERNO_EMITTED_ATTN`; default-off), a codegen-emitted private
+  `attn_hspan.emitted` function with the model's geometry baked in as
+  constants — bit-identical to the Rust hspan kernels (the
+  `attn_emit` harness in `inferno-codegen` is the guard; the Rust
+  kernels stay the rig oracle and the fallback). The flag is part of
+  the artifact cache key.
   The pool's `pool-profile` cargo feature is the M4b.12 dispatch-split
   instrument (off in every shipping/bench build; quiet-hw gate scripts
   build with it), and `INFERNO_ATTN_SHARDS` is its probe-only shard-count

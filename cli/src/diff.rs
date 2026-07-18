@@ -106,7 +106,8 @@ pub fn diff_compiled(
         let logits = generator.full_logits(&full)?;
         let vocab = generator.vocab_size();
 
-        let engine = Engine::load(model, max_seq_len)?;
+        let mut engine = Engine::load(model, max_seq_len)?;
+        engine.set_emitted_attn(std::env::var("INFERNO_EMITTED_ATTN").is_ok_and(|v| v == "1"));
         let mut backend = engine.compiled_backend()?;
 
         let mut checked = 0usize;

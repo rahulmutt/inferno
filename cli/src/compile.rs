@@ -8,7 +8,8 @@ use inferno_core::Engine;
 /// directory the resulting `model.so`/`weights.bin`/`meta.json` live in.
 pub fn compile(model: &Path, max_seq_len: usize) -> ExitCode {
     let inner = || -> inferno_core::Result<std::path::PathBuf> {
-        let engine = Engine::load(model, max_seq_len)?;
+        let mut engine = Engine::load(model, max_seq_len)?;
+        engine.set_emitted_attn(std::env::var("INFERNO_EMITTED_ATTN").is_ok_and(|v| v == "1"));
         // Forces the compile-or-cache: builds (or verifies a cached) Artifact
         // and wraps it in a CompiledBackend, which is otherwise discarded —
         // `inferno compile` only cares about the cache directory landing on

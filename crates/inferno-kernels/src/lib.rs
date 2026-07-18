@@ -28,7 +28,7 @@ pub mod attention;
 mod attention;
 mod buf;
 mod error;
-mod expf;
+pub mod expf;
 pub mod f32k;
 mod pf;
 pub mod q4_k;
