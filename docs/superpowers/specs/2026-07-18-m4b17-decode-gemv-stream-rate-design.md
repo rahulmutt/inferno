@@ -227,3 +227,183 @@ AVX2); `inferno-target` already detects `Feature::Vnni`.
 ## Amendments
 
 (recorded during execution; none yet)
+
+### 2026-07-18 — Round 1 Session A — d2.c1.medium (16c 6336Y, CHI, server 6a5b77b7, HEAD 315af9a)
+
+Provision history: attempt 1 aborted mid-workload (gate script lacked
+`mkdir -p "$OUT"` on the fresh clone — fixed in 315af9a; its partial
+best-t table is superseded by this session and not a recorded data
+point); attempt 2 PHX 406 no-stock (no server); attempt 3 (this one)
+CHI, PREFLIGHT: FIT (psi_some_avg10=0.18, quota=unquota'd, tsc=ok).
+
+```
+```
+
+#### gate-gemv-stream arm tables (verbatim)
+
+```
+gemv_stream: 24 layers + lm_head, 169 matrices, 530.0 MiB packed, Avx2, lanes=16, reps=5
+thp arm: region 557842432 B, AnonHugePages 544768 kB (from /proc/self/smaps)
+
+| arm | kernel | attn GB/s | ffn GB/s | lm_head GB/s | total GB/s | ms/token |
+|---|---|---|---|---|---|---|
+| heap | gemv | 30.65 | 45.85 | 40.60 | 42.46 | 13.09 |
+| heap | stream | 31.60 | 46.76 | 42.31 | 43.63 | 12.74 |
+| mmap4k | gemv | 31.14 | 40.10 | 41.25 | 39.39 | 14.11 |
+| mmap4k | stream | 32.35 | 40.92 | 42.97 | 40.49 | 13.72 |
+| thp | gemv | 29.41 | 40.10 | 41.25 | 39.13 | 14.20 |
+| thp | stream | 30.52 | 41.10 | 43.97 | 40.57 | 13.70 |
+
+gate input (human, to the M4b.17 spec §Amendments): roofline = stream
+rows; page/TLB recovery = thp vs mmap4k on the gemv rows; the heap row
+is the recorded-ceiling condition (bw_curve used heap buffers).
+
+gemv_stream: 24 layers + lm_head, 169 matrices, 530.0 MiB packed, Avx2, lanes=1, reps=5
+thp arm: region 557842432 B, AnonHugePages 544768 kB (from /proc/self/smaps)
+
+| arm | kernel | attn GB/s | ffn GB/s | lm_head GB/s | total GB/s | ms/token |
+|---|---|---|---|---|---|---|
+| heap | gemv | 13.46 | 13.55 | 13.69 | 13.58 | 40.92 |
+| heap | stream | 14.46 | 14.49 | 14.53 | 14.50 | 38.33 |
+| mmap4k | gemv | 14.03 | 14.11 | 14.13 | 14.11 | 39.40 |
+| mmap4k | stream | 14.45 | 14.48 | 14.56 | 14.50 | 38.33 |
+| thp | gemv | 13.81 | 13.87 | 13.68 | 13.81 | 40.23 |
+| thp | stream | 14.46 | 14.54 | 14.43 | 14.50 | 38.33 |
+
+gate input (human, to the M4b.17 spec §Amendments): roofline = stream
+rows; page/TLB recovery = thp vs mmap4k on the gemv rows; the heap row
+is the recorded-ceiling condition (bw_curve used heap buffers).
+```
+
+#### Counter lane
+
+DEVIATION (recorded per script): `perf` unavailable on the box
+(`apt-get install linux-perf` → "Unable to locate package"; Debian
+bookworm image, kernel 6.9.10+bpo). Counter lane skipped; dTLB
+corroboration for any rule-1 claim is therefore UNAVAILABLE this
+session. AnonHugePages lines above stand in as THP-backing evidence
+(544768 kB ≈ full 532 MiB region on both prints).
+
+#### gate-decode-attr profiles (verbatim)
+
+```
+profile [prefill] 33.485s wall, 103799490602 cyc total
+  op                                   cycles   share        GB/s
+  attention                       24749777312   23.8%           -
+  matmul:lm_head.weight           19809879010   19.1%        48.6
+  matmul:layers.*.ffn.gate_proj.weight    15170851742   14.6%        48.8
+  matmul:layers.*.ffn.up_proj.weight    15156345206   14.6%        48.8
+  matmul:layers.*.ffn.down_proj.weight    15077634818   14.5%        49.1
+  swiglu                           4270513364    4.1%           -
+  matmul:layers.*.attn.q_proj.weight     2788990486    2.7%        48.9
+  matmul:layers.*.attn.o_proj.weight     2787297778    2.7%        48.9
+  rmsnorm                          1191908922    1.1%           -
+  rope                              863607742    0.8%           -
+  quantize                          530197490    0.5%           -
+  matmul:layers.*.attn.v_proj.weight      401238574    0.4%        48.5
+  matmul:layers.*.attn.k_proj.weight      401220408    0.4%        48.5
+  add                               330611324    0.3%           -
+  bias                              136156962    0.1%           -
+  kv_append                         114618190    0.1%           -
+  embed                              18641274    0.0%           -
+profile [decode] 3.989s wall, 12267378900 cyc total
+  op                                   cycles   share        GB/s
+  attention                        4182726052   34.1%           -
+  matmul:lm_head.weight            2145973644   17.5%        14.0
+  matmul:layers.*.ffn.down_proj.weight     1664335614   13.6%        13.9
+  matmul:layers.*.ffn.gate_proj.weight     1660712500   13.5%        13.9
+  matmul:layers.*.ffn.up_proj.weight     1655898434   13.5%        14.0
+  matmul:layers.*.attn.o_proj.weight      312484428    2.5%        13.7
+  matmul:layers.*.attn.q_proj.weight      309334502    2.5%        13.8
+  swiglu                            136336992    1.1%           -
+  matmul:layers.*.attn.v_proj.weight       45285424    0.4%        13.5
+  matmul:layers.*.attn.k_proj.weight       44830436    0.4%        13.6
+  rope                               39679188    0.3%           -
+  rmsnorm                            39303576    0.3%           -
+  add                                17951366    0.1%           -
+  bias                               11673132    0.1%           -
+  embed                                449552    0.0%           -
+  quantize                             404060    0.0%           -
+  kv_append                                 0    0.0%           -
+
+profile [prefill] 2.952s wall, 9147747668 cyc total
+  op                                   cycles   share        GB/s
+  attention                        2298586842   25.1%           -
+  matmul:lm_head.weight            1497737146   16.4%       643.0
+  matmul:layers.*.ffn.up_proj.weight     1271582200   13.9%       581.9
+  matmul:layers.*.ffn.gate_proj.weight     1271161036   13.9%       582.1
+  matmul:layers.*.ffn.down_proj.weight     1263327942   13.8%       585.7
+  swiglu                            358566700    3.9%           -
+  matmul:layers.*.attn.o_proj.weight      290397760    3.2%       469.3
+  matmul:layers.*.attn.q_proj.weight      272665196    3.0%       499.9
+  quantize                          159274300    1.7%           -
+  rmsnorm                           109719228    1.2%           -
+  rope                               88087528    1.0%           -
+  matmul:layers.*.attn.k_proj.weight       62712606    0.7%       310.5
+  add                                62110802    0.7%           -
+  matmul:layers.*.attn.v_proj.weight       59501456    0.7%       327.2
+  bias                               53092570    0.6%           -
+  kv_append                          19649326    0.2%           -
+  embed                               9575030    0.1%           -
+profile [decode] 1.419s wall, 4298246334 cyc total
+  op                                   cycles   share        GB/s
+  attention                        1388604342   32.3%           -
+  matmul:lm_head.weight             678395804   15.8%        43.8
+  matmul:layers.*.ffn.gate_proj.weight      546999134   12.7%        41.7
+  matmul:layers.*.ffn.down_proj.weight      546566994   12.7%        41.7
+  matmul:layers.*.ffn.up_proj.weight      546554320   12.7%        41.7
+  swiglu                            140859220    3.3%           -
+  matmul:layers.*.attn.q_proj.weight      137392212    3.2%        30.6
+  matmul:layers.*.attn.o_proj.weight      124993502    2.9%        33.6
+  rope                               45634558    1.1%           -
+  rmsnorm                            42774558    1.0%           -
+  matmul:layers.*.attn.v_proj.weight       32623316    0.8%        18.4
+  matmul:layers.*.attn.k_proj.weight       32176524    0.7%        18.7
+  add                                19028820    0.4%           -
+  bias                               14807376    0.3%           -
+  embed                                478572    0.0%           -
+  quantize                             357082    0.0%           -
+  kv_append                                 0    0.0%           -
+```
+
+#### Session A gate-input quantities (human-computed; rule walk deferred to the gate-verdict amendment)
+
+- **Achieved in-loop per-class GB/s** (decode profile, t=16): lm_head
+  **43.8**; ffn gate/down/up **41.7 / 41.7 / 41.7**; attn projections
+  q **30.6** / o **33.6** / v **18.4** / k **18.7** (attn-projection
+  classes are 8.8% of streamed bytes; the low kv rates are 128-row
+  matrices, dispatch-overhead-bound, share 0.8%).
+- **Profile-weighted achieved GEMV rate**: decode t=16 wall = 1.419 s /
+  64 tokens = **22.17 ms/token**; matmul bracket cycles 2,645,701,806 of
+  4,298,246,334 total = **61.55%** → **13.65 ms/token** in GEMV. 530.0
+  MiB packed per token / 13.65 ms = **40.7 GB/s achieved**.
+- **GEMV-shaped roofline** (stream rows, best-t): shipping condition
+  (mmap4k) **40.49 GB/s** total (attn 32.35 / ffn 40.92 / lm_head
+  42.97); heap **43.63**; thp **40.57**.
+- **Per-shape-class gaps (roofline − achieved)**: ffn 40.92 − 41.7 =
+  **−0.8**; lm_head 42.97 − 43.8 = **−0.8**; i.e. the shipping loop's
+  big GEMV classes run AT the GEMV-shaped stream roofline (negative gap
+  = within measurement noise of zero). Total-rate gap
+  G = 40.49 − 40.7 = **−0.2 GB/s ≈ 0**.
+- **THP recovery** (gemv rows, thp − mmap4k): 39.13 − 39.39 =
+  **−0.26 GB/s** (nil), with AnonHugePages 544768 kB confirming the thp
+  arm really was hugepage-backed. Page/TLB cost is NOT where the
+  headroom is.
+- **Shape tax** (recorded-ceiling condition vs GEMV shape): heap stream
+  43.63 at lanes=16 vs the M4b.10-recorded sequential-stream ceiling
+  54.39 (lanes=8, same box class) → **10.76 GB/s (19.8%)** is the
+  GEMV access-pattern tax; file-backed mmap costs a further 43.63 −
+  40.49 = **3.14 GB/s (7.2%)** vs heap on the stream rows (present in
+  the thp arm too — it is not a 4KiB-page effect).
+- **Idle-gap (arm 4)**: 22.17 ms wall − 13.65 ms matmul = **8.52 ms**,
+  fully accounted by bracketed non-GEMV ops (attention 32.3% = 7.16 ms;
+  swiglu/rope/rmsnorm/add/bias ≈ 6.1% = 1.35 ms); unbracketed residual
+  ≈ 0.05% — M4b.12's sub-0.2% dispatch finding re-confirmed. Non-GEMV
+  dilution is real but attributed; it does not contaminate the per-class
+  achieved rates above.
+- **Instrument-vs-loop cross-check**: instrument mmap4k gemv row 14.11
+  ms/token vs in-loop matmul 13.65 ms/token (3.4% apart) — the
+  instrument reproduces the shipping decode matmul wall.
+- **dTLB corroboration**: unavailable (counter-lane deviation above).
+  Note rule 1 cannot fire without it per §Risks; moot if THP recovery
+  stays nil.
