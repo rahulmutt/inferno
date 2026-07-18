@@ -677,3 +677,11 @@ natural next lever, ahead of any KV-split parallelism work. On 8c the
 drain fraction is 2.1% — sub-head granularity has nothing to reclaim
 there; the 8c decode wall is GEMV bandwidth + kernel quality, not
 parallelism.
+
+### 2026-07-18 — Erratum note (closing verdict item 4 ratio basis)
+
+The v1 ratios cited in closing item 4 are the plain-build ratios
+(A pp 0.71x / tg 0.98x; B pp 0.70x / tg 0.86x). Against llama's
+best-of-builds (the v1 criterion's basis) the recorded values are
+A pp 0.79x / tg 0.93x and B pp 0.70x / tg 0.87x — v1 NOT MET under
+either basis; the verdict is unchanged. Recorded text unedited.
