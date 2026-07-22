@@ -5,6 +5,8 @@
 
 mod desc;
 mod detect;
+#[cfg(target_os = "macos")]
+mod detect_macos;
 mod error;
 mod profile;
 

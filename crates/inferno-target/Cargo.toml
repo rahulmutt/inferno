@@ -10,5 +10,13 @@ thiserror.workspace = true
 toml.workspace = true
 rustix.workspace = true
 
-[lints]
-workspace = true
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
+# The workspace lints deny `unsafe_code`; this crate is a sanctioned exception
+# for the macOS `sysctlbyname` FFI call in `detect_macos.rs` (aarch64/macOS
+# only — inert on every other target). Same pattern as inferno-kernels /
+# inferno-core / inferno-pool: opt out with our OWN lint table (NOT
+# `workspace = true`) and keep `unsafe_op_in_unsafe_fn` denied.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

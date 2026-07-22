@@ -16,6 +16,9 @@ pub enum Isa {
     /// v3 + AVX-512 F/BW/CD/DQ/VL. Defined for dispatch; no M2 kernels.
     #[serde(rename = "x86-64-v4")]
     X86_64v4,
+    /// Apple Silicon / ARMv8-A with mandatory NEON (128-bit Advanced SIMD).
+    /// AMX/SME are deliberately not modeled — inferno emits pure NEON (M5).
+    Aarch64Neon,
 }
 
 /// Features outside the ISA level that future kernels may dispatch on.
@@ -24,6 +27,10 @@ pub enum Isa {
 pub enum Feature {
     Vnni,
     Bf16,
+    /// ARM dotprod (SDOT/UDOT) — present on Apple M1+.
+    Dotprod,
+    /// ARM i8mm (SMMLA) — absent on M1; gated for M2+.
+    I8mm,
 }
 
 /// One data/unified cache level as seen by a single core.
@@ -41,6 +48,12 @@ pub struct CoreTopology {
     pub physical_cores: u32,
     pub logical_cores: u32,
     pub smt: bool,
+    /// Performance-core count on heterogeneous chips (Apple P/E). `None` on flat SMP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perf_cores: Option<u32>,
+    /// Efficiency-core count on heterogeneous chips. `None` on flat SMP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eff_cores: Option<u32>,
 }
 
 /// Coarse memory-bandwidth class. Profile-only: nothing detects it; the M3

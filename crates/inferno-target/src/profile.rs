@@ -41,7 +41,9 @@ mod tests {
             CoreTopology {
                 physical_cores: 12,
                 logical_cores: 24,
-                smt: true
+                smt: true,
+                perf_cores: None,
+                eff_cores: None,
             }
         );
         assert_eq!(

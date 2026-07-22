@@ -7,21 +7,43 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use crate::{CacheLevel, CoreTopology, Feature, Isa, Result, TargetDesc, TargetError};
+use crate::{CacheLevel, CoreTopology, Result, TargetDesc, TargetError};
+#[cfg(target_arch = "x86_64")]
+use crate::{Feature, Isa};
 
 impl TargetDesc {
     pub fn detect() -> Result<TargetDesc> {
-        let (isa, features) = detect_isa()?;
-        let root = Path::new("/sys/devices/system/cpu");
-        Ok(TargetDesc {
-            isa,
-            features,
-            page_size: rustix::param::page_size() as u64,
-            memory_bw_class: None,
-            topology: parse_topology(root)?,
-            caches: parse_caches(root)?,
-        })
+        detect()
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn detect() -> Result<TargetDesc> {
+    let (isa, features) = detect_isa()?;
+    let root = Path::new("/sys/devices/system/cpu");
+    Ok(TargetDesc {
+        isa,
+        features,
+        page_size: rustix::param::page_size() as u64,
+        memory_bw_class: None,
+        topology: parse_topology(root)?,
+        caches: parse_caches(root)?,
+    })
+}
+
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+fn detect() -> Result<TargetDesc> {
+    crate::detect_macos::detect_macos()
+}
+
+#[cfg(not(any(
+    target_arch = "x86_64",
+    all(target_arch = "aarch64", target_os = "macos")
+)))]
+fn detect() -> Result<TargetDesc> {
+    Err(TargetError::UnsupportedPlatform {
+        detail: "only x86-64 (M2) and aarch64-apple-darwin (M5) detection implemented".into(),
+    })
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -58,12 +80,11 @@ fn detect_isa() -> Result<(Isa, BTreeSet<Feature>)> {
     Ok((if v4 { Isa::X86_64v4 } else { Isa::X86_64v3 }, features))
 }
 
-#[cfg(not(target_arch = "x86_64"))]
-fn detect_isa() -> Result<(Isa, BTreeSet<Feature>)> {
-    Err(TargetError::UnsupportedPlatform {
-        detail: "only x86-64 detection is implemented (M2)".to_string(),
-    })
-}
+// No non-x86_64 fallback arm here: `detect_isa` is only ever called from the
+// `#[cfg(target_arch = "x86_64")] fn detect()` above. Every other platform's
+// `detect()` (macOS/aarch64, or the catch-all fallback) returns its
+// `UnsupportedPlatform` error directly without going through `detect_isa`, so
+// a non-x86_64 arm here would just be dead code.
 
 fn bad(path: &Path, detail: impl Into<String>) -> TargetError {
     TargetError::MalformedSysfs {
@@ -109,6 +130,8 @@ fn parse_topology(root: &Path) -> Result<CoreTopology> {
         physical_cores: physical,
         logical_cores: logical,
         smt: logical > physical,
+        perf_cores: None,
+        eff_cores: None,
     })
 }
 
@@ -210,7 +233,9 @@ mod tests {
             CoreTopology {
                 physical_cores: 12,
                 logical_cores: 24,
-                smt: true
+                smt: true,
+                perf_cores: None,
+                eff_cores: None,
             }
         );
     }

@@ -220,3 +220,11 @@ All must hold; **none is a performance gate.**
 _(Append-only. The precise M1 tier, the on-device verification walk, the
 tolerance re-derivation data, and the recorded baseline land here at
 implementation time. No data point in this section is ever edited.)_
+
+### Task 1 — machine pinned
+
+- **Chip:** Apple M1 Max (`machdep.cpu.brand_string`); `hw.model` = MacBookPro18,2
+- **Cores:** 10 physical / 10 logical (no SMT); `hw.perflevel0.physicalcpu` = 8 P-cores, `hw.perflevel1.physicalcpu` = 2 E-cores
+- **Caches / memory:** L1d 65536 B (64 KiB), L2 4194304 B (4 MiB), cacheline 128 B, page size 16384 B (16 KiB), RAM 68719476736 B (64 GiB)
+- **ISA features:** `hw.optional.neon` = 1, `AdvSIMD` = 1, `FEAT_DotProd` = 1 (present); `FEAT_I8MM` = 0 (absent on M1 — arrived with M2); `FEAT_SME` = 0
+- Recorded 2026-07-19 for M5 Task 1 → `Isa::Aarch64Neon`; `Feature::Dotprod` detected, `Feature::I8mm` not.
